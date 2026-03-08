@@ -1,0 +1,12 @@
+fastapi
+uvicorn>=0.23.0
+python-multipart>=0.0.6
+torch>=2.0.0
+transformers>=4.30.0
+modelscope>=1.10.0
+qwen-asr>=0.1.0
+chromadb>=0.4.0
+librosa>=0.10.0
+soundfile>=0.12.0
+numpy>=1.24.0
+pydantic>=2.0.0
