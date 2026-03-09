@@ -1,4 +1,4 @@
-"""ASR 语音识别引擎（优化版）"""
+"""ASR 语音识别引擎"""
 import torch
 import numpy as np
 import asyncio
@@ -41,14 +41,22 @@ class ASREngine:
         if self.initialized: 
             return
         
-        self.device = "mps" if torch.backends.mps.is_available() else "cpu"
+        # 设备检测：CUDA > MPS > CPU
+        if torch.cuda.is_available():
+            self.device = "cuda"
+        elif torch.backends.mps.is_available():
+            self.device = "mps"
+        else:
+            self.device = "cpu"
         logger.info(f"[ASR] 初始化中，设备: {self.device}")
 
         try:
             model_dir = snapshot_download("Qwen/Qwen3-ASR-0.6B")
+            # CUDA 和 MPS 使用 bfloat16，CPU 使用 float32
+            dtype = torch.bfloat16 if self.device in ("cuda", "mps") else torch.float32
             self.asr_model = Qwen3ASRModel.from_pretrained(
                 model_dir, 
-                dtype=torch.bfloat16 if self.device == "mps" else torch.float32, 
+                dtype=dtype, 
                 device_map=self.device
             )
             
