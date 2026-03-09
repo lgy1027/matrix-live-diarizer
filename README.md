@@ -56,7 +56,9 @@ SPEAKER_ENGINE=eres2net python main.py
 SPEAKER_ENGINE=wespeaker python main.py
 ```
 
-服务启动后访问 **http://127.0.0.1:8000**
+服务启动后：
+1. 用浏览器打开 `web/index.html` 文件
+2. 页面会自动连接到后端服务
 
 <details>
 <summary>📊 查看启动日志示例</summary>
@@ -76,10 +78,12 @@ INFO:     Uvicorn running on http://0.0.0.0:8000
 
 ### Web 界面
 
-访问 `http://127.0.0.1:8000` 即可使用 Web 界面：
+1. 启动后端服务：`python main.py`
+2. 用浏览器打开 `web/index.html` 文件
+3. 点击 **Start Stream** 开始实时转写
+4. 点击 **Upload File** 上传音频文件处理
 
-- 点击 **Start Stream** 开始实时转写
-- 点击 **Upload File** 上传音频文件处理
+> 💡 **提示**：Web 界面会自动连接到 `127.0.0.1:8000` 的后端服务
 
 ### API 接口
 
