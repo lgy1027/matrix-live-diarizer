@@ -432,6 +432,14 @@
     <script>
         const HOST = '127.0.0.1:8000';
         
+        // 重连配置
+        const RECONNECT_CONFIG = {
+            maxRetries: 5,          // 最大重连次数
+            baseDelay: 1000,        // 基础延迟（毫秒）
+            maxDelay: 10000,        // 最大延迟（毫秒）
+            enabled: true           // 是否启用自动重连
+        };
+        
         const state = {
             socket: null,
             micStream: null,
@@ -439,7 +447,11 @@
             renderQueue: [],
             isTyping: false,
             speakerColorMap: new Map(),
-            colorIndex: 0
+            colorIndex: 0,
+            // 重连状态
+            reconnectCount: 0,
+            isManualDisconnect: false,
+            reconnectTimer: null
         };
 
         function getSpeakerClass(speakerId) {
@@ -554,15 +566,59 @@
             statusText.textContent = text;
         }
 
-        async function connectStream() {
+        function getReconnectDelay() {
+            // 指数退避：delay = min(baseDelay * 2^retry, maxDelay)
+            const delay = Math.min(
+                RECONNECT_CONFIG.baseDelay * Math.pow(2, state.reconnectCount),
+                RECONNECT_CONFIG.maxDelay
+            );
+            // 添加随机抖动，避免同时重连
+            return delay + Math.random() * 500;
+        }
+
+        function scheduleReconnect() {
+            if (!RECONNECT_CONFIG.enabled) return;
+            if (state.isManualDisconnect) return;
+            
+            if (state.reconnectCount >= RECONNECT_CONFIG.maxRetries) {
+                logSys(`Reconnect failed after ${RECONNECT_CONFIG.maxRetries} attempts.`);
+                setStatus('error', 'RECONNECT_FAILED');
+                return;
+            }
+            
+            const delay = getReconnectDelay();
+            state.reconnectCount++;
+            
+            logSys(`Reconnecting in ${Math.round(delay / 1000)}s... (attempt ${state.reconnectCount}/${RECONNECT_CONFIG.maxRetries})`);
+            setStatus('ready', `RECONNECT_${state.reconnectCount}`);
+            
+            state.reconnectTimer = setTimeout(() => {
+                connectStream(true);  // isReconnect = true
+            }, delay);
+        }
+
+        async function connectStream(isReconnect = false) {
+            // 清除重连定时器
+            if (state.reconnectTimer) {
+                clearTimeout(state.reconnectTimer);
+                state.reconnectTimer = null;
+            }
+            
+            // 重连时重置手动断开标志
+            if (isReconnect) {
+                state.isManualDisconnect = false;
+            }
+            
             const uid = Math.random().toString(36).substring(7);
             state.socket = new WebSocket(`ws://${HOST}/ws/v1/stream/${uid}`);
 
             state.socket.onopen = () => {
-                logSys('Connection established. Waiting for audio input...');
+                logSys(isReconnect ? 'Reconnected successfully.' : 'Connection established. Waiting for audio input...');
                 setStatus('streaming', 'STREAMING');
                 document.getElementById('startBtn').disabled = true;
                 document.getElementById('stopBtn').disabled = false;
+                // 重置重连计数
+                state.reconnectCount = 0;
             };
 
             state.socket.onmessage = (e) => {
@@ -579,65 +635,95 @@
             };
 
             state.socket.onclose = (e) => {
-                logSys(e.code === 1000 ? 'Connection closed (timeout).' : `Connection closed (${e.code}).`);
-                resetUI();
+                // 非手动断开，尝试重连
+                if (!state.isManualDisconnect) {
+                    if (e.code === 1000) {
+                        logSys('Connection closed by server (timeout).');
+                    } else {
+                        logSys(`Connection lost (code: ${e.code}).`);
+                    }
+                    resetUI(false);  // 不完全重置，保留麦克风
+                    scheduleReconnect();
+                } else {
+                    logSys('Disconnected.');
+                    resetUI(true);
+                }
             };
 
-            try {
-                state.micStream = await navigator.mediaDevices.getUserMedia({ 
-                    audio: {
-                        echoCancellation: true,
-                        noiseSuppression: true,
-                        sampleRate: 16000
-                    }
-                });
-                
-                state.audioContext = new AudioContext({ sampleRate: 16000 });
-                const source = state.audioContext.createMediaStreamSource(state.micStream);
-                const processor = state.audioContext.createScriptProcessor(4096, 1, 1);
-                
-                processor.onaudioprocess = (e) => {
-                    if (state.socket && state.socket.readyState === WebSocket.OPEN) {
-                        const input = e.inputBuffer.getChannelData(0);
-                        const output = new Int16Array(input.length);
-                        for (let i = 0; i < input.length; i++) {
-                            const s = Math.max(-1, Math.min(1, input[i]));
-                            output[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+            // 首次连接时获取麦克风
+            if (!state.micStream) {
+                try {
+                    state.micStream = await navigator.mediaDevices.getUserMedia({ 
+                        audio: {
+                            echoCancellation: true,
+                            noiseSuppression: true,
+                            sampleRate: 16000
                         }
-                        state.socket.send(output.buffer);
-                    }
-                };
-                
-                source.connect(processor);
-                processor.connect(state.audioContext.destination);
-                
-            } catch (e) {
-                logSys('Microphone access denied: ' + e.message, 'error');
-                disconnectStream();
+                    });
+                    
+                    state.audioContext = new AudioContext({ sampleRate: 16000 });
+                    const source = state.audioContext.createMediaStreamSource(state.micStream);
+                    const processor = state.audioContext.createScriptProcessor(4096, 1, 1);
+                    
+                    processor.onaudioprocess = (e) => {
+                        if (state.socket && state.socket.readyState === WebSocket.OPEN) {
+                            const input = e.inputBuffer.getChannelData(0);
+                            const output = new Int16Array(input.length);
+                            for (let i = 0; i < input.length; i++) {
+                                const s = Math.max(-1, Math.min(1, input[i]));
+                                output[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                            }
+                            state.socket.send(output.buffer);
+                        }
+                    };
+                    
+                    source.connect(processor);
+                    processor.connect(state.audioContext.destination);
+                    
+                } catch (e) {
+                    logSys('Microphone access denied: ' + e.message, 'error');
+                    disconnectStream();
+                }
             }
         }
 
-        function resetUI() {
-            if (state.micStream) {
-                state.micStream.getTracks().forEach(t => t.stop());
-                state.micStream = null;
-            }
-            if (state.audioContext) {
-                state.audioContext.close();
-                state.audioContext = null;
+        function resetUI(full = true) {
+            if (full) {
+                if (state.micStream) {
+                    state.micStream.getTracks().forEach(t => t.stop());
+                    state.micStream = null;
+                }
+                if (state.audioContext) {
+                    state.audioContext.close();
+                    state.audioContext = null;
+                }
             }
             
             document.getElementById('startBtn').disabled = false;
             document.getElementById('stopBtn').disabled = true;
-            setStatus('ready', 'READY');
+            
+            if (full) {
+                setStatus('ready', 'READY');
+                state.reconnectCount = 0;
+                state.isManualDisconnect = false;
+            }
         }
 
         function disconnectStream() {
+            // 标记为手动断开，阻止自动重连
+            state.isManualDisconnect = true;
+            
+            // 清除重连定时器
+            if (state.reconnectTimer) {
+                clearTimeout(state.reconnectTimer);
+                state.reconnectTimer = null;
+            }
+            
             if (state.socket) {
                 state.socket.close();
                 state.socket = null;
             }
-            resetUI();
+            resetUI(true);
         }
 
         async function performUpload(input) {
