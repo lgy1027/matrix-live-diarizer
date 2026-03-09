@@ -76,6 +76,14 @@ class ERes2NetEngine:
         self.emb_buffer[client_id] = []
         self.match_history[client_id] = []
 
+    def cleanup_client(self, client_id: str):
+        """清理客户端资源（连接断开时调用）"""
+        if client_id in self.emb_buffer:
+            del self.emb_buffer[client_id]
+        if client_id in self.match_history:
+            del self.match_history[client_id]
+        print(f"[ERes2NetV2] 已清理客户端 {client_id} 的缓冲区")
+
     def _get_dynamic_threshold(self, count: int) -> tuple:
         """动态阈值"""
         base_low = 0.42

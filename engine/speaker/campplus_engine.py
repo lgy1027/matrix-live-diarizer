@@ -67,6 +67,12 @@ class CamPlusEngine:
         """重置声纹缓存"""
         self.emb_buffer[client_id] = []
 
+    def cleanup_client(self, client_id: str):
+        """清理客户端资源（连接断开时调用）"""
+        if client_id in self.emb_buffer:
+            del self.emb_buffer[client_id]
+            print(f"[CamPlus] 已清理客户端 {client_id} 的缓冲区")
+
     def compare_and_identify(self, current_emb, client_id: str) -> str:
         """说话人匹配与识别"""
         if current_emb is None: 

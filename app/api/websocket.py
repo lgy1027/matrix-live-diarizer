@@ -143,4 +143,6 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
     except Exception as e:
         logger.error(f"[WS ERROR] {e}")
     finally:
+        # 清理客户端资源，防止内存泄漏
+        spk_engine.cleanup_client(client_id)
         logger.info(f"[WS] 用户 {client_id} 连接已释放")
