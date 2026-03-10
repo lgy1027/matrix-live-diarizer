@@ -1,16 +1,36 @@
+# Web 框架
 fastapi
 uvicorn>=0.23.0
 python-multipart>=0.0.6
+
+# 深度学习
 torch>=2.0.0
 transformers>=4.30.0
+
+# ASR 模型
 modelscope>=1.10.0
 qwen-asr>=0.0.6
+
+# 声纹向量库
 chromadb>=0.4.0
+
+# 音频处理
 librosa>=0.10.0
 soundfile>=0.12.0
 numpy>=1.24.0
+scipy>=1.10.0
+
+# 数据模型
 pydantic>=2.0.0
+
+# 配置管理
 python-dotenv>=1.0.0
+
+# modelscope 隐式依赖
+setuptools<81              # pkg_resources 在 81+ 版本移除
 addict
 simplejson
 sortedcontainers
+
+# soundfile 隐式依赖
+cffi
