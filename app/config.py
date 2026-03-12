@@ -1,37 +1,26 @@
-"""配置管理
-
-支持从 .env 文件和环境变量加载配置。
-优先级：环境变量 > .env 文件 > 默认值
-"""
+"""配置管理 - 从 .env 文件和环境变量加载配置"""
 import os
 import logging
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import Optional
 
 logger = logging.getLogger("Matrix_Core")
 
 # 加载 .env 文件
 try:
     from dotenv import load_dotenv
-    # 从项目根目录加载 .env
     env_path = Path(__file__).parent.parent / ".env"
     if env_path.exists():
         load_dotenv(env_path)
-        logger.info(f"[CONFIG] 已加载 .env 文件: {env_path}")
-    else:
-        logger.info("[CONFIG] 未找到 .env 文件，使用环境变量和默认值")
 except ImportError:
-    logger.warning("[CONFIG] python-dotenv 未安装，仅使用环境变量和默认值")
+    pass
 
 
 def get_env_str(key: str, default: str = "") -> str:
-    """获取字符串类型环境变量"""
     return os.getenv(key, default)
 
 
 def get_env_int(key: str, default: int) -> int:
-    """获取整数类型环境变量"""
     try:
         return int(os.getenv(key, str(default)))
     except ValueError:
@@ -39,7 +28,6 @@ def get_env_int(key: str, default: int) -> int:
 
 
 def get_env_float(key: str, default: float) -> float:
-    """获取浮点数类型环境变量"""
     try:
         return float(os.getenv(key, str(default)))
     except ValueError:
@@ -47,7 +35,6 @@ def get_env_float(key: str, default: float) -> float:
 
 
 def get_env_bool(key: str, default: bool) -> bool:
-    """获取布尔类型环境变量"""
     val = os.getenv(key, str(default)).lower()
     return val in ("true", "1", "yes", "on")
 
@@ -57,7 +44,7 @@ class ServerConfig:
     """服务器配置"""
     host: str = "0.0.0.0"
     port: int = 8000
-    workers: int = 1  # 单进程，防止 GPU 内存溢出
+    workers: int = 1  # 单进程防止 GPU 内存溢出
     debug: bool = False
     
     @classmethod
@@ -74,27 +61,30 @@ class ServerConfig:
 class AudioConfig:
     """音频处理配置"""
     sample_rate: int = 16000
-    buffer_threshold: int = 32000      # 2秒音频触发推理
-    overlap_samples: int = 4000        # 0.25秒重叠
-    silence_threshold: float = 0.008   # 静音检测阈值
-    timeout_seconds: float = 30.0      # 无音频超时断开
-    # VAD 配置
-    vad_threshold: float = 0.5         # VAD 灵敏度
-    min_speech_duration_ms: int = 200  # 最小语音时长
-    # 增益控制
-    target_rms: float = 0.08           # 目标音量
-    max_gain: float = 10.0             # 最大增益倍数
-    # 音频队列配置
-    queue_size: int = 8                # 队列最大容量（帧数）
-    skip_frame_threshold: int = 3      # 触发跳帧的队列阈值
-    queue_monitor_interval: float = 5.0  # 队列监控间隔（秒）
-    # 心跳配置
-    heartbeat_interval: int = 10       # 心跳间隔（秒）
-    heartbeat_timeout: int = 30        # 心跳超时（秒）
-    # 缓冲区上限
-    max_buffer_seconds: int = 10       # 音频缓冲区上限（秒）
-    # 语音分段配置
-    max_segment_seconds: int = 5       # 单个语音段最大长度（秒）
+    buffer_threshold: int = 32000       # 2秒触发推理
+    overlap_samples: int = 4000         # 0.25秒重叠
+    silence_threshold: float = 0.008
+    timeout_seconds: float = 30.0
+    # VAD
+    vad_threshold: float = 0.5
+    min_speech_duration_ms: int = 200
+    # 增益
+    target_rms: float = 0.08
+    max_gain: float = 10.0
+    # 队列
+    queue_size: int = 8
+    skip_frame_threshold: int = 3
+    queue_monitor_interval: float = 5.0
+    # 心跳
+    heartbeat_interval: int = 10
+    heartbeat_timeout: int = 30
+    # 缓冲
+    max_buffer_seconds: int = 10
+    max_segment_seconds: int = 5
+    # 上传
+    upload_max_duration: int = 3600     # 1小时
+    upload_chunk_duration: int = 30     # 30秒分段
+    upload_overlap_duration: float = 1.0
     
     @classmethod
     def from_env(cls) -> "AudioConfig":
@@ -114,13 +104,16 @@ class AudioConfig:
             heartbeat_interval=get_env_int("HEARTBEAT_INTERVAL", 10),
             heartbeat_timeout=get_env_int("HEARTBEAT_TIMEOUT", 30),
             max_buffer_seconds=get_env_int("AUDIO_MAX_BUFFER_SECONDS", 10),
+            upload_max_duration=get_env_int("UPLOAD_MAX_DURATION", 3600),
+            upload_chunk_duration=get_env_int("UPLOAD_CHUNK_DURATION", 30),
+            upload_overlap_duration=get_env_float("UPLOAD_OVERLAP_DURATION", 1.0),
         )
 
 
 @dataclass  
 class SpeakerConfig:
-    """声纹引擎配置"""
-    engine_type: str = "campplus"  # campplus, eres2net, wespeaker
+    """声纹引擎: campplus / eres2net / wespeaker"""
+    engine_type: str = "campplus"
     
     @classmethod
     def from_env(cls) -> "SpeakerConfig":
@@ -131,14 +124,13 @@ class SpeakerConfig:
 
 @dataclass
 class AppConfig:
-    """应用总配置"""
+    """应用配置"""
     server: ServerConfig = field(default_factory=ServerConfig)
     audio: AudioConfig = field(default_factory=AudioConfig)
     speaker: SpeakerConfig = field(default_factory=SpeakerConfig)
     
     @classmethod
     def load(cls) -> "AppConfig":
-        """加载配置，优先使用环境变量"""
         return cls(
             server=ServerConfig.from_env(),
             audio=AudioConfig.from_env(),
@@ -146,22 +138,4 @@ class AppConfig:
         )
 
 
-# 全局配置实例
 config = AppConfig.load()
-
-# 验证配置
-def validate_config():
-    """验证配置是否正确加载"""
-    try:
-        # 验证音频配置
-        _ = config.audio.heartbeat_interval
-        _ = config.audio.heartbeat_timeout
-        _ = config.audio.queue_size
-        _ = config.audio.buffer_threshold
-        logger.info(f"[CONFIG] 配置加载成功: audio.heartbeat_interval={config.audio.heartbeat_interval}")
-        return True
-    except AttributeError as e:
-        logger.error(f"[CONFIG] 配置加载失败: {e}")
-        return False
-
-validate_config()

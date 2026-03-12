@@ -1,13 +1,17 @@
-"""文件上传 API 路由"""
+"""文件上传 API - 支持长音频分段处理"""
 import asyncio
 import uuid
 import os
-import shutil
 import logging
-from fastapi import APIRouter, UploadFile, File
+import time
+from typing import List, Tuple
+import numpy as np
 
+from fastapi import APIRouter, UploadFile, File, HTTPException, Query
+
+from app.config import config
 from app.constants import FILE_UPLOAD_SESSION
-from app.schemas import UploadResponse, ModelsResponse
+from app.schemas import UploadResponse, ModelsResponse, SegmentResult
 
 logger = logging.getLogger("Matrix_Core")
 
@@ -28,34 +32,222 @@ def init_engines(asr, spk, lock, base_dir: str):
     current_dir = base_dir
 
 
+def split_audio_into_chunks(
+    audio: np.ndarray,
+    sample_rate: int,
+    chunk_duration: float,
+    overlap_duration: float
+) -> List[Tuple[np.ndarray, float, float]]:
+    """音频分段，返回 [(chunk, start_time, end_time), ...]"""
+    chunk_samples = int(chunk_duration * sample_rate)
+    overlap_samples = int(overlap_duration * sample_rate)
+    step_samples = chunk_samples - overlap_samples
+    
+    chunks = []
+    start = 0
+    
+    while start < len(audio):
+        end = min(start + chunk_samples, len(audio))
+        chunk = audio[start:end]
+        
+        start_time = start / sample_rate
+        end_time = end / sample_rate
+        
+        # 最小分段 0.5 秒
+        if len(chunk) >= sample_rate * 0.5:
+            chunks.append((chunk, start_time, end_time))
+        
+        start += step_samples
+        
+        if len(audio) - start < sample_rate * 0.5:
+            break
+    
+    return chunks
+
+
+def merge_text_with_overlap(prev_text: str, new_text: str, overlap_chars: int = 50) -> str:
+    """合并两段文本，自动去除重叠部分"""
+    if not prev_text:
+        return new_text
+    if not new_text:
+        return prev_text
+    
+    prev_clean = prev_text.strip()
+    new_clean = new_text.strip()
+    
+    max_overlap = min(len(prev_clean), len(new_clean), overlap_chars * 3)
+    
+    for overlap_len in range(max_overlap, 0, -1):
+        if prev_clean[-overlap_len:] == new_clean[:overlap_len]:
+            return prev_clean + new_clean[overlap_len:]
+    
+    return prev_clean + " " + new_text
+
+
+async def process_audio_chunk_with_diarization(
+    chunk: np.ndarray,
+    start_time: float,
+    end_time: float
+) -> SegmentResult:
+    """分段处理：ASR + 说话人识别"""
+    text = await asr_engine.run_asr(chunk, use_preprocessing=True)
+    embedding = await asyncio.get_event_loop().run_in_executor(
+        None, spk_engine.extract_feat, chunk
+    )
+    spk_id = spk_engine.compare_and_identify(embedding, FILE_UPLOAD_SESSION)
+    
+    return SegmentResult(
+        speaker=spk_id,
+        text=text or "",
+        start_time=start_time,
+        end_time=end_time
+    )
+
+
+async def process_audio_chunk_asr_only(
+    chunk: np.ndarray,
+    start_time: float,
+    end_time: float
+) -> SegmentResult:
+    """分段处理：仅 ASR"""
+    text = await asr_engine.run_asr(chunk, use_preprocessing=True)
+    
+    return SegmentResult(
+        speaker="SPEAKER",
+        text=text or "",
+        start_time=start_time,
+        end_time=end_time
+    )
+
+
 @router.post("/v1/upload", response_model=UploadResponse)
-async def upload_audio(file: UploadFile = File(...)):
-    """处理离线音频文件上传"""
+async def upload_audio(
+    file: UploadFile = File(...),
+    enable_diarization: bool = Query(True, description="启用说话人识别")
+):
+    """上传音频文件，支持长音频分段处理
+    
+    enable_diarization=true: 识别说话人（会议场景）
+    enable_diarization=false: 仅转写（单人演讲）
+    """
+    start_time_total = time.time()
+    
     temp_dir = os.path.join(current_dir, "uploads")
     os.makedirs(temp_dir, exist_ok=True)
     file_path = os.path.join(temp_dir, f"{uuid.uuid4()}_{file.filename}")
     
     try:
+        import shutil
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
         
         import librosa
-        audio, _ = librosa.load(file_path, sr=16000)
+        audio, _ = librosa.load(file_path, sr=config.audio.sample_rate)
+        duration = len(audio) / config.audio.sample_rate
         
-        async with inference_lock:
-            full_text = await asr_engine.run_asr(audio)
-            embedding = await asyncio.get_event_loop().run_in_executor(
-                None, spk_engine.extract_feat, audio
+        mode = "说话人识别" if enable_diarization else "快速转写"
+        logger.info(f"[UPLOAD] {file.filename}, {duration:.1f}s, {mode}")
+        
+        if duration > config.audio.upload_max_duration:
+            raise HTTPException(
+                status_code=400,
+                detail=f"音频 {duration:.1f}s 超过限制 {config.audio.upload_max_duration}s"
             )
-            spk_id = spk_engine.compare_and_identify(embedding, FILE_UPLOAD_SESSION)
+        
+        # 短音频直接处理
+        if duration <= config.audio.upload_chunk_duration:
+            async with inference_lock:
+                text = await asr_engine.run_asr(audio, use_preprocessing=True)
+                
+                if enable_diarization:
+                    embedding = await asyncio.get_event_loop().run_in_executor(
+                        None, spk_engine.extract_feat, audio
+                    )
+                    spk_id = spk_engine.compare_and_identify(embedding, FILE_UPLOAD_SESSION)
+                else:
+                    spk_id = "SPEAKER"
+            
+            logger.info(f"[UPLOAD] 完成, {time.time() - start_time_total:.2f}s")
+            
+            return UploadResponse(
+                status="success",
+                filename=file.filename,
+                speaker=spk_id,
+                text=text or "",
+                duration=duration
+            )
+        
+        # 长音频分段处理
+        chunks = split_audio_into_chunks(
+            audio,
+            config.audio.sample_rate,
+            config.audio.upload_chunk_duration,
+            config.audio.upload_overlap_duration
+        )
+        
+        segments: List[SegmentResult] = []
+        all_speakers = set()
+        
+        process_func = (
+            process_audio_chunk_with_diarization 
+            if enable_diarization 
+            else process_audio_chunk_asr_only
+        )
+        
+        for i, (chunk, start_time, end_time) in enumerate(chunks):
+            async with inference_lock:
+                result = await process_func(chunk, start_time, end_time)
+            
+            segments.append(result)
+            if result.speaker:
+                all_speakers.add(result.speaker)
+        
+        # 合并文本
+        if enable_diarization:
+            merged_text = ""
+            prev_speaker = None
+            prev_text = ""
+            
+            for seg in segments:
+                if not seg.text:
+                    continue
+                
+                if seg.speaker == prev_speaker:
+                    merged_segment = merge_text_with_overlap(prev_text, seg.text)
+                    new_part = merged_segment[len(prev_text):]
+                    if new_part:
+                        merged_text += new_part
+                    prev_text = merged_segment
+                else:
+                    if merged_text:
+                        merged_text += f"\n[{seg.speaker}]: {seg.text}"
+                    else:
+                        merged_text = f"[{seg.speaker}]: {seg.text}"
+                    prev_speaker = seg.speaker
+                    prev_text = seg.text
+        else:
+            merged_text = ""
+            prev_text = ""
+            for seg in segments:
+                if seg.text:
+                    merged_text = merge_text_with_overlap(prev_text, seg.text)
+                    prev_text = merged_text
+        
+        elapsed = time.time() - start_time_total
+        speaker_info = f", {len(all_speakers)} 说话人" if enable_diarization else ""
+        logger.info(f"[UPLOAD] 完成{speaker_info}, {elapsed:.2f}s")
         
         return UploadResponse(
             status="success",
             filename=file.filename,
-            speaker=spk_id,
-            text=full_text
+            text=merged_text.strip(),
+            duration=duration,
+            segments=segments,
+            speakers=sorted(list(all_speakers)) if enable_diarization else None
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"[UPLOAD ERROR] {e}")
         return UploadResponse(status="error", message=str(e))
@@ -66,6 +258,6 @@ async def upload_audio(file: UploadFile = File(...)):
 
 @router.get("/v1/models", response_model=ModelsResponse)
 async def get_models():
-    """获取当前模型信息"""
+    """获取模型信息"""
     from engine.speaker import get_all_engines
     return get_all_engines()
