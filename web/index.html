@@ -357,6 +357,38 @@
             display: none;
         }
 
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            color: var(--text-muted);
+            cursor: pointer;
+        }
+
+        .checkbox-label input[type="checkbox"] {
+            appearance: none;
+            width: 14px;
+            height: 14px;
+            border: 1px solid var(--matrix-dim);
+            background: transparent;
+            cursor: pointer;
+            position: relative;
+        }
+
+        .checkbox-label input[type="checkbox"]:checked {
+            background: var(--matrix-dim);
+        }
+
+        .checkbox-label input[type="checkbox"]:checked::after {
+            content: '✓';
+            position: absolute;
+            top: -2px;
+            left: 1px;
+            font-size: 10px;
+            color: var(--bg-primary);
+        }
+
         /* Responsive */
         @media (max-width: 768px) {
             .header {
@@ -425,6 +457,10 @@
         <button class="btn btn-danger" id="stopBtn" onclick="disconnectStream()" disabled>Terminate</button>
         <button class="btn btn-secondary" onclick="clearTerminal()">Clear</button>
         <span class="spacer"></span>
+        <label class="checkbox-label">
+            <input type="checkbox" id="enableDiarization" checked>
+            <span>Speaker ID</span>
+        </label>
         <input type="file" class="file-input" id="audioFile" onchange="performUpload(this)" accept=".wav,.mp3,.m4a,.flac">
         <button class="btn" onclick="document.getElementById('audioFile').click()">Upload File</button>
     </footer>
@@ -730,24 +766,39 @@
             if (!input.files.length) return;
             
             const file = input.files[0];
-            logSys(`Uploading file: ${file.name}...`);
+            const enableDiarization = document.getElementById('enableDiarization').checked;
+            
+            logSys(`Uploading: ${file.name} (${enableDiarization ? 'speaker diarization' : 'fast transcription'})...`);
 
             const fd = new FormData();
             fd.append('file', file);
 
             try {
-                const res = await fetch(`http://${HOST}/v1/upload`, { method: 'POST', body: fd });
+                // 添加 enable_diarization 参数
+                const url = `http://${HOST}/v1/upload?enable_diarization=${enableDiarization}`;
+                const res = await fetch(url, { method: 'POST', body: fd });
                 const data = await res.json();
                 
                 if (data.status === 'success') {
-                    logSys(`Transcription complete [${data.speaker}]:`);
-                    state.renderQueue.push({ speaker: 'FILE_RESULT', text: data.text });
+                    if (data.segments && data.segments.length > 1) {
+                        // 长音频：显示分段结果
+                        logSys(`Done. Duration: ${data.duration.toFixed(1)}s, Speakers: ${data.speakers?.length || 1}`);
+                        for (const seg of data.segments) {
+                            if (seg.text) {
+                                state.renderQueue.push({ speaker: seg.speaker, text: seg.text });
+                            }
+                        }
+                    } else {
+                        // 短音频：显示单个结果
+                        logSys(`Done. [${data.speaker}]:`);
+                        state.renderQueue.push({ speaker: 'FILE_RESULT', text: data.text });
+                    }
                     if (!state.isTyping) typeWriter();
                 } else {
-                    logSys('Transcription failed: ' + data.message, 'error');
+                    logSys('Failed: ' + data.message, 'error');
                 }
             } catch (e) {
-                logSys('API request failed. Check backend service.', 'error');
+                logSys('Request failed. Check backend.', 'error');
             }
             
             input.value = '';

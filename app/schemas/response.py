@@ -1,19 +1,30 @@
 """响应数据模型"""
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 from pydantic import BaseModel
 
 
+class SegmentResult(BaseModel):
+    """分段结果"""
+    speaker: str
+    text: str
+    start_time: float
+    end_time: float
+
+
 class UploadResponse(BaseModel):
-    """文件上传响应"""
+    """上传响应"""
     status: str
     filename: Optional[str] = None
     speaker: Optional[str] = None
     text: Optional[str] = None
     message: Optional[str] = None
+    duration: Optional[float] = None
+    segments: Optional[List[SegmentResult]] = None
+    speakers: Optional[List[str]] = None
 
 
 class EngineInfo(BaseModel):
-    """引擎信息"""
+    """声纹引擎信息"""
     name: str
     model: str
     description: str
@@ -24,7 +35,7 @@ class EngineInfo(BaseModel):
 
 
 class ASRInfo(BaseModel):
-    """ASR 模型信息"""
+    """ASR 信息"""
     name: str
     model: str
     description: str
@@ -32,7 +43,7 @@ class ASRInfo(BaseModel):
 
 
 class ModelsResponse(BaseModel):
-    """模型信息响应"""
+    """模型信息"""
     current: str
     asr: ASRInfo
     speakers: Dict[str, EngineInfo]
