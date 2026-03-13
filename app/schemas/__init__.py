@@ -4,7 +4,14 @@ from app.schemas.response import (
     ModelsResponse,
     EngineInfo,
     ASRInfo,
-    SegmentResult
+    SegmentResult,
+    SpeakerInfo,
+    SpeakerResponse,
+    SpeakerListResponse,
+    SpeakerUpdateRequest
 )
 
-__all__ = ['UploadResponse', 'ModelsResponse', 'EngineInfo', 'ASRInfo', 'SegmentResult']
+__all__ = [
+    'UploadResponse', 'ModelsResponse', 'EngineInfo', 'ASRInfo', 'SegmentResult',
+    'SpeakerInfo', 'SpeakerResponse', 'SpeakerListResponse', 'SpeakerUpdateRequest'
+]

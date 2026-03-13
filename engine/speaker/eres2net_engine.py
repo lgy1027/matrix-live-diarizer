@@ -10,6 +10,7 @@ from modelscope.models import Model
 import time
 import os
 from collections import defaultdict
+from typing import List, Dict, Optional
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -172,3 +173,87 @@ class ERes2NetEngine:
         )
         print(f"[NEW SPEAKER] {new_id}")
         return new_id
+
+    # ============ 说话人管理 ============
+
+    def list_speakers(self, session_id: Optional[str] = None) -> List[Dict]:
+        """获取说话人列表"""
+        try:
+            if session_id:
+                results = self.collection.get(
+                    where={"session_id": session_id},
+                    include=["metadatas"]
+                )
+            else:
+                results = self.collection.get(include=["metadatas"])
+            
+            speakers = []
+            for i, speaker_id in enumerate(results['ids']):
+                meta = results['metadatas'][i] if results['metadatas'] else {}
+                speakers.append({
+                    "id": speaker_id,
+                    "name": meta.get("name", speaker_id),
+                    "session_id": meta.get("session_id", ""),
+                    "sample_count": meta.get("count", 1),
+                    "last_update": meta.get("last_update", 0)
+                })
+            
+            speakers.sort(key=lambda x: x["last_update"], reverse=True)
+            return speakers
+        except Exception as e:
+            print(f"[ERes2NetV2] 获取说话人列表失败: {e}")
+            return []
+
+    def rename_speaker(self, speaker_id: str, name: str) -> bool:
+        """重命名说话人"""
+        try:
+            results = self.collection.get(ids=[speaker_id], include=["metadatas", "embeddings"])
+            if not results['ids']:
+                return False
+            
+            meta = results['metadatas'][0]
+            meta["name"] = name
+            
+            self.collection.update(
+                ids=[speaker_id],
+                embeddings=results['embeddings'],
+                metadatas=[meta]
+            )
+            print(f"[ERes2NetV2] 已重命名 {speaker_id} -> {name}")
+            return True
+        except Exception as e:
+            print(f"[ERes2NetV2] 重命名失败: {e}")
+            return False
+
+    def delete_speaker(self, speaker_id: str) -> bool:
+        """删除说话人"""
+        try:
+            results = self.collection.get(ids=[speaker_id])
+            if not results['ids']:
+                return False
+            
+            self.collection.delete(ids=[speaker_id])
+            print(f"[ERes2NetV2] 已删除说话人 {speaker_id}")
+            return True
+        except Exception as e:
+            print(f"[ERes2NetV2] 删除失败: {e}")
+            return False
+
+    def get_speaker(self, speaker_id: str) -> Optional[Dict]:
+        """获取单个说话人信息"""
+        try:
+            results = self.collection.get(ids=[speaker_id], include=["metadatas"])
+            if not results['ids']:
+                return None
+            
+            meta = results['metadatas'][0]
+            return {
+                "id": speaker_id,
+                "name": meta.get("name", speaker_id),
+                "session_id": meta.get("session_id", ""),
+                "sample_count": meta.get("count", 1),
+                "last_update": meta.get("last_update", 0)
+            }
+        except Exception as e:
+            print(f"[ERes2NetV2] 获取说话人失败: {e}")
+            return None

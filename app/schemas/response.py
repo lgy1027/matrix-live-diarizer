@@ -47,3 +47,28 @@ class ModelsResponse(BaseModel):
     current: str
     asr: ASRInfo
     speakers: Dict[str, EngineInfo]
+
+
+class SpeakerInfo(BaseModel):
+    """说话人信息"""
+    id: str
+    name: str
+    session_id: str
+    sample_count: int
+    last_update: float
+
+
+class SpeakerResponse(BaseModel):
+    """单个说话人响应"""
+    speaker: SpeakerInfo
+
+
+class SpeakerListResponse(BaseModel):
+    """说话人列表响应"""
+    speakers: List[SpeakerInfo]
+    total: int
+
+
+class SpeakerUpdateRequest(BaseModel):
+    """说话人更新请求"""
+    name: str
