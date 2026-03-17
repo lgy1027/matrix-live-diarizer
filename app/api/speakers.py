@@ -2,12 +2,15 @@
 from fastapi import APIRouter, HTTPException, Query, Path
 from typing import Optional
 
-from engine.speaker.speaker_factory import get_speaker_engine
+from engine.speaker.speaker_factory import get_speaker_engine, get_engine_manager
 from app.schemas.response import (
     SpeakerListResponse,
     SpeakerResponse,
     SpeakerUpdateRequest,
     SpeakerDeleteResponse,
+    EngineSwitchRequest,
+    EngineSwitchResponse,
+    EnginesListResponse,
 )
 
 router = APIRouter()
@@ -75,3 +78,25 @@ async def delete_speaker(speaker_id: str = SPEAKER_ID_PATH):
         raise HTTPException(status_code=500, detail="删除失败")
 
     return SpeakerDeleteResponse(message=f"已删除说话人 {speaker_id}")
+
+
+# ========== 引擎管理 API ==========
+
+@router.get("/v1/engines", response_model=EnginesListResponse)
+async def list_engines():
+    """获取所有引擎信息"""
+    manager = get_engine_manager()
+    info = manager.get_all_engines_info()
+    return EnginesListResponse(current=info["current"], engines=info["engines"])
+
+
+@router.put("/v1/engine", response_model=EngineSwitchResponse)
+async def switch_engine(body: EngineSwitchRequest):
+    """切换声纹引擎"""
+    manager = get_engine_manager()
+    result = manager.switch_engine(body.engine_type)
+    
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "切换失败"))
+    
+    return EngineSwitchResponse(**result)

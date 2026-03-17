@@ -10,7 +10,7 @@ import time
 import os
 import logging
 from collections import defaultdict
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 
 from engine.speaker.base_engine import BaseSpeakerEngine
 
@@ -60,19 +60,21 @@ class WespeakerEngine(BaseSpeakerEngine):
     def _model_name(self) -> str:
         return "Wespeaker"
 
-    def extract_feat(self, audio_data: np.ndarray) -> np.ndarray:
-        """提取声纹特征"""
+    def extract_feat(self, audio_data: np.ndarray) -> Tuple[np.ndarray, float]:
+        """提取声纹特征，返回 (embedding, 音频时长)"""
         try:
+            audio_duration = len(audio_data) / 16000.0
+            
             tensor = torch.FloatTensor(audio_data).unsqueeze(0)
             with torch.no_grad():
                 outputs = self.model(tensor)
                 emb = outputs['spk_embedding'] if isinstance(outputs, dict) else outputs
                 final_emb = emb.cpu().numpy().flatten()
                 final_emb = final_emb / (np.linalg.norm(final_emb) + 1e-6)
-                return final_emb
+                return final_emb, audio_duration
         except Exception as e:
             logger.error(f"[Wespeaker] 提取异常: {e}")
-            return None
+            return None, 0
 
     def get_smoothed_embedding(self, emb: np.ndarray, client_id: str) -> np.ndarray:
         """滑动窗口加权平均"""
@@ -101,26 +103,34 @@ class WespeakerEngine(BaseSpeakerEngine):
             del self.match_history[client_id]
         logger.info(f"[Wespeaker] 已清理客户端 {client_id} 的缓冲区")
 
-    def _get_dynamic_threshold(self, count: int) -> tuple:
-        """动态阈值"""
-        base_low = 0.48
-        base_high = 0.58
+    def _get_dynamic_threshold(self, count: int, is_reliable: bool = True) -> tuple:
+        """动态阈值 - 可靠样本使用更严格阈值"""
+        base_low = 0.44 if is_reliable else 0.54
+        base_high = 0.54 if is_reliable else 0.64
         adjustment = min(0.05, count * 0.005)
         return base_low + adjustment, base_high + adjustment
 
-    def compare_and_identify(self, current_emb, client_id: str) -> str:
-        """说话人匹配与识别"""
+    def compare_and_identify(self, current_emb, client_id: str, audio_duration: float = 0) -> str:
+        """说话人匹配与识别
+        
+        Args:
+            current_emb: 当前声纹特征
+            client_id: 客户端ID
+            audio_duration: 音频时长（秒）
+        """
         if current_emb is None: 
             return "Unknown"
         
-        MIN_SAMPLES_FOR_EDGE = 3
+        # 判断是否为可靠样本
+        is_reliable = audio_duration >= 1.5
+        MIN_SAMPLES_FOR_EDGE = 2
         
         smoothed_emb = self.get_smoothed_embedding(current_emb, client_id)
         emb_list = smoothed_emb.tolist()
 
         results = self.collection.query(
             query_embeddings=[emb_list],
-            n_results=1,
+            n_results=3,
             where={"session_id": client_id}
         )
 
@@ -130,7 +140,7 @@ class WespeakerEngine(BaseSpeakerEngine):
             metadata = results['metadatas'][0][0]
             count = metadata.get("count", 1)
             
-            low_threshold, high_threshold = self._get_dynamic_threshold(count)
+            low_threshold, high_threshold = self._get_dynamic_threshold(count, is_reliable)
             
             logger.debug(f"[MATCH] Dist={min_dist:.4f}, Low={low_threshold:.2f}, High={high_threshold:.2f}, Best={best_id}, Count={count}")
             
@@ -187,5 +197,5 @@ class WespeakerEngine(BaseSpeakerEngine):
             embeddings=[emb_list],
             metadatas=[{"session_id": client_id, "count": 1, "last_update": time.time()}]
         )
-        logger.info(f"[NEW SPEAKER] {new_id}")
+        logger.info(f"[NEW SPEAKER] {new_id} ({audio_duration:.1f}s)")
         return new_id

@@ -636,6 +636,48 @@
             display: none;
         }
 
+        /* ========== UPLOAD PAGE ========== */
+        .upload-page {
+            flex-direction: row;
+            gap: 1px;
+            background: var(--border-subtle);
+        }
+
+        .upload-main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: var(--bg-primary);
+            min-width: 0;
+        }
+
+        .upload-result-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+        }
+
+        .result-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .result-title {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .result-terminal {
+            flex: 1;
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            padding: 16px;
+            overflow-y: auto;
+        }
+
         /* ========== SPEAKERS PAGE ========== */
         .speakers-page {
             padding: 24px;
@@ -820,6 +862,68 @@
             gap: 8px;
         }
 
+        /* ========== HISTORY PAGE ========== */
+        .history-page {
+            padding: 24px;
+            overflow-y: auto;
+        }
+
+        .history-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .history-item {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 8px;
+            padding: 16px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .history-item:hover {
+            border-color: var(--border-color);
+        }
+
+        .history-item-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .history-item-title {
+            font-size: 13px;
+            color: var(--text-primary);
+        }
+
+        .history-item-time {
+            font-size: 10px;
+            color: var(--text-muted);
+        }
+
+        .history-item-preview {
+            font-size: 12px;
+            color: var(--text-secondary);
+            line-height: 1.5;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .history-item-meta {
+            display: flex;
+            gap: 16px;
+            margin-top: 8px;
+        }
+
+        .history-meta-item {
+            font-size: 10px;
+            color: var(--text-muted);
+        }
+
         /* ========== SETTINGS PAGE ========== */
         .settings-page {
             padding: 24px;
@@ -899,71 +1003,9 @@
             border-color: var(--matrix-green);
         }
 
-        /* ========== HISTORY PAGE ========== */
-        .history-page {
-            padding: 24px;
-            overflow-y: auto;
-        }
-
-        .history-list {
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-        }
-
-        .history-item {
-            background: var(--bg-card);
-            border: 1px solid var(--border-subtle);
-            border-radius: 8px;
-            padding: 16px;
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
-
-        .history-item:hover {
-            border-color: var(--border-color);
-        }
-
-        .history-item-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 8px;
-        }
-
-        .history-item-title {
-            font-size: 13px;
-            color: var(--text-primary);
-        }
-
-        .history-item-time {
-            font-size: 10px;
-            color: var(--text-muted);
-        }
-
-        .history-item-preview {
-            font-size: 12px;
-            color: var(--text-secondary);
-            line-height: 1.5;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        .history-item-meta {
-            display: flex;
-            gap: 16px;
-            margin-top: 8px;
-        }
-
-        .history-meta-item {
-            font-size: 10px;
-            color: var(--text-muted);
-        }
-
         /* Responsive */
         @media (max-width: 1024px) {
-            .stream-sidebar {
+            .stream-sidebar, .upload-sidebar {
                 display: none;
             }
         }
@@ -992,6 +1034,52 @@
         @keyframes pulse {
             0%, 100% { opacity: 1; transform: scale(1); }
             50% { opacity: 0.7; transform: scale(0.95); }
+        }
+
+        /* Upload History Item */
+        .upload-history-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.2s ease;
+            margin-bottom: 8px;
+            border: 1px solid var(--border-subtle);
+        }
+
+        .upload-history-item:hover {
+            background: rgba(0, 255, 65, 0.05);
+        }
+
+        .upload-history-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--bg-tertiary);
+            font-size: 16px;
+        }
+
+        .upload-history-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .upload-history-name {
+            font-size: 12px;
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .upload-history-meta {
+            font-size: 10px;
+            color: var(--text-muted);
         }
     </style>
 </head>
@@ -1149,40 +1237,65 @@
             </div>
 
             <!-- Upload Page -->
-            <div class="page" id="uploadPage">
-                <div class="speakers-page">
-                    <div class="page-header">
-                        <h2>文件上传</h2>
+            <div class="page upload-page" id="uploadPage">
+                <div class="stream-main">
+                    <div class="upload-result-area">
+                        <div class="result-header">
+                            <span class="result-title">转写结果</span>
+                            <button class="btn btn-secondary btn-small" id="clearUploadResult">清空</button>
+                        </div>
+                        <div class="result-terminal" id="uploadTerminal"></div>
                     </div>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
-                        <div>
-                            <div class="upload-zone" id="uploadZoneMain" style="padding: 60px;">
-                                <div class="upload-icon" style="font-size: 48px; margin-bottom: 16px;">🎙️</div>
-                                <div class="upload-text" style="font-size: 14px;">拖放音频文件到这里</div>
-                                <div class="upload-hint" style="margin-top: 8px;">支持 WAV, MP3, M4A, FLAC, OGG 格式</div>
+                    <div class="stream-controls">
+                        <button class="btn btn-primary" id="selectFileBtn">
+                            <span class="btn-icon">📁</span>
+                            <span>选择文件</span>
+                        </button>
+                        <span class="control-spacer"></span>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="enableDiarizationUpload" checked>
+                            <span>说话人识别</span>
+                        </label>
+                    </div>
+                </div>
+                <aside class="stream-sidebar upload-sidebar">
+                    <div class="sidebar-section">
+                        <div class="section-header">上传文件</div>
+                        <div class="section-content">
+                            <div class="upload-zone" id="uploadZoneMain">
+                                <div class="upload-icon" style="font-size: 40px;">🎙️</div>
+                                <div class="upload-text">拖放音频文件</div>
+                                <div class="upload-hint">WAV, MP3, M4A, FLAC, OGG</div>
                             </div>
                             <input type="file" class="file-input" id="audioFileMain" accept=".wav,.mp3,.m4a,.flac,.ogg">
-                            <div style="margin-top: 16px;">
-                                <label class="checkbox-label">
-                                    <input type="checkbox" id="enableDiarizationUpload" checked>
-                                    <span>启用说话人识别（会议场景推荐）</span>
-                                </label>
-                            </div>
                         </div>
-                        <div class="settings-section">
-                            <div class="settings-section-header">
-                                <div class="settings-section-title">上传历史</div>
-                            </div>
-                            <div class="settings-section-body">
-                                <div id="uploadHistory" style="max-height: 300px; overflow-y: auto;">
-                                    <div style="color: var(--text-muted); font-size: 12px; text-align: center; padding: 20px;">
-                                        暂无上传记录
-                                    </div>
+                    </div>
+                    <div class="sidebar-section">
+                        <div class="section-header">上传历史</div>
+                        <div class="section-content">
+                            <div id="uploadHistory">
+                                <div style="color: var(--text-muted); font-size: 11px; text-align: center; padding: 20px;">
+                                    暂无上传记录
                                 </div>
                             </div>
                         </div>
                     </div>
-                </div>
+                    <div class="sidebar-section">
+                        <div class="section-header">模型信息</div>
+                        <div class="section-content">
+                            <div class="model-grid">
+                                <div class="model-item">
+                                    <span class="model-label">ASR 模型</span>
+                                    <span class="model-value" id="asrNameUpload">--</span>
+                                </div>
+                                <div class="model-item">
+                                    <span class="model-label">声纹引擎</span>
+                                    <span class="model-value highlight" id="spkCurrentUpload">--</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </aside>
             </div>
 
             <!-- Speakers Page -->
@@ -1206,7 +1319,7 @@
                 <div class="history-page">
                     <div class="page-header">
                         <h2>历史记录</h2>
-                        <button class="btn btn-secondary">
+                        <button class="btn btn-secondary" id="clearHistory">
                             <span class="btn-icon">🗑</span>
                             <span>清空历史</span>
                         </button>
@@ -1231,7 +1344,7 @@
                             <div class="setting-row">
                                 <div>
                                     <div class="setting-label">声纹引擎</div>
-                                    <div class="setting-desc">切换引擎需要重启服务</div>
+                                    <div class="setting-desc" id="engineSwitchStatus">动态切换引擎（实时生效）</div>
                                 </div>
                                 <div class="setting-control">
                                     <select class="select-input" id="engineSelect">
@@ -1241,6 +1354,7 @@
                                     </select>
                                 </div>
                             </div>
+                            <div id="engineWarning" style="display: none; color: var(--warning-color); font-size: 12px; margin-top: 8px; padding: 8px; background: rgba(255,193,7,0.1); border-radius: 4px;"></div>
                         </div>
                     </div>
                     <div class="settings-section">
@@ -1302,8 +1416,8 @@
                 </div>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-secondary" id="cancelRename">取消</button>
-                <button class="btn btn-primary" id="confirmRename">确认</button>
+                <button class="btn btn-secondary btn-small" id="cancelRename">取消</button>
+                <button class="btn btn-primary btn-small" id="confirmRename">确认</button>
             </div>
         </div>
     </div>
@@ -1326,7 +1440,9 @@
             reconnectTimer: null,
             currentPage: 'stream',
             speakers: [],
-            renameTarget: null
+            renameTarget: null,
+            uploadHistory: [],  // 上传历史
+            transcriptionHistory: []  // 转写历史
         };
 
         const RECONNECT_CONFIG = {
@@ -1419,7 +1535,6 @@
                     ctx.lineTo(width, height / 2);
                     ctx.stroke();
                 } else {
-                    // Idle animation
                     ctx.strokeStyle = '#003b00';
                     ctx.lineWidth = 1;
                     ctx.beginPath();
@@ -1471,9 +1586,14 @@
             return `spk-${state.speakerColorMap.get(speakerId)}`;
         }
 
-        // Logging
-        function log(msg, speaker = 'SYSTEM') {
-            state.renderQueue.push({ speaker, text: msg });
+        // Logging - 统一的日志函数，可以输出到不同终端
+        function log(msg, speaker = 'SYSTEM', targetId = null) {
+            const target = targetId || (state.currentPage === 'upload' ? 'uploadTerminal' : 'terminal');
+            addToQueue(msg, speaker, target);
+        }
+
+        function addToQueue(msg, speaker, targetId) {
+            state.renderQueue.push({ speaker, text: msg, target: targetId });
             if (!state.isTyping) typeWriter();
         }
 
@@ -1484,8 +1604,13 @@
             }
             state.isTyping = true;
             
-            const { speaker, text } = state.renderQueue.shift();
-            const terminal = document.getElementById('terminal');
+            const { speaker, text, target } = state.renderQueue.shift();
+            const terminal = document.getElementById(target);
+            
+            if (!terminal) {
+                state.isTyping = false;
+                return;
+            }
             
             let lastLine = terminal.querySelector('.line:last-child');
             const shouldAppend = lastLine && 
@@ -1508,28 +1633,28 @@
             }
 
             const content = lastLine.querySelector('.line-content');
-            
-            for (let i = 0; i < text.length; i += 3) {
-                content.textContent += text.slice(i, i + 3);
-                terminal.scrollTop = terminal.scrollHeight;
+
+            for (let i = 0; i < text.length; i += 2) {
+                content.textContent += text.slice(i, i + 2);
             }
+            
+            terminal.scrollTop = terminal.scrollHeight;
             
             setTimeout(() => {
                 const cursor = lastLine.querySelector('.cursor');
                 if (cursor) cursor.remove();
-            }, 300);
+            }, 400);
             
             requestAnimationFrame(typeWriter);
         }
 
-        function clearTerminal() {
-            document.getElementById('terminal').innerHTML = '';
+        function clearTerminal(targetId = 'terminal') {
+            const terminal = document.getElementById(targetId);
+            if (terminal) terminal.innerHTML = '';
             state.speakerColorMap.clear();
             state.colorIndex = 0;
-            log('终端已清空。');
         }
 
-        // Status
         function setStatus(status, text) {
             const dot = document.getElementById('statusDot');
             const statusText = document.getElementById('statusText');
@@ -1545,8 +1670,9 @@
             }
             
             if (isReconnect) {
-                state.isManualDisconnect = false;
+                log('正在重连...');
             }
+            state.isManualDisconnect = false;
             
             const uid = Math.random().toString(36).substring(7);
             state.socket = new WebSocket(`ws://${HOST}/ws/v1/stream/${uid}`);
@@ -1562,7 +1688,7 @@
             state.socket.onmessage = (e) => {
                 const data = JSON.parse(e.data);
                 if (data.text) {
-                    state.renderQueue.push({ speaker: data.speaker, text: data.text });
+                    state.renderQueue.push({ speaker: data.speaker, text: data.text, target: 'terminal' });
                     if (!state.isTyping) typeWriter();
                 }
             };
@@ -1662,6 +1788,7 @@
                 state.socket = null;
             }
             resetUI(true);
+            state.isManualDisconnect = true;
         }
 
         function resetUI(full = true) {
@@ -1683,7 +1810,6 @@
             if (full) {
                 setStatus('ready', 'READY');
                 state.reconnectCount = 0;
-                state.isManualDisconnect = false;
             }
         }
 
@@ -1692,7 +1818,11 @@
             const enableDiarization = document.getElementById('enableDiarization').checked || 
                                      document.getElementById('enableDiarizationUpload').checked;
             
-            log(`上传中: ${file.name} (${enableDiarization ? '说话人识别' : '快速转写'})...`);
+            // 切换到上传页面并清空结果
+            switchPage('upload');
+            clearTerminal('uploadTerminal');
+            
+            log(`上传中: ${file.name} (${enableDiarization ? '说话人识别' : '快速转写'})...`, 'SYSTEM', 'uploadTerminal');
 
             const fd = new FormData();
             fd.append('file', file);
@@ -1703,26 +1833,208 @@
                 const data = await res.json();
                 
                 if (data.status === 'success') {
+                    // 添加到上传历史
+                    addToUploadHistory(file.name, data);
+                    
+                    // 显示转写结果
                     if (data.segments && data.segments.length > 1) {
-                        log(`完成。时长: ${data.duration.toFixed(1)}s，说话人: ${data.speakers?.length || 1}`);
+                        log(`完成。时长: ${data.duration.toFixed(1)}s，说话人: ${data.speakers?.length || 1}`, 'SYSTEM', 'uploadTerminal');
                         for (const seg of data.segments) {
                             if (seg.text) {
-                                state.renderQueue.push({ speaker: seg.speaker, text: seg.text });
+                                state.renderQueue.push({ speaker: seg.speaker, text: seg.text, target: 'uploadTerminal' });
                             }
                         }
                     } else {
-                        log(`完成。[${data.speaker}]:`);
-                        state.renderQueue.push({ speaker: 'FILE_RESULT', text: data.text });
+                        log(`完成。`, 'SYSTEM', 'uploadTerminal');
+                        if (data.text) {
+                            state.renderQueue.push({ speaker: data.speaker || 'SPEAKER', text: data.text, target: 'uploadTerminal' });
+                        }
                     }
                     if (!state.isTyping) typeWriter();
                     
-                    // Refresh speakers
+                    // 刷新说话人列表
                     loadSpeakers();
+                    
+                    // 添加到转写历史
+                    addToTranscriptionHistory(file.name, data);
                 } else {
-                    log('失败: ' + data.message, 'SYSTEM');
+                    log('失败: ' + (data.message || '未知错误'), 'SYSTEM', 'uploadTerminal');
                 }
             } catch (e) {
-                log('请求失败，请检查后端服务。', 'SYSTEM');
+                log('请求失败，请检查后端服务。', 'SYSTEM', 'uploadTerminal');
+            }
+        }
+
+        // 上传历史管理
+        function addToUploadHistory(filename, data) {
+            const historyItem = {
+                filename: filename,
+                duration: data.duration,
+                speakers: data.speakers?.length || 1,
+                timestamp: new Date().toLocaleString(),
+                text: data.text || ''
+            };
+            
+            state.uploadHistory.unshift(historyItem);
+            if (state.uploadHistory.length > 20) {
+                state.uploadHistory.pop();
+            }
+            
+            renderUploadHistory();
+        }
+
+        function renderUploadHistory() {
+            const container = document.getElementById('uploadHistory');
+            
+            if (state.uploadHistory.length === 0) {
+                container.innerHTML = '<div style="color: var(--text-muted); font-size: 11px; text-align: center; padding: 20px;">暂无上传记录</div>';
+                return;
+            }
+            
+            container.innerHTML = state.uploadHistory.map((item, idx) => `
+                <div class="upload-history-item" onclick="showHistoryDetail(${idx})">
+                    <div class="upload-history-icon">🎙️</div>
+                    <div class="upload-history-info">
+                        <div class="upload-history-name">${item.filename}</div>
+                        <div class="upload-history-meta">${item.duration?.toFixed(1) || '--'}s · ${item.speakers} 说话人</div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // 转写历史管理
+        function addToTranscriptionHistory(filename, data) {
+            const historyItem = {
+                id: Date.now(),
+                filename: filename,
+                duration: data.duration,
+                speakers: data.speakers,
+                text: data.text,
+                segments: data.segments,
+                timestamp: new Date().toLocaleString()
+            };
+            
+            state.transcriptionHistory.unshift(historyItem);
+            if (state.transcriptionHistory.length > 50) {
+                state.transcriptionHistory.pop();
+            }
+            
+            renderTranscriptionHistory();
+        }
+
+        function renderTranscriptionHistory() {
+            const container = document.getElementById('historyList');
+            
+            if (state.transcriptionHistory.length === 0) {
+                container.innerHTML = '<div style="color: var(--text-muted); font-size: 12px; text-align: center; padding: 40px;">暂无历史记录</div>';
+                return;
+            }
+            
+            container.innerHTML = state.transcriptionHistory.map((item, idx) => `
+                <div class="history-item" onclick="showTranscriptionDetail(${idx})">
+                    <div class="history-item-header">
+                        <div class="history-item-title">${item.filename}</div>
+                        <div class="history-item-time">${item.timestamp}</div>
+                    </div>
+                    <div class="history-item-preview">${item.text || '(分段转写结果)'}</div>
+                    <div class="history-item-meta">
+                        <div class="history-meta-item">时长: ${item.duration?.toFixed(1) || '--'}s</div>
+                        <div class="history-meta-item">说话人: ${item.speakers?.length || 1}</div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function showHistoryDetail(idx) {
+            const item = state.uploadHistory[idx];
+            if (!item) return;
+            
+            switchPage('upload');
+            clearTerminal('uploadTerminal');
+            log(`[历史记录] ${item.filename}`, 'SYSTEM', 'uploadTerminal');
+            log(`时长: ${item.duration?.toFixed(1) || '--'}s`, 'SYSTEM', 'uploadTerminal');
+            if (item.text) {
+                state.renderQueue.push({ speaker: 'FILE_RESULT', text: item.text, target: 'uploadTerminal' });
+                if (!state.isTyping) typeWriter();
+            }
+        }
+
+        function showTranscriptionDetail(idx) {
+            const item = state.transcriptionHistory[idx];
+            if (!item) return;
+            
+            switchPage('upload');
+            clearTerminal('uploadTerminal');
+            log(`[历史记录] ${item.filename}`, 'SYSTEM', 'uploadTerminal');
+            log(`时长: ${item.duration?.toFixed(1) || '--'}s，说话人: ${item.speakers?.length || 1}`, 'SYSTEM', 'uploadTerminal');
+            
+            if (item.segments && item.segments.length > 0) {
+                for (const seg of item.segments) {
+                    if (seg.text) {
+                        state.renderQueue.push({ speaker: seg.speaker, text: seg.text, target: 'uploadTerminal' });
+                    }
+                }
+            } else if (item.text) {
+                state.renderQueue.push({ speaker: 'FILE_RESULT', text: item.text, target: 'uploadTerminal' });
+            }
+            
+            if (!state.isTyping) typeWriter();
+        }
+
+        // Switch Engine
+        async function switchEngine(engineType) {
+            const statusEl = document.getElementById('engineSwitchStatus');
+            const warningEl = document.getElementById('engineWarning');
+            
+            statusEl.textContent = '切换中...';
+            statusEl.style.color = 'var(--accent-color)';
+            warningEl.style.display = 'none';
+            
+            try {
+                const res = await fetch(`http://${HOST}/v1/engine`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ engine_type: engineType })
+                });
+                
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || '切换失败');
+                }
+                
+                const data = await res.json();
+                
+                if (data.success) {
+                    statusEl.textContent = `已切换到 ${data.engine_info?.name || engineType}`;
+                    statusEl.style.color = 'var(--success-color)';
+                    
+                    // Show warning if embedding dimension changed
+                    if (data.embedding_dim_changed) {
+                        warningEl.textContent = `⚠️ ${data.warning || 'Embedding 维度已变化，已有说话人数据可能不兼容'}`;
+                        warningEl.style.display = 'block';
+                    }
+                    
+                    // Refresh model info
+                    await loadModelInfo();
+                    await loadSpeakers();
+                    
+                    log(`引擎已切换: ${engineType}`, 'SYSTEM');
+                } else {
+                    throw new Error(data.error || '切换失败');
+                }
+            } catch (e) {
+                statusEl.textContent = '切换失败: ' + e.message;
+                statusEl.style.color = 'var(--danger-color)';
+                log('引擎切换失败: ' + e.message, 'SYSTEM');
+                
+                // Reset to current engine
+                try {
+                    const modelsRes = await fetch(`http://${HOST}/v1/models`);
+                    const modelsData = await modelsRes.json();
+                    document.getElementById('engineSelect').value = modelsData.current;
+                } catch {
+                    document.getElementById('engineSelect').value = 'campplus';
+                }
             }
         }
 
@@ -1737,10 +2049,15 @@
                 document.getElementById('engineName').textContent = data.current.toUpperCase();
                 document.getElementById('asrName').textContent = data.asr.model;
                 document.getElementById('asrLang').textContent = data.asr.languages;
+                document.getElementById('asrNameUpload').textContent = data.asr.model;
                 
                 const currentSpk = data.speakers[data.current];
                 document.getElementById('spkCurrent').textContent = currentSpk.name;
+                document.getElementById('spkCurrentUpload').textContent = currentSpk.name;
                 document.getElementById('spkEer').textContent = currentSpk.eer_voxceleb;
+                
+                // Set engine select value
+                document.getElementById('engineSelect').value = data.current;
                 
             } catch (e) {
                 log('无法连接到后端服务。', 'SYSTEM');
@@ -1752,7 +2069,7 @@
             try {
                 const res = await fetch(`http://${HOST}/v1/speakers`);
                 const data = await res.json();
-                state.speakers = data.speakers;
+                state.speakers = data.speakers || [];
                 renderSpeakerList();
                 renderSpeakerCards();
             } catch (e) {
@@ -1768,7 +2085,7 @@
                 return;
             }
             
-            list.innerHTML = state.speakers.map(sp => `
+            list.innerHTML = state.speakers.slice(0, 10).map(sp => `
                 <div class="speaker-item">
                     <div class="speaker-avatar ${getSpeakerClass(sp.id)}">${sp.name.charAt(0)}</div>
                     <div class="speaker-info">
@@ -1803,7 +2120,7 @@
                         </div>
                         <div class="stat-box">
                             <div class="stat-box-label">会话</div>
-                            <div class="stat-box-value">${sp.session_id || '--'}</div>
+                            <div class="stat-box-value">${sp.session_id ? sp.session_id.substring(0, 8) : '--'}</div>
                         </div>
                     </div>
                     <div class="speaker-card-actions">
@@ -1863,8 +2180,18 @@
         // Event Listeners
         document.getElementById('startBtn').addEventListener('click', () => connectStream());
         document.getElementById('stopBtn').addEventListener('click', disconnectStream);
-        document.getElementById('clearBtn').addEventListener('click', clearTerminal);
+        document.getElementById('clearBtn').addEventListener('click', () => clearTerminal('terminal'));
+        document.getElementById('clearUploadResult').addEventListener('click', () => clearTerminal('uploadTerminal'));
         document.getElementById('refreshSpeakers').addEventListener('click', loadSpeakers);
+        document.getElementById('clearHistory').addEventListener('click', () => {
+            state.transcriptionHistory = [];
+            renderTranscriptionHistory();
+        });
+        
+        // Engine switch listener
+        document.getElementById('engineSelect').addEventListener('change', (e) => {
+            switchEngine(e.target.value);
+        });
 
         document.getElementById('cancelRename').addEventListener('click', () => {
             document.getElementById('renameModal').classList.remove('active');
@@ -1878,10 +2205,17 @@
             document.getElementById('renameModal').classList.remove('active');
         });
 
+        // Select file button for upload page
+        document.getElementById('selectFileBtn').addEventListener('click', () => {
+            document.getElementById('audioFileMain').click();
+        });
+
         // Upload Zones
         function setupUploadZone(zoneId, inputId) {
             const zone = document.getElementById(zoneId);
             const input = document.getElementById(inputId);
+            
+            if (!zone || !input) return;
             
             zone.addEventListener('click', () => input.click());
             

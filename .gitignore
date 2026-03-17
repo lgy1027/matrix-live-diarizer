@@ -26,6 +26,8 @@ ENV/
 env/
 .venv/
 
+TODO.md
+
 # IDE
 .idea/
 .vscode/
