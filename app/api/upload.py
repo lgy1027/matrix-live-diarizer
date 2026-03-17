@@ -4,7 +4,7 @@ import uuid
 import os
 import logging
 import time
-from typing import List, Tuple
+from typing import List, Tuple, Set
 import numpy as np
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, Query
@@ -21,6 +21,10 @@ asr_engine = None
 spk_engine = None
 inference_lock = None
 current_dir = None
+
+# 文件上传安全配置
+ALLOWED_EXTENSIONS: Set[str] = {'.wav', '.mp3', '.m4a', '.flac', '.ogg', '.aac', '.wma'}
+MAX_FILE_SIZE: int = 500 * 1024 * 1024  # 500MB
 
 
 def init_engines(asr, spk, lock, base_dir: str):
@@ -131,6 +135,26 @@ async def upload_audio(
     enable_diarization=false: 仅转写（单人演讲）
     """
     start_time_total = time.time()
+    
+    # 1. 验证文件类型
+    if file.filename:
+        ext = os.path.splitext(file.filename)[1].lower()
+        if ext not in ALLOWED_EXTENSIONS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"不支持的文件类型: {ext}。支持的格式: {', '.join(sorted(ALLOWED_EXTENSIONS))}"
+            )
+    
+    # 2. 验证文件大小（先读取内容）
+    content = await file.read()
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"文件大小 {len(content) / 1024 / 1024:.1f}MB 超过限制 {MAX_FILE_SIZE / 1024 / 1024:.0f}MB"
+        )
+    
+    # 重置文件指针供后续使用
+    await file.seek(0)
     
     temp_dir = os.path.join(current_dir, "uploads")
     os.makedirs(temp_dir, exist_ok=True)

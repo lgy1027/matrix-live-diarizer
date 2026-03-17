@@ -8,13 +8,19 @@ import torch
 import chromadb
 import time
 import os
+import logging
 from collections import defaultdict
 from typing import List, Dict, Optional
 
+from engine.speaker.base_engine import BaseSpeakerEngine
+
+logger = logging.getLogger("Matrix_Speaker")
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
 
-class WespeakerEngine:
+class WespeakerEngine(BaseSpeakerEngine):
+    """Wespeaker ResNet34 声纹引擎 - 继承基类"""
+    
     _instance = None
     
     def __new__(cls):
@@ -36,17 +42,19 @@ class WespeakerEngine:
             cls._instance.match_history = defaultdict(list)
             cls._instance.HISTORY_SIZE = 3
             
-            print("[Wespeaker] 初始化完成")
+            cls._instance.ENGINE_NAME = "Wespeaker"
+            
+            logger.info("[Wespeaker] 初始化完成")
         return cls._instance
 
     def _init_model(self):
         """初始化模型"""
-        print("[Wespeaker] 加载模型...")
+        logger.info("[Wespeaker] 加载模型...")
         from modelscope.models import Model
         model_id = 'iic/speech_resnet34_sv_zh-cn_3dspeaker_16k'
         self.model = Model.from_pretrained(model_id, device='cpu')
         self.model.eval()
-        print("[Wespeaker] ResNet34 模型加载成功")
+        logger.info("[Wespeaker] ResNet34 模型加载成功")
 
     def extract_feat(self, audio_data: np.ndarray) -> np.ndarray:
         """提取声纹特征"""
@@ -59,7 +67,7 @@ class WespeakerEngine:
                 final_emb = final_emb / (np.linalg.norm(final_emb) + 1e-6)
                 return final_emb
         except Exception as e:
-            print(f"[Wespeaker] 提取异常: {e}")
+            logger.error(f"[Wespeaker] 提取异常: {e}")
             return None
 
     def get_smoothed_embedding(self, emb: np.ndarray, client_id: str) -> np.ndarray:
@@ -87,7 +95,7 @@ class WespeakerEngine:
             del self.emb_buffer[client_id]
         if client_id in self.match_history:
             del self.match_history[client_id]
-        print(f"[Wespeaker] 已清理客户端 {client_id} 的缓冲区")
+        logger.info(f"[Wespeaker] 已清理客户端 {client_id} 的缓冲区")
 
     def _get_dynamic_threshold(self, count: int) -> tuple:
         """动态阈值"""
@@ -120,7 +128,7 @@ class WespeakerEngine:
             
             low_threshold, high_threshold = self._get_dynamic_threshold(count)
             
-            print(f"[MATCH] Dist={min_dist:.4f}, Low={low_threshold:.2f}, High={high_threshold:.2f}, Best={best_id}, Count={count}")
+            logger.debug(f"[MATCH] Dist={min_dist:.4f}, Low={low_threshold:.2f}, High={high_threshold:.2f}, Best={best_id}, Count={count}")
             
             # 高置信度匹配
             if min_dist < low_threshold:
@@ -137,7 +145,7 @@ class WespeakerEngine:
                     embeddings=[new_mean.tolist()],
                     metadatas=[{"session_id": client_id, "count": count + 1, "last_update": time.time()}]
                 )
-                print(f"[MATCHED] {best_id} (sim: {1-min_dist:.0%})")
+                logger.info(f"[MATCHED] {best_id} (sim: {1-min_dist:.0%})")
                 return best_id
             
             # 边缘匹配
@@ -163,10 +171,10 @@ class WespeakerEngine:
                         embeddings=[new_mean.tolist()],
                         metadatas=[{"session_id": client_id, "count": count + 1, "last_update": time.time()}]
                     )
-                    print(f"[EDGE OK] {best_id} (连续确认 {same_speaker_count} 次)")
+                    logger.info(f"[EDGE OK] {best_id} (连续确认 {same_speaker_count} 次)")
                     return best_id
                 
-                print(f"[EDGE?] Dist={min_dist:.4f} 待确认 (连续匹配 {same_speaker_count} 次)")
+                logger.debug(f"[EDGE?] Dist={min_dist:.4f} 待确认 (连续匹配 {same_speaker_count} 次)")
         
         # 注册新说话人
         new_id = f"Spk_{int(time.time() * 1000) % 10000}"
@@ -175,89 +183,5 @@ class WespeakerEngine:
             embeddings=[emb_list],
             metadatas=[{"session_id": client_id, "count": 1, "last_update": time.time()}]
         )
-        print(f"[NEW SPEAKER] {new_id}")
+        logger.info(f"[NEW SPEAKER] {new_id}")
         return new_id
-
-    # ============ 说话人管理 ============
-
-    def list_speakers(self, session_id: Optional[str] = None) -> List[Dict]:
-        """获取说话人列表"""
-        try:
-            if session_id:
-                results = self.collection.get(
-                    where={"session_id": session_id},
-                    include=["metadatas"]
-                )
-            else:
-                results = self.collection.get(include=["metadatas"])
-            
-            speakers = []
-            for i, speaker_id in enumerate(results['ids']):
-                meta = results['metadatas'][i] if results['metadatas'] else {}
-                speakers.append({
-                    "id": speaker_id,
-                    "name": meta.get("name", speaker_id),
-                    "session_id": meta.get("session_id", ""),
-                    "sample_count": meta.get("count", 1),
-                    "last_update": meta.get("last_update", 0)
-                })
-            
-            speakers.sort(key=lambda x: x["last_update"], reverse=True)
-            return speakers
-        except Exception as e:
-            print(f"[Wespeaker] 获取说话人列表失败: {e}")
-            return []
-
-    def rename_speaker(self, speaker_id: str, name: str) -> bool:
-        """重命名说话人"""
-        try:
-            results = self.collection.get(ids=[speaker_id], include=["metadatas", "embeddings"])
-            if not results['ids']:
-                return False
-            
-            meta = results['metadatas'][0]
-            meta["name"] = name
-            
-            self.collection.update(
-                ids=[speaker_id],
-                embeddings=results['embeddings'],
-                metadatas=[meta]
-            )
-            print(f"[Wespeaker] 已重命名 {speaker_id} -> {name}")
-            return True
-        except Exception as e:
-            print(f"[Wespeaker] 重命名失败: {e}")
-            return False
-
-    def delete_speaker(self, speaker_id: str) -> bool:
-        """删除说话人"""
-        try:
-            results = self.collection.get(ids=[speaker_id])
-            if not results['ids']:
-                return False
-            
-            self.collection.delete(ids=[speaker_id])
-            print(f"[Wespeaker] 已删除说话人 {speaker_id}")
-            return True
-        except Exception as e:
-            print(f"[Wespeaker] 删除失败: {e}")
-            return False
-
-    def get_speaker(self, speaker_id: str) -> Optional[Dict]:
-        """获取单个说话人信息"""
-        try:
-            results = self.collection.get(ids=[speaker_id], include=["metadatas"])
-            if not results['ids']:
-                return None
-            
-            meta = results['metadatas'][0]
-            return {
-                "id": speaker_id,
-                "name": meta.get("name", speaker_id),
-                "session_id": meta.get("session_id", ""),
-                "sample_count": meta.get("count", 1),
-                "last_update": meta.get("last_update", 0)
-            }
-        except Exception as e:
-            print(f"[Wespeaker] 获取说话人失败: {e}")
-            return None

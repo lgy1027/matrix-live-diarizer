@@ -10,6 +10,7 @@ from app.constants import APP_TITLE
 from app.api import api_router
 from app.api.websocket import init_engines as init_ws_engines
 from app.api.upload import init_engines as init_upload_engines
+from app.middleware.rate_limit import RateLimitMiddleware
 
 tf_logging.set_verbosity_error()
 
@@ -27,6 +28,12 @@ def create_app() -> FastAPI:
         title=APP_TITLE,
         description="实时音频转写与说话人识别系统",
         version="1.0.0"
+    )
+    
+    # 速率限制中间件
+    app.add_middleware(
+        RateLimitMiddleware,
+        requests_per_minute=getattr(config.server, 'rate_limit_requests', 100)
     )
     
     app.add_middleware(
