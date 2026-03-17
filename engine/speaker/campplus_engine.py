@@ -9,13 +9,19 @@ import chromadb
 from modelscope.models import Model
 import time
 import os
+import logging
 from collections import defaultdict
 from typing import List, Dict, Optional
 
+from engine.speaker.base_engine import BaseSpeakerEngine
+
+logger = logging.getLogger("Matrix_Speaker")
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
 
-class CamPlusEngine:
+class CamPlusEngine(BaseSpeakerEngine):
+    """CamPlus 声纹引擎 - 继承基类"""
+    
     _instance = None
     
     def __new__(cls):
@@ -37,7 +43,9 @@ class CamPlusEngine:
             cls._instance.emb_buffer = defaultdict(list)
             cls._instance.EMB_BUFFER_SIZE = 3
             
-            print("[CamPlus] 引擎初始化完成")
+            cls._instance.ENGINE_NAME = "CamPlus"
+            
+            logger.info("[CamPlus] 引擎初始化完成")
         return cls._instance
 
     def extract_feat(self, audio_data: np.ndarray) -> np.ndarray:
@@ -51,7 +59,7 @@ class CamPlusEngine:
                 final_emb = final_emb / (np.linalg.norm(final_emb) + 1e-6)
                 return final_emb
         except Exception as e:
-            print(f"[CamPlus] 提取异常: {e}")
+            logger.error(f"[CamPlus] 提取异常: {e}")
             return None
 
     def get_smoothed_embedding(self, emb: np.ndarray, client_id: str) -> np.ndarray:
@@ -72,7 +80,7 @@ class CamPlusEngine:
         """清理客户端资源（连接断开时调用）"""
         if client_id in self.emb_buffer:
             del self.emb_buffer[client_id]
-            print(f"[CamPlus] 已清理客户端 {client_id} 的缓冲区")
+            logger.info(f"[CamPlus] 已清理客户端 {client_id} 的缓冲区")
 
     def compare_and_identify(self, current_emb, client_id: str) -> str:
         """说话人匹配与识别"""
@@ -99,7 +107,7 @@ class CamPlusEngine:
             metadata = results['metadatas'][0][0]
             count = metadata.get("count", 1)
             
-            print(f"[MATCH] Dist={min_dist:.4f}, Best={best_id}, Count={count}")
+            logger.debug(f"[MATCH] Dist={min_dist:.4f}, Best={best_id}, Count={count}")
             
             # 高置信度匹配
             if min_dist < LOW_THRESHOLD:
@@ -116,7 +124,7 @@ class CamPlusEngine:
                     embeddings=[new_mean.tolist()],
                     metadatas=[{"session_id": client_id, "count": count + 1, "last_update": time.time()}]
                 )
-                print(f"[MATCHED] {best_id} (sim: {1-min_dist:.0%})")
+                logger.info(f"[MATCHED] {best_id} (sim: {1-min_dist:.0%})")
                 return best_id
             
             # 边缘匹配
@@ -134,13 +142,13 @@ class CamPlusEngine:
                     embeddings=[new_mean.tolist()],
                     metadatas=[{"session_id": client_id, "count": count + 1, "last_update": time.time()}]
                 )
-                print(f"[EDGE OK] {best_id} (sim: {1-min_dist:.0%}, samples={count})")
+                logger.info(f"[EDGE OK] {best_id} (sim: {1-min_dist:.0%}, samples={count})")
                 return best_id
             
             if min_dist < HIGH_THRESHOLD:
-                print(f"[EDGE?] Dist={min_dist:.4f} 样本不足({count}<{MIN_SAMPLES_FOR_EDGE})")
+                logger.debug(f"[EDGE?] Dist={min_dist:.4f} 样本不足({count}<{MIN_SAMPLES_FOR_EDGE})")
             else:
-                print(f"[NEW] Dist={min_dist:.4f}")
+                logger.debug(f"[NEW] Dist={min_dist:.4f}")
 
         # 注册新说话人
         new_id = f"Spk_{int(time.time() * 1000) % 10000}"
@@ -149,92 +157,5 @@ class CamPlusEngine:
             embeddings=[emb_list],
             metadatas=[{"session_id": client_id, "count": 1, "last_update": time.time()}]
         )
-        print(f"[NEW SPEAKER] {new_id}")
+        logger.info(f"[NEW SPEAKER] {new_id}")
         return new_id
-
-    # ============ 说话人管理 ============
-
-    def list_speakers(self, session_id: Optional[str] = None) -> List[Dict]:
-        """获取说话人列表"""
-        try:
-            if session_id:
-                results = self.collection.get(
-                    where={"session_id": session_id},
-                    include=["metadatas"]
-                )
-            else:
-                results = self.collection.get(include=["metadatas"])
-            
-            speakers = []
-            for i, speaker_id in enumerate(results['ids']):
-                meta = results['metadatas'][i] if results['metadatas'] else {}
-                speakers.append({
-                    "id": speaker_id,
-                    "name": meta.get("name", speaker_id),
-                    "session_id": meta.get("session_id", ""),
-                    "sample_count": meta.get("count", 1),
-                    "last_update": meta.get("last_update", 0)
-                })
-            
-            # 按更新时间倒序
-            speakers.sort(key=lambda x: x["last_update"], reverse=True)
-            return speakers
-        except Exception as e:
-            print(f"[CamPlus] 获取说话人列表失败: {e}")
-            return []
-
-    def rename_speaker(self, speaker_id: str, name: str) -> bool:
-        """重命名说话人"""
-        try:
-            results = self.collection.get(ids=[speaker_id], include=["metadatas", "embeddings"])
-            if not results['ids']:
-                print(f"[CamPlus] 说话人 {speaker_id} 不存在")
-                return False
-            
-            meta = results['metadatas'][0]
-            meta["name"] = name
-            
-            self.collection.update(
-                ids=[speaker_id],
-                embeddings=results['embeddings'],
-                metadatas=[meta]
-            )
-            print(f"[CamPlus] 已重命名 {speaker_id} -> {name}")
-            return True
-        except Exception as e:
-            print(f"[CamPlus] 重命名失败: {e}")
-            return False
-
-    def delete_speaker(self, speaker_id: str) -> bool:
-        """删除说话人"""
-        try:
-            results = self.collection.get(ids=[speaker_id])
-            if not results['ids']:
-                print(f"[CamPlus] 说话人 {speaker_id} 不存在")
-                return False
-            
-            self.collection.delete(ids=[speaker_id])
-            print(f"[CamPlus] 已删除说话人 {speaker_id}")
-            return True
-        except Exception as e:
-            print(f"[CamPlus] 删除失败: {e}")
-            return False
-
-    def get_speaker(self, speaker_id: str) -> Optional[Dict]:
-        """获取单个说话人信息"""
-        try:
-            results = self.collection.get(ids=[speaker_id], include=["metadatas"])
-            if not results['ids']:
-                return None
-            
-            meta = results['metadatas'][0]
-            return {
-                "id": speaker_id,
-                "name": meta.get("name", speaker_id),
-                "session_id": meta.get("session_id", ""),
-                "sample_count": meta.get("count", 1),
-                "last_update": meta.get("last_update", 0)
-            }
-        except Exception as e:
-            print(f"[CamPlus] 获取说话人失败: {e}")
-            return None

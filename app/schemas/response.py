@@ -1,6 +1,6 @@
 """响应数据模型"""
 from typing import Optional, Dict, List
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class SegmentResult(BaseModel):
@@ -71,4 +71,9 @@ class SpeakerListResponse(BaseModel):
 
 class SpeakerUpdateRequest(BaseModel):
     """说话人更新请求"""
-    name: str
+    name: str = Field(..., min_length=1, max_length=100, description="说话人名称")
+
+
+class SpeakerDeleteResponse(BaseModel):
+    """说话人删除响应"""
+    message: str
