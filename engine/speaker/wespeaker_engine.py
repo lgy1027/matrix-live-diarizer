@@ -56,6 +56,10 @@ class WespeakerEngine(BaseSpeakerEngine):
         self.model.eval()
         logger.info("[Wespeaker] ResNet34 模型加载成功")
 
+    @property
+    def _model_name(self) -> str:
+        return "Wespeaker"
+
     def extract_feat(self, audio_data: np.ndarray) -> np.ndarray:
         """提取声纹特征"""
         try:
