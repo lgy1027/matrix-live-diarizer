@@ -15,15 +15,10 @@ class BaseSpeakerEngine(ABC):
     
     子类需要实现:
         - extract_feat: 提取声纹特征
-        - _get_model_name: 返回模型名称用于日志
-    """
+        - _model_name: 返回模型名称用于日志
     
-    def __init__(self):
-        self.collection = None
-        self.emb_buffer = {}
-        self.match_history = {}
-        self.EMB_BUFFER_SIZE = 3
-        self.HISTORY_SIZE = 3
+    注意: 子类使用 __new__ 单例模式时，所有属性初始化应在 __new__ 中完成
+    """
     
     @abstractmethod
     def extract_feat(self, audio_data: np.ndarray) -> np.ndarray:

@@ -52,6 +52,10 @@ class ERes2NetEngine(BaseSpeakerEngine):
             logger.info("[ERes2NetV2] 初始化完成")
         return cls._instance
 
+    @property
+    def _model_name(self) -> str:
+        return "ERes2NetV2"
+
     def extract_feat(self, audio_data: np.ndarray) -> np.ndarray:
         """提取声纹特征"""
         try:

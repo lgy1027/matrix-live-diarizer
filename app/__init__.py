@@ -64,9 +64,12 @@ def _init_engines(app: FastAPI):
     inference_lock = asyncio.Lock()
     
     import os
+    from app.api.health import init_health_check
+    
     current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     init_ws_engines(asr_engine, spk_engine, inference_lock)
     init_upload_engines(asr_engine, spk_engine, inference_lock, current_dir)
+    init_health_check(asr_engine, spk_engine)
     
     app.state.asr_engine = asr_engine
     app.state.spk_engine = spk_engine
