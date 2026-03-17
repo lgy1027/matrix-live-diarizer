@@ -77,3 +77,41 @@ class SpeakerUpdateRequest(BaseModel):
 class SpeakerDeleteResponse(BaseModel):
     """说话人删除响应"""
     message: str
+
+
+class EngineSwitchRequest(BaseModel):
+    """引擎切换请求"""
+    engine_type: str = Field(..., min_length=1, description="引擎类型: campplus/eres2net/wespeaker")
+
+
+class EngineInfoExtended(BaseModel):
+    """扩展的引擎信息（包含embedding维度）"""
+    name: str
+    model: str
+    description: str
+    eer_voxceleb: str
+    eer_cnceleb: str
+    params: str
+    speed: str
+    embedding_dim: int
+    type: Optional[str] = None
+
+
+class EngineSwitchResponse(BaseModel):
+    """引擎切换响应"""
+    success: bool
+    engine_type: str
+    engine_info: Optional[EngineInfoExtended] = None
+    previous_type: Optional[str] = None
+    embedding_dim_changed: bool = False
+    previous_dim: Optional[int] = None
+    new_dim: Optional[int] = None
+    warning: Optional[str] = None
+    error: Optional[str] = None
+    already_active: Optional[bool] = None
+
+
+class EnginesListResponse(BaseModel):
+    """引擎列表响应"""
+    current: str
+    engines: Dict[str, Dict]

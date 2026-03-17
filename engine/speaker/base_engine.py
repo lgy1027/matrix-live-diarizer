@@ -4,7 +4,7 @@
 """
 import logging
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 logger = logging.getLogger("Matrix_Core")
@@ -14,15 +14,34 @@ class BaseSpeakerEngine(ABC):
     """声纹引擎基类
     
     子类需要实现:
-        - extract_feat: 提取声纹特征
+        - extract_feat: 提取声纹特征，返回 (embedding, audio_duration)
+        - compare_and_identify: 说话人匹配与识别
         - _model_name: 返回模型名称用于日志
     
     注意: 子类使用 __new__ 单例模式时，所有属性初始化应在 __new__ 中完成
     """
     
     @abstractmethod
-    def extract_feat(self, audio_data: np.ndarray) -> np.ndarray:
-        """提取声纹特征 - 子类必须实现"""
+    def extract_feat(self, audio_data: np.ndarray) -> Tuple[np.ndarray, float]:
+        """提取声纹特征 - 子类必须实现
+        
+        Returns:
+            Tuple[np.ndarray, float]: (embedding, audio_duration)
+        """
+        pass
+    
+    @abstractmethod
+    def compare_and_identify(self, current_emb, client_id: str, audio_duration: float = 0) -> str:
+        """说话人匹配与识别 - 子类必须实现
+        
+        Args:
+            current_emb: 当前声纹特征
+            client_id: 客户端ID
+            audio_duration: 音频时长（秒），用于判断可靠性
+            
+        Returns:
+            str: 说话人ID
+        """
         pass
     
     @property

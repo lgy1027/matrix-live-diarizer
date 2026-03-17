@@ -12,13 +12,13 @@ from fastapi import APIRouter, UploadFile, File, HTTPException, Query
 from app.config import config
 from app.constants import FILE_UPLOAD_SESSION
 from app.schemas import UploadResponse, ModelsResponse, SegmentResult
+from engine.speaker.speaker_factory import get_speaker_engine
 
 logger = logging.getLogger("Matrix_Core")
 
 router = APIRouter()
 
 asr_engine = None
-spk_engine = None
 inference_lock = None
 current_dir = None
 
@@ -28,10 +28,13 @@ MAX_FILE_SIZE: int = 500 * 1024 * 1024  # 500MB
 
 
 def init_engines(asr, spk, lock, base_dir: str):
-    """初始化引擎实例"""
-    global asr_engine, spk_engine, inference_lock, current_dir
+    """初始化引擎实例
+    
+    Note: spk 参数保留用于兼容，但实际使用 get_speaker_engine() 动态获取
+    """
+    global asr_engine, inference_lock, current_dir
     asr_engine = asr
-    spk_engine = spk
+    # spk_engine 通过 get_speaker_engine() 动态获取，支持运行时切换
     inference_lock = lock
     current_dir = base_dir
 
@@ -82,7 +85,7 @@ def merge_text_with_overlap(prev_text: str, new_text: str, overlap_chars: int = 
     max_overlap = min(len(prev_clean), len(new_clean), overlap_chars * 3)
     
     for overlap_len in range(max_overlap, 0, -1):
-        if prev_clean[-overlap_len:] == new_clean[:overlap_len]:
+        if prev_clean[-overlap_len:] == new_clean[:overlap_len:]:
             return prev_clean + new_clean[overlap_len:]
     
     return prev_clean + " " + new_text
@@ -94,11 +97,20 @@ async def process_audio_chunk_with_diarization(
     end_time: float
 ) -> SegmentResult:
     """分段处理：ASR + 说话人识别"""
+    audio_duration = end_time - start_time
+    
     text = await asr_engine.run_asr(chunk, use_preprocessing=True)
-    embedding = await asyncio.get_event_loop().run_in_executor(
-        None, spk_engine.extract_feat, chunk
+    emb_result = await asyncio.get_event_loop().run_in_executor(
+        None, get_speaker_engine().extract_feat, chunk
     )
-    spk_id = spk_engine.compare_and_identify(embedding, FILE_UPLOAD_SESSION)
+    
+    # 处理 tuple 返回值
+    if isinstance(emb_result, tuple):
+        embedding, _ = emb_result
+    else:
+        embedding = emb_result
+    
+    spk_id = get_speaker_engine().compare_and_identify(embedding, FILE_UPLOAD_SESSION, audio_duration)
     
     return SegmentResult(
         speaker=spk_id,
@@ -184,10 +196,15 @@ async def upload_audio(
                 text = await asr_engine.run_asr(audio, use_preprocessing=True)
                 
                 if enable_diarization:
-                    embedding = await asyncio.get_event_loop().run_in_executor(
-                        None, spk_engine.extract_feat, audio
+                    emb_result = await asyncio.get_event_loop().run_in_executor(
+                        None, get_speaker_engine().extract_feat, audio
                     )
-                    spk_id = spk_engine.compare_and_identify(embedding, FILE_UPLOAD_SESSION)
+                    # 处理 tuple 返回值
+                    if isinstance(emb_result, tuple):
+                        embedding, _ = emb_result
+                    else:
+                        embedding = emb_result
+                    spk_id = get_speaker_engine().compare_and_identify(embedding, FILE_UPLOAD_SESSION, duration)
                 else:
                     spk_id = "SPEAKER"
             
