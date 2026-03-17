@@ -19,12 +19,14 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-
+.pytest_cache
 # Virtual environments
 venv/
 ENV/
 env/
 .venv/
+
+TODO.md
 
 # IDE
 .idea/

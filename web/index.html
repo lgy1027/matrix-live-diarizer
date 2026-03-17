@@ -9,15 +9,22 @@
             --matrix-green: #00ff41;
             --matrix-dim: #008f11;
             --matrix-dark: #003b00;
-            --bg-primary: #0a0a0a;
-            --bg-secondary: #111111;
-            --bg-tertiary: #1a1a1a;
+            --matrix-glow: rgba(0, 255, 65, 0.3);
+            --bg-primary: #050505;
+            --bg-secondary: #0a0a0a;
+            --bg-tertiary: #111111;
+            --bg-card: #0d0d0d;
             --border-color: #1a3a1a;
-            --text-muted: #666666;
+            --border-subtle: #0f1f0f;
+            --text-primary: #e0e0e0;
+            --text-secondary: #888888;
+            --text-muted: #555555;
             --cyan: #00d4ff;
             --red: #ff4757;
             --yellow: #ffd93d;
             --purple: #c77dff;
+            --orange: #ff9f43;
+            --sidebar-width: 240px;
         }
 
         * {
@@ -29,15 +36,25 @@
         body {
             font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace;
             background: var(--bg-primary);
-            color: var(--matrix-green);
+            color: var(--text-primary);
             min-height: 100vh;
             display: flex;
-            flex-direction: column;
             overflow: hidden;
         }
 
-        /* Scanline effect */
-        body::before {
+        /* Matrix Rain Background */
+        .matrix-bg {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+            opacity: 0.03;
+        }
+
+        /* Scanline Effect */
+        body::after {
             content: '';
             position: fixed;
             top: 0;
@@ -48,48 +65,100 @@
                 0deg,
                 transparent,
                 transparent 2px,
-                rgba(0, 255, 65, 0.015) 2px,
-                rgba(0, 255, 65, 0.015) 4px
+                rgba(0, 255, 65, 0.01) 2px,
+                rgba(0, 255, 65, 0.01) 4px
             );
             pointer-events: none;
-            z-index: 1000;
+            z-index: 9999;
         }
 
-        /* Header */
-        .header {
-            background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-primary) 100%);
-            border-bottom: 1px solid var(--border-color);
-            padding: 16px 24px;
+        /* Sidebar */
+        .sidebar {
+            width: var(--sidebar-width);
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border-subtle);
             display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: 12px;
+            flex-direction: column;
+            flex-shrink: 0;
         }
 
-        .header-left {
-            display: flex;
-            align-items: center;
-            gap: 16px;
+        .sidebar-header {
+            padding: 20px;
+            border-bottom: 1px solid var(--border-subtle);
         }
 
         .logo {
-            font-size: 14px;
-            font-weight: 600;
-            letter-spacing: 2px;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 3px;
             color: var(--matrix-green);
-            text-shadow: 0 0 10px var(--matrix-dim);
+            text-shadow: 0 0 20px var(--matrix-glow);
+            display: flex;
+            align-items: center;
+            gap: 10px;
         }
 
-        .status-group {
+        .logo-icon {
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, var(--matrix-dim), var(--matrix-green));
+            border-radius: 4px;
+            font-size: 12px;
+            color: var(--bg-primary);
+        }
+
+        .sidebar-nav {
+            flex: 1;
+            padding: 12px 0;
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 20px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border-left: 2px solid transparent;
+            font-size: 12px;
+            letter-spacing: 0.5px;
+        }
+
+        .nav-item:hover {
+            background: rgba(0, 255, 65, 0.05);
+            color: var(--text-primary);
+        }
+
+        .nav-item.active {
+            background: rgba(0, 255, 65, 0.08);
+            color: var(--matrix-green);
+            border-left-color: var(--matrix-green);
+        }
+
+        .nav-icon {
+            width: 18px;
+            height: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+        }
+
+        .sidebar-footer {
+            padding: 16px 20px;
+            border-top: 1px solid var(--border-subtle);
+        }
+
+        .status-indicator {
             display: flex;
             align-items: center;
             gap: 8px;
-            padding: 6px 12px;
-            background: var(--bg-tertiary);
-            border: 1px solid var(--border-color);
-            border-radius: 4px;
-            font-size: 12px;
+            font-size: 11px;
+            color: var(--text-muted);
         }
 
         .status-dot {
@@ -97,100 +166,128 @@
             height: 8px;
             border-radius: 50%;
             background: var(--text-muted);
+            transition: all 0.3s ease;
         }
 
         .status-dot.ready { background: var(--matrix-dim); }
         .status-dot.streaming { 
             background: var(--matrix-green);
+            box-shadow: 0 0 10px var(--matrix-glow);
             animation: pulse 1.5s ease-in-out infinite;
-            box-shadow: 0 0 8px var(--matrix-green);
         }
         .status-dot.error { background: var(--red); }
 
-        .header-right {
+        /* Main Content */
+        .main-content {
+            flex: 1;
             display: flex;
-            gap: 24px;
-            font-size: 11px;
-            color: var(--text-muted);
+            flex-direction: column;
+            min-width: 0;
         }
 
-        .header-right span {
+        /* Top Bar */
+        .top-bar {
+            height: 56px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-subtle);
+            display: flex;
+            align-items: center;
+            padding: 0 24px;
+            gap: 16px;
+        }
+
+        .page-title {
+            font-size: 13px;
+            font-weight: 600;
+            letter-spacing: 1px;
+            color: var(--text-primary);
+        }
+
+        .top-spacer { flex: 1; }
+
+        .top-stats {
+            display: flex;
+            gap: 24px;
+        }
+
+        .stat-item {
             display: flex;
             align-items: center;
             gap: 6px;
+            font-size: 11px;
+            color: var(--text-muted);
         }
 
-        .header-right .value {
+        .stat-value {
             color: var(--matrix-dim);
+            font-weight: 500;
         }
 
-        @keyframes pulse {
-            0%, 100% { opacity: 1; transform: scale(1); }
-            50% { opacity: 0.6; transform: scale(0.9); }
-        }
-
-        /* Model Info Panel */
-        .model-panel {
-            background: var(--bg-secondary);
-            border-bottom: 1px solid var(--border-color);
-            padding: 16px 24px;
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-            gap: 24px;
-        }
-
-        .model-section {
+        /* Page Container */
+        .page-container {
+            flex: 1;
+            overflow: hidden;
             display: flex;
             flex-direction: column;
-            gap: 8px;
         }
 
-        .model-section .title {
-            font-size: 10px;
-            font-weight: 600;
-            letter-spacing: 1.5px;
-            color: var(--cyan);
-            text-transform: uppercase;
-            padding-bottom: 6px;
-            border-bottom: 1px solid var(--border-color);
+        .page {
+            display: none;
+            flex: 1;
+            overflow: hidden;
         }
 
-        .model-section .row {
+        .page.active {
             display: flex;
-            gap: 8px;
-            font-size: 11px;
-            line-height: 1.6;
+            flex-direction: column;
         }
 
-        .model-section .label {
-            color: var(--text-muted);
-            min-width: 48px;
+        /* ========== STREAM PAGE ========== */
+        .stream-page {
+            flex-direction: row;
+            gap: 1px;
+            background: var(--border-subtle);
         }
 
-        .model-section .value {
-            color: var(--matrix-green);
+        .stream-main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: var(--bg-primary);
+            min-width: 0;
         }
 
-        .model-section .current {
-            display: inline-block;
-            padding: 2px 8px;
-            background: rgba(0, 255, 65, 0.1);
-            border: 1px solid var(--matrix-dim);
-            border-radius: 2px;
+        /* Audio Visualizer */
+        .visualizer-container {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-subtle);
+            padding: 20px;
+        }
+
+        .visualizer {
+            height: 80px;
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .visualizer-canvas {
+            width: 100%;
+            height: 100%;
+        }
+
+        .visualizer-overlay {
+            position: absolute;
+            top: 8px;
+            left: 12px;
             font-size: 10px;
-        }
-
-        .engine-item {
-            padding: 4px 0;
-            border-bottom: 1px solid rgba(26, 58, 26, 0.3);
-        }
-
-        .engine-item:last-child {
-            border-bottom: none;
+            color: var(--text-muted);
+            letter-spacing: 1px;
         }
 
         /* Terminal */
-        .terminal-container {
+        .terminal-wrapper {
             flex: 1;
             display: flex;
             flex-direction: column;
@@ -200,47 +297,42 @@
         .terminal {
             flex: 1;
             overflow-y: auto;
-            padding: 20px 24px;
-            background: var(--bg-primary);
+            padding: 20px;
             scroll-behavior: smooth;
         }
 
         .terminal::-webkit-scrollbar {
-            width: 6px;
+            width: 4px;
         }
 
         .terminal::-webkit-scrollbar-track {
-            background: var(--bg-secondary);
+            background: transparent;
         }
 
         .terminal::-webkit-scrollbar-thumb {
             background: var(--matrix-dark);
-            border-radius: 3px;
-        }
-
-        .terminal::-webkit-scrollbar-thumb:hover {
-            background: var(--matrix-dim);
+            border-radius: 2px;
         }
 
         .line {
             display: flex;
             align-items: flex-start;
             gap: 12px;
-            margin-bottom: 8px;
-            animation: fadeIn 0.3s ease-out;
+            margin-bottom: 6px;
+            animation: fadeSlide 0.3s ease-out;
         }
 
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(4px); }
-            to { opacity: 1; transform: translateY(0); }
+        @keyframes fadeSlide {
+            from { opacity: 0; transform: translateX(-10px); }
+            to { opacity: 1; transform: translateX(0); }
         }
 
         .speaker-tag {
             flex-shrink: 0;
             padding: 2px 8px;
             border: 1px solid;
-            border-radius: 2px;
-            font-size: 10px;
+            border-radius: 3px;
+            font-size: 9px;
             font-weight: 600;
             letter-spacing: 0.5px;
             text-transform: uppercase;
@@ -249,18 +341,17 @@
         .line-content {
             flex: 1;
             font-size: 13px;
-            line-height: 1.6;
+            line-height: 1.7;
             word-break: break-word;
-            color: #b8b8b8;
+            color: var(--text-primary);
         }
 
         .cursor {
             display: inline-block;
             width: 8px;
-            height: 16px;
+            height: 14px;
             background: var(--matrix-green);
             margin-left: 4px;
-            vertical-align: middle;
             animation: blink 0.8s step-end infinite;
         }
 
@@ -281,15 +372,14 @@
         .spk-6 { color: #f72585; border-color: #f72585; }
         .spk-7 { color: #4cc9f0; border-color: #4cc9f0; }
 
-        /* Controls */
-        .controls {
+        /* Stream Controls */
+        .stream-controls {
             background: var(--bg-secondary);
-            border-top: 1px solid var(--border-color);
-            padding: 16px 24px;
+            border-top: 1px solid var(--border-subtle);
+            padding: 16px 20px;
             display: flex;
-            gap: 12px;
-            flex-wrap: wrap;
             align-items: center;
+            gap: 12px;
         }
 
         .btn {
@@ -298,23 +388,22 @@
             border: 1px solid var(--matrix-dim);
             color: var(--matrix-green);
             font-family: inherit;
-            font-size: 12px;
+            font-size: 11px;
             font-weight: 500;
             letter-spacing: 1px;
             text-transform: uppercase;
             cursor: pointer;
             transition: all 0.2s ease;
-            border-radius: 2px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
 
         .btn:hover:not(:disabled) {
             background: var(--matrix-green);
             color: var(--bg-primary);
-            box-shadow: 0 0 20px rgba(0, 255, 65, 0.3);
-        }
-
-        .btn:active:not(:disabled) {
-            transform: scale(0.98);
+            box-shadow: 0 0 20px var(--matrix-glow);
         }
 
         .btn:disabled {
@@ -343,153 +432,1149 @@
         }
 
         .btn-secondary:hover:not(:disabled) {
-            border-color: var(--matrix-dim);
-            color: var(--matrix-green);
+            border-color: var(--text-secondary);
+            color: var(--text-secondary);
             background: transparent;
             box-shadow: none;
         }
 
-        .spacer {
+        .btn-icon {
+            width: 14px;
+            height: 14px;
+        }
+
+        .control-spacer { flex: 1; }
+
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11px;
+            color: var(--text-secondary);
+            cursor: pointer;
+        }
+
+        .checkbox-label input[type="checkbox"] {
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            border: 1px solid var(--matrix-dim);
+            background: transparent;
+            cursor: pointer;
+            border-radius: 3px;
+            position: relative;
+            transition: all 0.2s ease;
+        }
+
+        .checkbox-label input[type="checkbox"]:checked {
+            background: var(--matrix-dim);
+            border-color: var(--matrix-green);
+        }
+
+        .checkbox-label input[type="checkbox"]:checked::after {
+            content: '✓';
+            position: absolute;
+            top: -1px;
+            left: 2px;
+            font-size: 11px;
+            color: var(--bg-primary);
+        }
+
+        /* Stream Sidebar */
+        .stream-sidebar {
+            width: 320px;
+            background: var(--bg-secondary);
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+        }
+
+        .sidebar-section {
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .section-header {
+            padding: 12px 16px;
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 1.5px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            background: var(--bg-tertiary);
+        }
+
+        .section-content {
+            padding: 12px 16px;
+        }
+
+        /* Model Info */
+        .model-grid {
+            display: grid;
+            gap: 12px;
+        }
+
+        .model-item {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .model-label {
+            font-size: 10px;
+            color: var(--text-muted);
+            letter-spacing: 0.5px;
+        }
+
+        .model-value {
+            font-size: 12px;
+            color: var(--text-primary);
+        }
+
+        .model-value.highlight {
+            color: var(--matrix-green);
+            padding: 2px 8px;
+            background: rgba(0, 255, 65, 0.1);
+            border: 1px solid var(--matrix-dim);
+            border-radius: 3px;
+            display: inline-block;
+        }
+
+        /* Speaker List */
+        .speaker-list {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .speaker-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.2s ease;
+        }
+
+        .speaker-item:hover {
+            background: rgba(0, 255, 65, 0.05);
+        }
+
+        .speaker-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 600;
+            border: 2px solid;
+        }
+
+        .speaker-info {
             flex: 1;
+            min-width: 0;
+        }
+
+        .speaker-name {
+            font-size: 12px;
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .speaker-count {
+            font-size: 10px;
+            color: var(--text-muted);
+        }
+
+        /* Upload Zone */
+        .upload-zone {
+            border: 2px dashed var(--border-color);
+            border-radius: 8px;
+            padding: 24px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .upload-zone:hover {
+            border-color: var(--matrix-dim);
+            background: rgba(0, 255, 65, 0.03);
+        }
+
+        .upload-zone.dragover {
+            border-color: var(--matrix-green);
+            background: rgba(0, 255, 65, 0.08);
+        }
+
+        .upload-icon {
+            font-size: 32px;
+            margin-bottom: 8px;
+            color: var(--text-muted);
+        }
+
+        .upload-text {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .upload-hint {
+            font-size: 10px;
+            color: var(--text-muted);
+            margin-top: 4px;
         }
 
         .file-input {
             display: none;
         }
 
-        .checkbox-label {
+        /* ========== UPLOAD PAGE ========== */
+        .upload-page {
+            flex-direction: row;
+            gap: 1px;
+            background: var(--border-subtle);
+        }
+
+        .upload-main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: var(--bg-primary);
+            min-width: 0;
+        }
+
+        .upload-result-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+        }
+
+        .result-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .result-title {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .result-terminal {
+            flex: 1;
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            padding: 16px;
+            overflow-y: auto;
+        }
+
+        /* ========== SPEAKERS PAGE ========== */
+        .speakers-page {
+            padding: 24px;
+            overflow-y: auto;
+        }
+
+        .page-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+        }
+
+        .page-header h2 {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .speakers-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 16px;
+        }
+
+        .speaker-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 8px;
+            padding: 20px;
+            transition: all 0.2s ease;
+        }
+
+        .speaker-card:hover {
+            border-color: var(--border-color);
+            transform: translateY(-2px);
+        }
+
+        .speaker-card-header {
             display: flex;
             align-items: center;
-            gap: 6px;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .speaker-card-avatar {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            font-weight: 600;
+            border: 2px solid;
+        }
+
+        .speaker-card-info {
+            flex: 1;
+        }
+
+        .speaker-card-name {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 2px;
+        }
+
+        .speaker-card-id {
             font-size: 11px;
             color: var(--text-muted);
-            cursor: pointer;
         }
 
-        .checkbox-label input[type="checkbox"] {
-            appearance: none;
-            width: 14px;
-            height: 14px;
-            border: 1px solid var(--matrix-dim);
-            background: transparent;
-            cursor: pointer;
-            position: relative;
+        .speaker-card-stats {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+            margin-bottom: 16px;
         }
 
-        .checkbox-label input[type="checkbox"]:checked {
-            background: var(--matrix-dim);
+        .stat-box {
+            background: var(--bg-tertiary);
+            padding: 10px;
+            border-radius: 4px;
         }
 
-        .checkbox-label input[type="checkbox"]:checked::after {
-            content: '✓';
-            position: absolute;
-            top: -2px;
-            left: 1px;
+        .stat-box-label {
             font-size: 10px;
-            color: var(--bg-primary);
+            color: var(--text-muted);
+            margin-bottom: 2px;
+        }
+
+        .stat-box-value {
+            font-size: 14px;
+            color: var(--text-primary);
+            font-weight: 500;
+        }
+
+        .speaker-card-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .btn-small {
+            padding: 6px 12px;
+            font-size: 10px;
+        }
+
+        /* Modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 24px;
+            width: 100%;
+            max-width: 400px;
+        }
+
+        .modal-header {
+            margin-bottom: 20px;
+        }
+
+        .modal-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .modal-body {
+            margin-bottom: 20px;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+            letter-spacing: 0.5px;
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 10px 12px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 13px;
+            transition: border-color 0.2s ease;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: var(--matrix-green);
+        }
+
+        .modal-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+        }
+
+        /* ========== HISTORY PAGE ========== */
+        .history-page {
+            padding: 24px;
+            overflow-y: auto;
+        }
+
+        .history-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .history-item {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 8px;
+            padding: 16px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .history-item:hover {
+            border-color: var(--border-color);
+        }
+
+        .history-item-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .history-item-title {
+            font-size: 13px;
+            color: var(--text-primary);
+        }
+
+        .history-item-time {
+            font-size: 10px;
+            color: var(--text-muted);
+        }
+
+        .history-item-preview {
+            font-size: 12px;
+            color: var(--text-secondary);
+            line-height: 1.5;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .history-item-meta {
+            display: flex;
+            gap: 16px;
+            margin-top: 8px;
+        }
+
+        .history-meta-item {
+            font-size: 10px;
+            color: var(--text-muted);
+        }
+
+        /* ========== SETTINGS PAGE ========== */
+        .settings-page {
+            padding: 24px;
+            overflow-y: auto;
+        }
+
+        .settings-section {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 8px;
+            margin-bottom: 16px;
+        }
+
+        .settings-section-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .settings-section-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .settings-section-desc {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        .settings-section-body {
+            padding: 16px 20px;
+        }
+
+        .setting-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .setting-row:last-child {
+            border-bottom: none;
+        }
+
+        .setting-label {
+            font-size: 12px;
+            color: var(--text-primary);
+        }
+
+        .setting-desc {
+            font-size: 10px;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        .setting-control {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .select-input {
+            padding: 8px 12px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        .select-input:focus {
+            outline: none;
+            border-color: var(--matrix-green);
         }
 
         /* Responsive */
-        @media (max-width: 768px) {
-            .header {
-                padding: 12px 16px;
-            }
-            .header-right {
+        @media (max-width: 1024px) {
+            .stream-sidebar, .upload-sidebar {
                 display: none;
             }
-            .model-panel {
-                padding: 12px 16px;
-                gap: 16px;
+        }
+
+        @media (max-width: 768px) {
+            .sidebar {
+                width: 60px;
             }
-            .terminal {
-                padding: 16px;
+            .logo span,
+            .nav-item span,
+            .status-indicator span {
+                display: none;
             }
-            .controls {
-                padding: 12px 16px;
+            .logo-icon {
+                margin: 0 auto;
             }
-            .btn {
-                padding: 8px 16px;
-                font-size: 11px;
+            .nav-item {
+                justify-content: center;
+                padding: 12px;
             }
+            .top-stats {
+                display: none;
+            }
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.7; transform: scale(0.95); }
+        }
+
+        /* Upload History Item */
+        .upload-history-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.2s ease;
+            margin-bottom: 8px;
+            border: 1px solid var(--border-subtle);
+        }
+
+        .upload-history-item:hover {
+            background: rgba(0, 255, 65, 0.05);
+        }
+
+        .upload-history-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--bg-tertiary);
+            font-size: 16px;
+        }
+
+        .upload-history-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .upload-history-name {
+            font-size: 12px;
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .upload-history-meta {
+            font-size: 10px;
+            color: var(--text-muted);
         }
     </style>
 </head>
 <body>
-    <header class="header">
-        <div class="header-left">
-            <div class="logo">MATRIX DIARIZER</div>
-            <div class="status-group">
-                <span class="status-dot ready" id="status-dot"></span>
-                <span id="node-status">READY</span>
+    <!-- Matrix Rain Background -->
+    <canvas class="matrix-bg" id="matrixBg"></canvas>
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <div class="logo">
+                <div class="logo-icon">M</div>
+                <span>MATRIX DIARIZER</span>
             </div>
         </div>
-        <div class="header-right">
-            <span>TIMEOUT <span class="value">30s</span></span>
-            <span>ASR <span class="value" id="asr-model">--</span></span>
-            <span>SPK <span class="value" id="spk-model">--</span></span>
+        <nav class="sidebar-nav">
+            <div class="nav-item active" data-page="stream">
+                <span class="nav-icon">◉</span>
+                <span>实时转写</span>
+            </div>
+            <div class="nav-item" data-page="upload">
+                <span class="nav-icon">▲</span>
+                <span>文件上传</span>
+            </div>
+            <div class="nav-item" data-page="speakers">
+                <span class="nav-icon">◈</span>
+                <span>说话人管理</span>
+            </div>
+            <div class="nav-item" data-page="history">
+                <span class="nav-icon">◷</span>
+                <span>历史记录</span>
+            </div>
+            <div class="nav-item" data-page="settings">
+                <span class="nav-icon">⚙</span>
+                <span>系统设置</span>
+            </div>
+        </nav>
+        <div class="sidebar-footer">
+            <div class="status-indicator">
+                <span class="status-dot ready" id="statusDot"></span>
+                <span id="statusText">READY</span>
+            </div>
         </div>
-    </header>
+    </aside>
 
-    <section class="model-panel" id="model-panel">
-        <div class="model-section">
-            <div class="title">ASR Engine</div>
-            <div class="row"><span class="label">Model</span><span class="value" id="asr-name">--</span></div>
-            <div class="row"><span class="label">Lang</span><span class="value" id="asr-lang">--</span></div>
-        </div>
-        <div class="model-section">
-            <div class="title">Speaker Engine</div>
-            <div class="row"><span class="label">Current</span><span class="value current" id="spk-current">--</span></div>
-            <div class="row"><span class="label">Model</span><span class="value" id="spk-model-name">--</span></div>
-            <div class="row"><span class="label">Speed</span><span class="value" id="spk-speed">--</span></div>
-        </div>
-        <div class="model-section">
-            <div class="title">Available Engines</div>
-            <div id="engine-list"></div>
-        </div>
-    </section>
+    <!-- Main Content -->
+    <main class="main-content">
+        <!-- Top Bar -->
+        <header class="top-bar">
+            <h1 class="page-title" id="pageTitle">实时转写</h1>
+            <span class="top-spacer"></span>
+            <div class="top-stats">
+                <div class="stat-item">
+                    <span>ASR</span>
+                    <span class="stat-value" id="asrModel">--</span>
+                </div>
+                <div class="stat-item">
+                    <span>SPK</span>
+                    <span class="stat-value" id="spkModel">--</span>
+                </div>
+                <div class="stat-item">
+                    <span>ENGINE</span>
+                    <span class="stat-value" id="engineName">--</span>
+                </div>
+            </div>
+        </header>
 
-    <div class="terminal-container">
-        <div class="terminal" id="terminal"></div>
+        <!-- Page Container -->
+        <div class="page-container">
+            <!-- Stream Page -->
+            <div class="page stream-page active" id="streamPage">
+                <div class="stream-main">
+                    <!-- Audio Visualizer -->
+                    <div class="visualizer-container">
+                        <div class="visualizer">
+                            <canvas class="visualizer-canvas" id="visualizerCanvas"></canvas>
+                            <div class="visualizer-overlay">AUDIO WAVEFORM</div>
+                        </div>
+                    </div>
+                    
+                    <!-- Terminal -->
+                    <div class="terminal-wrapper">
+                        <div class="terminal" id="terminal"></div>
+                    </div>
+                    
+                    <!-- Controls -->
+                    <div class="stream-controls">
+                        <button class="btn btn-primary" id="startBtn">
+                            <span class="btn-icon">▶</span>
+                            <span>开始录制</span>
+                        </button>
+                        <button class="btn btn-danger" id="stopBtn" disabled>
+                            <span class="btn-icon">■</span>
+                            <span>停止</span>
+                        </button>
+                        <button class="btn btn-secondary" id="clearBtn">
+                            <span class="btn-icon">✕</span>
+                            <span>清空</span>
+                        </button>
+                        <span class="control-spacer"></span>
+                        <div class="checkbox-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="enableDiarization" checked>
+                                <span>说话人识别</span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Stream Sidebar -->
+                <aside class="stream-sidebar">
+                    <div class="sidebar-section">
+                        <div class="section-header">模型信息</div>
+                        <div class="section-content">
+                            <div class="model-grid">
+                                <div class="model-item">
+                                    <span class="model-label">ASR 模型</span>
+                                    <span class="model-value" id="asrName">--</span>
+                                </div>
+                                <div class="model-item">
+                                    <span class="model-label">支持语言</span>
+                                    <span class="model-value" id="asrLang">--</span>
+                                </div>
+                                <div class="model-item">
+                                    <span class="model-label">声纹引擎</span>
+                                    <span class="model-value highlight" id="spkCurrent">--</span>
+                                </div>
+                                <div class="model-item">
+                                    <span class="model-label">EER (VoxCeleb)</span>
+                                    <span class="model-value" id="spkEer">--</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="sidebar-section">
+                        <div class="section-header">说话人列表</div>
+                        <div class="section-content">
+                            <div class="speaker-list" id="speakerList">
+                                <!-- Dynamic content -->
+                            </div>
+                        </div>
+                    </div>
+                    <div class="sidebar-section">
+                        <div class="section-header">快速上传</div>
+                        <div class="section-content">
+                            <div class="upload-zone" id="uploadZone">
+                                <div class="upload-icon">📁</div>
+                                <div class="upload-text">拖放音频文件</div>
+                                <div class="upload-hint">或点击选择文件</div>
+                            </div>
+                            <input type="file" class="file-input" id="audioFile" accept=".wav,.mp3,.m4a,.flac,.ogg">
+                        </div>
+                    </div>
+                </aside>
+            </div>
+
+            <!-- Upload Page -->
+            <div class="page upload-page" id="uploadPage">
+                <div class="stream-main">
+                    <div class="upload-result-area">
+                        <div class="result-header">
+                            <span class="result-title">转写结果</span>
+                            <button class="btn btn-secondary btn-small" id="clearUploadResult">清空</button>
+                        </div>
+                        <div class="result-terminal" id="uploadTerminal"></div>
+                    </div>
+                    <div class="stream-controls">
+                        <button class="btn btn-primary" id="selectFileBtn">
+                            <span class="btn-icon">📁</span>
+                            <span>选择文件</span>
+                        </button>
+                        <span class="control-spacer"></span>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="enableDiarizationUpload" checked>
+                            <span>说话人识别</span>
+                        </label>
+                    </div>
+                </div>
+                <aside class="stream-sidebar upload-sidebar">
+                    <div class="sidebar-section">
+                        <div class="section-header">上传文件</div>
+                        <div class="section-content">
+                            <div class="upload-zone" id="uploadZoneMain">
+                                <div class="upload-icon" style="font-size: 40px;">🎙️</div>
+                                <div class="upload-text">拖放音频文件</div>
+                                <div class="upload-hint">WAV, MP3, M4A, FLAC, OGG</div>
+                            </div>
+                            <input type="file" class="file-input" id="audioFileMain" accept=".wav,.mp3,.m4a,.flac,.ogg">
+                        </div>
+                    </div>
+                    <div class="sidebar-section">
+                        <div class="section-header">上传历史</div>
+                        <div class="section-content">
+                            <div id="uploadHistory">
+                                <div style="color: var(--text-muted); font-size: 11px; text-align: center; padding: 20px;">
+                                    暂无上传记录
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="sidebar-section">
+                        <div class="section-header">模型信息</div>
+                        <div class="section-content">
+                            <div class="model-grid">
+                                <div class="model-item">
+                                    <span class="model-label">ASR 模型</span>
+                                    <span class="model-value" id="asrNameUpload">--</span>
+                                </div>
+                                <div class="model-item">
+                                    <span class="model-label">声纹引擎</span>
+                                    <span class="model-value highlight" id="spkCurrentUpload">--</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </aside>
+            </div>
+
+            <!-- Speakers Page -->
+            <div class="page" id="speakersPage">
+                <div class="speakers-page">
+                    <div class="page-header">
+                        <h2>说话人管理</h2>
+                        <button class="btn btn-primary" id="refreshSpeakers">
+                            <span class="btn-icon">↻</span>
+                            <span>刷新列表</span>
+                        </button>
+                    </div>
+                    <div class="speakers-grid" id="speakersGrid">
+                        <!-- Dynamic content -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- History Page -->
+            <div class="page" id="historyPage">
+                <div class="history-page">
+                    <div class="page-header">
+                        <h2>历史记录</h2>
+                        <button class="btn btn-secondary" id="clearHistory">
+                            <span class="btn-icon">🗑</span>
+                            <span>清空历史</span>
+                        </button>
+                    </div>
+                    <div class="history-list" id="historyList">
+                        <div style="color: var(--text-muted); font-size: 12px; text-align: center; padding: 40px;">
+                            暂无历史记录
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Settings Page -->
+            <div class="page" id="settingsPage">
+                <div class="settings-page">
+                    <div class="settings-section">
+                        <div class="settings-section-header">
+                            <div class="settings-section-title">声纹引擎设置</div>
+                            <div class="settings-section-desc">选择不同的声纹识别引擎，影响识别精度和速度</div>
+                        </div>
+                        <div class="settings-section-body">
+                            <div class="setting-row">
+                                <div>
+                                    <div class="setting-label">声纹引擎</div>
+                                    <div class="setting-desc" id="engineSwitchStatus">动态切换引擎（实时生效）</div>
+                                </div>
+                                <div class="setting-control">
+                                    <select class="select-input" id="engineSelect">
+                                        <option value="campplus">CamPlus (推荐)</option>
+                                        <option value="eres2net">ERes2Net (高精度)</option>
+                                        <option value="wespeaker">Wespeaker (快速)</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div id="engineWarning" style="display: none; color: var(--warning-color); font-size: 12px; margin-top: 8px; padding: 8px; background: rgba(255,193,7,0.1); border-radius: 4px;"></div>
+                        </div>
+                    </div>
+                    <div class="settings-section">
+                        <div class="settings-section-header">
+                            <div class="settings-section-title">音频设置</div>
+                            <div class="settings-section-desc">调整音频处理参数</div>
+                        </div>
+                        <div class="settings-section-body">
+                            <div class="setting-row">
+                                <div>
+                                    <div class="setting-label">采样率</div>
+                                </div>
+                                <div class="setting-control">
+                                    <span style="color: var(--text-primary);">16000 Hz</span>
+                                </div>
+                            </div>
+                            <div class="setting-row">
+                                <div>
+                                    <div class="setting-label">VAD 灵敏度</div>
+                                    <div class="setting-desc">越小越灵敏</div>
+                                </div>
+                                <div class="setting-control">
+                                    <span style="color: var(--text-primary);">0.5</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="settings-section">
+                        <div class="settings-section-header">
+                            <div class="settings-section-title">速率限制</div>
+                            <div class="settings-section-desc">API 请求频率控制</div>
+                        </div>
+                        <div class="settings-section-body">
+                            <div class="setting-row">
+                                <div>
+                                    <div class="setting-label">每分钟请求数</div>
+                                </div>
+                                <div class="setting-control">
+                                    <span style="color: var(--text-primary);">100 请求/分钟</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Rename Modal -->
+    <div class="modal-overlay" id="renameModal">
+        <div class="modal">
+            <div class="modal-header">
+                <div class="modal-title">重命名说话人</div>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label">说话人名称</label>
+                    <input type="text" class="form-input" id="renameInput" placeholder="输入新名称">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary btn-small" id="cancelRename">取消</button>
+                <button class="btn btn-primary btn-small" id="confirmRename">确认</button>
+            </div>
+        </div>
     </div>
-
-    <footer class="controls">
-        <button class="btn btn-primary" id="startBtn" onclick="connectStream()">Start Stream</button>
-        <button class="btn btn-danger" id="stopBtn" onclick="disconnectStream()" disabled>Terminate</button>
-        <button class="btn btn-secondary" onclick="clearTerminal()">Clear</button>
-        <span class="spacer"></span>
-        <label class="checkbox-label">
-            <input type="checkbox" id="enableDiarization" checked>
-            <span>Speaker ID</span>
-        </label>
-        <input type="file" class="file-input" id="audioFile" onchange="performUpload(this)" accept=".wav,.mp3,.m4a,.flac">
-        <button class="btn" onclick="document.getElementById('audioFile').click()">Upload File</button>
-    </footer>
 
     <script>
         const HOST = '127.0.0.1:8000';
         
-        // 重连配置
-        const RECONNECT_CONFIG = {
-            maxRetries: 5,          // 最大重连次数
-            baseDelay: 1000,        // 基础延迟（毫秒）
-            maxDelay: 10000,        // 最大延迟（毫秒）
-            enabled: true           // 是否启用自动重连
-        };
-        
+        // State
         const state = {
             socket: null,
             micStream: null,
             audioContext: null,
+            analyser: null,
             renderQueue: [],
             isTyping: false,
             speakerColorMap: new Map(),
             colorIndex: 0,
-            // 重连状态
             reconnectCount: 0,
             isManualDisconnect: false,
-            reconnectTimer: null
+            reconnectTimer: null,
+            currentPage: 'stream',
+            speakers: [],
+            renameTarget: null,
+            uploadHistory: [],  // 上传历史
+            transcriptionHistory: []  // 转写历史
         };
 
+        const RECONNECT_CONFIG = {
+            maxRetries: 5,
+            baseDelay: 1000,
+            maxDelay: 10000,
+            enabled: true
+        };
+
+        // Matrix Rain Background
+        function initMatrixRain() {
+            const canvas = document.getElementById('matrixBg');
+            const ctx = canvas.getContext('2d');
+            
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            
+            const columns = Math.floor(canvas.width / 20);
+            const drops = Array(columns).fill(1);
+            
+            function draw() {
+                ctx.fillStyle = 'rgba(5, 5, 5, 0.05)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                ctx.fillStyle = '#00ff41';
+                ctx.font = '15px monospace';
+                
+                for (let i = 0; i < drops.length; i++) {
+                    const text = String.fromCharCode(0x30A0 + Math.random() * 96);
+                    ctx.fillText(text, i * 20, drops[i] * 20);
+                    
+                    if (drops[i] * 20 > canvas.height && Math.random() > 0.975) {
+                        drops[i] = 0;
+                    }
+                    drops[i]++;
+                }
+            }
+            
+            setInterval(draw, 50);
+        }
+
+        // Audio Visualizer
+        function initVisualizer() {
+            const canvas = document.getElementById('visualizerCanvas');
+            const ctx = canvas.getContext('2d');
+            
+            canvas.width = canvas.offsetWidth * 2;
+            canvas.height = canvas.offsetHeight * 2;
+            ctx.scale(2, 2);
+            
+            let animationId;
+            let dataArray;
+            let bufferLength;
+            
+            function draw() {
+                animationId = requestAnimationFrame(draw);
+                
+                const width = canvas.offsetWidth;
+                const height = canvas.offsetHeight;
+                
+                ctx.fillStyle = '#111111';
+                ctx.fillRect(0, 0, width, height);
+                
+                if (state.analyser) {
+                    bufferLength = state.analyser.frequencyBinCount;
+                    dataArray = new Uint8Array(bufferLength);
+                    state.analyser.getByteTimeDomainData(dataArray);
+                    
+                    ctx.lineWidth = 2;
+                    ctx.strokeStyle = '#00ff41';
+                    ctx.shadowColor = '#00ff41';
+                    ctx.shadowBlur = 10;
+                    ctx.beginPath();
+                    
+                    const sliceWidth = width / bufferLength;
+                    let x = 0;
+                    
+                    for (let i = 0; i < bufferLength; i++) {
+                        const v = dataArray[i] / 128.0;
+                        const y = v * height / 2;
+                        
+                        if (i === 0) {
+                            ctx.moveTo(x, y);
+                        } else {
+                            ctx.lineTo(x, y);
+                        }
+                        x += sliceWidth;
+                    }
+                    
+                    ctx.lineTo(width, height / 2);
+                    ctx.stroke();
+                } else {
+                    ctx.strokeStyle = '#003b00';
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    ctx.moveTo(0, height / 2);
+                    ctx.lineTo(width, height / 2);
+                    ctx.stroke();
+                }
+            }
+            
+            draw();
+        }
+
+        // Navigation
+        document.querySelectorAll('.nav-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const page = item.dataset.page;
+                switchPage(page);
+            });
+        });
+
+        function switchPage(page) {
+            state.currentPage = page;
+            
+            document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+            document.querySelector(`.nav-item[data-page="${page}"]`).classList.add('active');
+            
+            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+            document.getElementById(`${page}Page`).classList.add('active');
+            
+            const titles = {
+                stream: '实时转写',
+                upload: '文件上传',
+                speakers: '说话人管理',
+                history: '历史记录',
+                settings: '系统设置'
+            };
+            document.getElementById('pageTitle').textContent = titles[page];
+        }
+
+        // Speaker Colors
         function getSpeakerClass(speakerId) {
             if (speakerId === 'SYSTEM') return 'spk-system';
             if (speakerId === 'FILE_RESULT') return 'spk-file';
@@ -501,63 +1586,31 @@
             return `spk-${state.speakerColorMap.get(speakerId)}`;
         }
 
-        async function loadModelInfo() {
-            try {
-                const res = await fetch(`http://${HOST}/v1/models`);
-                const data = await res.json();
-                
-                document.getElementById('asr-model').textContent = data.asr.name;
-                document.getElementById('spk-model').textContent = data.speakers[data.current].name;
-                document.getElementById('asr-name').textContent = data.asr.model;
-                document.getElementById('asr-lang').textContent = data.asr.languages;
-                
-                const currentSpk = data.speakers[data.current];
-                document.getElementById('spk-current').textContent = currentSpk.name;
-                document.getElementById('spk-model-name').textContent = currentSpk.model;
-                document.getElementById('spk-speed').textContent = currentSpk.speed;
-                
-                const listEl = document.getElementById('engine-list');
-                listEl.innerHTML = '';
-                
-                for (const [key, info] of Object.entries(data.speakers)) {
-                    const item = document.createElement('div');
-                    item.className = 'engine-item';
-                    const isCurrent = key === data.current;
-                    item.innerHTML = `
-                        <div class="row">
-                            <span class="${isCurrent ? 'current' : 'value'}">${info.name}</span>
-                            <span class="label">EER</span>
-                            <span class="value">${info.eer_voxceleb}</span>
-                        </div>
-                    `;
-                    listEl.appendChild(item);
-                }
-            } catch (e) {
-                logSys('Cannot connect to backend service.', 'error');
-            }
+        // Logging - 统一的日志函数，可以输出到不同终端
+        function log(msg, speaker = 'SYSTEM', targetId = null) {
+            const target = targetId || (state.currentPage === 'upload' ? 'uploadTerminal' : 'terminal');
+            addToQueue(msg, speaker, target);
         }
 
-        function logSys(msg, type = 'normal') {
-            state.renderQueue.push({ speaker: 'SYSTEM', text: msg });
+        function addToQueue(msg, speaker, targetId) {
+            state.renderQueue.push({ speaker, text: msg, target: targetId });
             if (!state.isTyping) typeWriter();
         }
 
-        function clearTerminal() {
-            document.getElementById('terminal').innerHTML = '';
-            state.speakerColorMap.clear();
-            state.colorIndex = 0;
-            logSys('Terminal cleared.');
-        }
-
-        async function typeWriter() {
+        function typeWriter() {
             if (state.renderQueue.length === 0) {
                 state.isTyping = false;
                 return;
             }
             state.isTyping = true;
             
-            const { speaker, text } = state.renderQueue.shift();
-            const terminal = document.getElementById('terminal');
+            const { speaker, text, target } = state.renderQueue.shift();
+            const terminal = document.getElementById(target);
+            
+            if (!terminal) {
+                state.isTyping = false;
+                return;
+            }
             
             let lastLine = terminal.querySelector('.line:last-child');
             const shouldAppend = lastLine && 
@@ -580,12 +1633,12 @@
             }
 
             const content = lastLine.querySelector('.line-content');
-            
+
             for (let i = 0; i < text.length; i += 2) {
                 content.textContent += text.slice(i, i + 2);
-                terminal.scrollTop = terminal.scrollHeight;
-                await new Promise(r => setTimeout(r, 12));
             }
+            
+            terminal.scrollTop = terminal.scrollHeight;
             
             setTimeout(() => {
                 const cursor = lastLine.querySelector('.cursor');
@@ -595,98 +1648,68 @@
             requestAnimationFrame(typeWriter);
         }
 
+        function clearTerminal(targetId = 'terminal') {
+            const terminal = document.getElementById(targetId);
+            if (terminal) terminal.innerHTML = '';
+            state.speakerColorMap.clear();
+            state.colorIndex = 0;
+        }
+
         function setStatus(status, text) {
-            const dot = document.getElementById('status-dot');
-            const statusText = document.getElementById('node-status');
+            const dot = document.getElementById('statusDot');
+            const statusText = document.getElementById('statusText');
             dot.className = `status-dot ${status}`;
             statusText.textContent = text;
         }
 
-        function getReconnectDelay() {
-            // 指数退避：delay = min(baseDelay * 2^retry, maxDelay)
-            const delay = Math.min(
-                RECONNECT_CONFIG.baseDelay * Math.pow(2, state.reconnectCount),
-                RECONNECT_CONFIG.maxDelay
-            );
-            // 添加随机抖动，避免同时重连
-            return delay + Math.random() * 500;
-        }
-
-        function scheduleReconnect() {
-            if (!RECONNECT_CONFIG.enabled) return;
-            if (state.isManualDisconnect) return;
-            
-            if (state.reconnectCount >= RECONNECT_CONFIG.maxRetries) {
-                logSys(`Reconnect failed after ${RECONNECT_CONFIG.maxRetries} attempts.`);
-                setStatus('error', 'RECONNECT_FAILED');
-                return;
-            }
-            
-            const delay = getReconnectDelay();
-            state.reconnectCount++;
-            
-            logSys(`Reconnecting in ${Math.round(delay / 1000)}s... (attempt ${state.reconnectCount}/${RECONNECT_CONFIG.maxRetries})`);
-            setStatus('ready', `RECONNECT_${state.reconnectCount}`);
-            
-            state.reconnectTimer = setTimeout(() => {
-                connectStream(true);  // isReconnect = true
-            }, delay);
-        }
-
+        // WebSocket Connection
         async function connectStream(isReconnect = false) {
-            // 清除重连定时器
             if (state.reconnectTimer) {
                 clearTimeout(state.reconnectTimer);
                 state.reconnectTimer = null;
             }
             
-            // 重连时重置手动断开标志
             if (isReconnect) {
-                state.isManualDisconnect = false;
+                log('正在重连...');
             }
+            state.isManualDisconnect = false;
             
             const uid = Math.random().toString(36).substring(7);
             state.socket = new WebSocket(`ws://${HOST}/ws/v1/stream/${uid}`);
 
             state.socket.onopen = () => {
-                logSys(isReconnect ? 'Reconnected successfully.' : 'Connection established. Waiting for audio input...');
+                log(isReconnect ? '重连成功。' : '连接已建立，等待音频输入...');
                 setStatus('streaming', 'STREAMING');
                 document.getElementById('startBtn').disabled = true;
                 document.getElementById('stopBtn').disabled = false;
-                // 重置重连计数
                 state.reconnectCount = 0;
             };
 
             state.socket.onmessage = (e) => {
                 const data = JSON.parse(e.data);
                 if (data.text) {
-                    state.renderQueue.push({ speaker: data.speaker, text: data.text });
+                    state.renderQueue.push({ speaker: data.speaker, text: data.text, target: 'terminal' });
                     if (!state.isTyping) typeWriter();
                 }
             };
 
             state.socket.onerror = () => {
-                logSys('WebSocket connection error.', 'error');
+                log('WebSocket 连接错误。', 'SYSTEM');
                 setStatus('error', 'ERROR');
             };
 
             state.socket.onclose = (e) => {
-                // 非手动断开，尝试重连
                 if (!state.isManualDisconnect) {
-                    if (e.code === 1000) {
-                        logSys('Connection closed by server (timeout).');
-                    } else {
-                        logSys(`Connection lost (code: ${e.code}).`);
-                    }
-                    resetUI(false);  // 不完全重置，保留麦克风
+                    log(`连接断开 (code: ${e.code})，尝试重连...`);
+                    resetUI(false);
                     scheduleReconnect();
                 } else {
-                    logSys('Disconnected.');
+                    log('已断开连接。');
                     resetUI(true);
                 }
             };
 
-            // 首次连接时获取麦克风
+            // Get Microphone
             if (!state.micStream) {
                 try {
                     state.micStream = await navigator.mediaDevices.getUserMedia({ 
@@ -698,8 +1721,13 @@
                     });
                     
                     state.audioContext = new AudioContext({ sampleRate: 16000 });
+                    state.analyser = state.audioContext.createAnalyser();
+                    state.analyser.fftSize = 2048;
+                    
                     const source = state.audioContext.createMediaStreamSource(state.micStream);
                     const processor = state.audioContext.createScriptProcessor(4096, 1, 1);
+                    
+                    source.connect(state.analyser);
                     
                     processor.onaudioprocess = (e) => {
                         if (state.socket && state.socket.readyState === WebSocket.OPEN) {
@@ -717,10 +1745,50 @@
                     processor.connect(state.audioContext.destination);
                     
                 } catch (e) {
-                    logSys('Microphone access denied: ' + e.message, 'error');
+                    log('麦克风访问被拒绝: ' + e.message, 'SYSTEM');
                     disconnectStream();
                 }
             }
+        }
+
+        function scheduleReconnect() {
+            if (!RECONNECT_CONFIG.enabled) return;
+            if (state.isManualDisconnect) return;
+            
+            if (state.reconnectCount >= RECONNECT_CONFIG.maxRetries) {
+                log(`重连失败，已达到最大重试次数 (${RECONNECT_CONFIG.maxRetries})。`);
+                setStatus('error', 'RECONNECT_FAILED');
+                return;
+            }
+            
+            const delay = Math.min(
+                RECONNECT_CONFIG.baseDelay * Math.pow(2, state.reconnectCount),
+                RECONNECT_CONFIG.maxDelay
+            );
+            
+            state.reconnectCount++;
+            log(`${Math.round(delay / 1000)}秒后重连... (${state.reconnectCount}/${RECONNECT_CONFIG.maxRetries})`);
+            setStatus('ready', `RECONNECT_${state.reconnectCount}`);
+            
+            state.reconnectTimer = setTimeout(() => {
+                connectStream(true);
+            }, delay);
+        }
+
+        function disconnectStream() {
+            state.isManualDisconnect = true;
+            
+            if (state.reconnectTimer) {
+                clearTimeout(state.reconnectTimer);
+                state.reconnectTimer = null;
+            }
+            
+            if (state.socket) {
+                state.socket.close();
+                state.socket = null;
+            }
+            resetUI(true);
+            state.isManualDisconnect = true;
         }
 
         function resetUI(full = true) {
@@ -732,6 +1800,7 @@
                 if (state.audioContext) {
                     state.audioContext.close();
                     state.audioContext = null;
+                    state.analyser = null;
                 }
             }
             
@@ -741,71 +1810,455 @@
             if (full) {
                 setStatus('ready', 'READY');
                 state.reconnectCount = 0;
-                state.isManualDisconnect = false;
             }
         }
 
-        function disconnectStream() {
-            // 标记为手动断开，阻止自动重连
-            state.isManualDisconnect = true;
+        // File Upload
+        async function uploadFile(file) {
+            const enableDiarization = document.getElementById('enableDiarization').checked || 
+                                     document.getElementById('enableDiarizationUpload').checked;
             
-            // 清除重连定时器
-            if (state.reconnectTimer) {
-                clearTimeout(state.reconnectTimer);
-                state.reconnectTimer = null;
-            }
+            // 切换到上传页面并清空结果
+            switchPage('upload');
+            clearTerminal('uploadTerminal');
             
-            if (state.socket) {
-                state.socket.close();
-                state.socket = null;
-            }
-            resetUI(true);
-        }
-
-        async function performUpload(input) {
-            if (!input.files.length) return;
-            
-            const file = input.files[0];
-            const enableDiarization = document.getElementById('enableDiarization').checked;
-            
-            logSys(`Uploading: ${file.name} (${enableDiarization ? 'speaker diarization' : 'fast transcription'})...`);
+            log(`上传中: ${file.name} (${enableDiarization ? '说话人识别' : '快速转写'})...`, 'SYSTEM', 'uploadTerminal');
 
             const fd = new FormData();
             fd.append('file', file);
 
             try {
-                // 添加 enable_diarization 参数
                 const url = `http://${HOST}/v1/upload?enable_diarization=${enableDiarization}`;
                 const res = await fetch(url, { method: 'POST', body: fd });
                 const data = await res.json();
                 
                 if (data.status === 'success') {
+                    // 添加到上传历史
+                    addToUploadHistory(file.name, data);
+                    
+                    // 显示转写结果
                     if (data.segments && data.segments.length > 1) {
-                        // 长音频：显示分段结果
-                        logSys(`Done. Duration: ${data.duration.toFixed(1)}s, Speakers: ${data.speakers?.length || 1}`);
+                        log(`完成。时长: ${data.duration.toFixed(1)}s，说话人: ${data.speakers?.length || 1}`, 'SYSTEM', 'uploadTerminal');
                         for (const seg of data.segments) {
                             if (seg.text) {
-                                state.renderQueue.push({ speaker: seg.speaker, text: seg.text });
+                                state.renderQueue.push({ speaker: seg.speaker, text: seg.text, target: 'uploadTerminal' });
                             }
                         }
                     } else {
-                        // 短音频：显示单个结果
-                        logSys(`Done. [${data.speaker}]:`);
-                        state.renderQueue.push({ speaker: 'FILE_RESULT', text: data.text });
+                        log(`完成。`, 'SYSTEM', 'uploadTerminal');
+                        if (data.text) {
+                            state.renderQueue.push({ speaker: data.speaker || 'SPEAKER', text: data.text, target: 'uploadTerminal' });
+                        }
                     }
                     if (!state.isTyping) typeWriter();
+                    
+                    // 刷新说话人列表
+                    loadSpeakers();
+                    
+                    // 添加到转写历史
+                    addToTranscriptionHistory(file.name, data);
                 } else {
-                    logSys('Failed: ' + data.message, 'error');
+                    log('失败: ' + (data.message || '未知错误'), 'SYSTEM', 'uploadTerminal');
                 }
             } catch (e) {
-                logSys('Request failed. Check backend.', 'error');
+                log('请求失败，请检查后端服务。', 'SYSTEM', 'uploadTerminal');
             }
-            
-            input.value = '';
         }
 
-        loadModelInfo();
-        logSys('System initialized. Ready for input.');
+        // 上传历史管理
+        function addToUploadHistory(filename, data) {
+            const historyItem = {
+                filename: filename,
+                duration: data.duration,
+                speakers: data.speakers?.length || 1,
+                timestamp: new Date().toLocaleString(),
+                text: data.text || ''
+            };
+            
+            state.uploadHistory.unshift(historyItem);
+            if (state.uploadHistory.length > 20) {
+                state.uploadHistory.pop();
+            }
+            
+            renderUploadHistory();
+        }
+
+        function renderUploadHistory() {
+            const container = document.getElementById('uploadHistory');
+            
+            if (state.uploadHistory.length === 0) {
+                container.innerHTML = '<div style="color: var(--text-muted); font-size: 11px; text-align: center; padding: 20px;">暂无上传记录</div>';
+                return;
+            }
+            
+            container.innerHTML = state.uploadHistory.map((item, idx) => `
+                <div class="upload-history-item" onclick="showHistoryDetail(${idx})">
+                    <div class="upload-history-icon">🎙️</div>
+                    <div class="upload-history-info">
+                        <div class="upload-history-name">${item.filename}</div>
+                        <div class="upload-history-meta">${item.duration?.toFixed(1) || '--'}s · ${item.speakers} 说话人</div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // 转写历史管理
+        function addToTranscriptionHistory(filename, data) {
+            const historyItem = {
+                id: Date.now(),
+                filename: filename,
+                duration: data.duration,
+                speakers: data.speakers,
+                text: data.text,
+                segments: data.segments,
+                timestamp: new Date().toLocaleString()
+            };
+            
+            state.transcriptionHistory.unshift(historyItem);
+            if (state.transcriptionHistory.length > 50) {
+                state.transcriptionHistory.pop();
+            }
+            
+            renderTranscriptionHistory();
+        }
+
+        function renderTranscriptionHistory() {
+            const container = document.getElementById('historyList');
+            
+            if (state.transcriptionHistory.length === 0) {
+                container.innerHTML = '<div style="color: var(--text-muted); font-size: 12px; text-align: center; padding: 40px;">暂无历史记录</div>';
+                return;
+            }
+            
+            container.innerHTML = state.transcriptionHistory.map((item, idx) => `
+                <div class="history-item" onclick="showTranscriptionDetail(${idx})">
+                    <div class="history-item-header">
+                        <div class="history-item-title">${item.filename}</div>
+                        <div class="history-item-time">${item.timestamp}</div>
+                    </div>
+                    <div class="history-item-preview">${item.text || '(分段转写结果)'}</div>
+                    <div class="history-item-meta">
+                        <div class="history-meta-item">时长: ${item.duration?.toFixed(1) || '--'}s</div>
+                        <div class="history-meta-item">说话人: ${item.speakers?.length || 1}</div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function showHistoryDetail(idx) {
+            const item = state.uploadHistory[idx];
+            if (!item) return;
+            
+            switchPage('upload');
+            clearTerminal('uploadTerminal');
+            log(`[历史记录] ${item.filename}`, 'SYSTEM', 'uploadTerminal');
+            log(`时长: ${item.duration?.toFixed(1) || '--'}s`, 'SYSTEM', 'uploadTerminal');
+            if (item.text) {
+                state.renderQueue.push({ speaker: 'FILE_RESULT', text: item.text, target: 'uploadTerminal' });
+                if (!state.isTyping) typeWriter();
+            }
+        }
+
+        function showTranscriptionDetail(idx) {
+            const item = state.transcriptionHistory[idx];
+            if (!item) return;
+            
+            switchPage('upload');
+            clearTerminal('uploadTerminal');
+            log(`[历史记录] ${item.filename}`, 'SYSTEM', 'uploadTerminal');
+            log(`时长: ${item.duration?.toFixed(1) || '--'}s，说话人: ${item.speakers?.length || 1}`, 'SYSTEM', 'uploadTerminal');
+            
+            if (item.segments && item.segments.length > 0) {
+                for (const seg of item.segments) {
+                    if (seg.text) {
+                        state.renderQueue.push({ speaker: seg.speaker, text: seg.text, target: 'uploadTerminal' });
+                    }
+                }
+            } else if (item.text) {
+                state.renderQueue.push({ speaker: 'FILE_RESULT', text: item.text, target: 'uploadTerminal' });
+            }
+            
+            if (!state.isTyping) typeWriter();
+        }
+
+        // Switch Engine
+        async function switchEngine(engineType) {
+            const statusEl = document.getElementById('engineSwitchStatus');
+            const warningEl = document.getElementById('engineWarning');
+            
+            statusEl.textContent = '切换中...';
+            statusEl.style.color = 'var(--accent-color)';
+            warningEl.style.display = 'none';
+            
+            try {
+                const res = await fetch(`http://${HOST}/v1/engine`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ engine_type: engineType })
+                });
+                
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || '切换失败');
+                }
+                
+                const data = await res.json();
+                
+                if (data.success) {
+                    statusEl.textContent = `已切换到 ${data.engine_info?.name || engineType}`;
+                    statusEl.style.color = 'var(--success-color)';
+                    
+                    // Show warning if embedding dimension changed
+                    if (data.embedding_dim_changed) {
+                        warningEl.textContent = `⚠️ ${data.warning || 'Embedding 维度已变化，已有说话人数据可能不兼容'}`;
+                        warningEl.style.display = 'block';
+                    }
+                    
+                    // Refresh model info
+                    await loadModelInfo();
+                    await loadSpeakers();
+                    
+                    log(`引擎已切换: ${engineType}`, 'SYSTEM');
+                } else {
+                    throw new Error(data.error || '切换失败');
+                }
+            } catch (e) {
+                statusEl.textContent = '切换失败: ' + e.message;
+                statusEl.style.color = 'var(--danger-color)';
+                log('引擎切换失败: ' + e.message, 'SYSTEM');
+                
+                // Reset to current engine
+                try {
+                    const modelsRes = await fetch(`http://${HOST}/v1/models`);
+                    const modelsData = await modelsRes.json();
+                    document.getElementById('engineSelect').value = modelsData.current;
+                } catch {
+                    document.getElementById('engineSelect').value = 'campplus';
+                }
+            }
+        }
+
+        // Load Model Info
+        async function loadModelInfo() {
+            try {
+                const res = await fetch(`http://${HOST}/v1/models`);
+                const data = await res.json();
+                
+                document.getElementById('asrModel').textContent = data.asr.name;
+                document.getElementById('spkModel').textContent = data.speakers[data.current].name;
+                document.getElementById('engineName').textContent = data.current.toUpperCase();
+                document.getElementById('asrName').textContent = data.asr.model;
+                document.getElementById('asrLang').textContent = data.asr.languages;
+                document.getElementById('asrNameUpload').textContent = data.asr.model;
+                
+                const currentSpk = data.speakers[data.current];
+                document.getElementById('spkCurrent').textContent = currentSpk.name;
+                document.getElementById('spkCurrentUpload').textContent = currentSpk.name;
+                document.getElementById('spkEer').textContent = currentSpk.eer_voxceleb;
+                
+                // Set engine select value
+                document.getElementById('engineSelect').value = data.current;
+                
+            } catch (e) {
+                log('无法连接到后端服务。', 'SYSTEM');
+            }
+        }
+
+        // Load Speakers
+        async function loadSpeakers() {
+            try {
+                const res = await fetch(`http://${HOST}/v1/speakers`);
+                const data = await res.json();
+                state.speakers = data.speakers || [];
+                renderSpeakerList();
+                renderSpeakerCards();
+            } catch (e) {
+                console.error('Failed to load speakers:', e);
+            }
+        }
+
+        function renderSpeakerList() {
+            const list = document.getElementById('speakerList');
+            
+            if (state.speakers.length === 0) {
+                list.innerHTML = '<div style="color: var(--text-muted); font-size: 11px; text-align: center; padding: 20px;">暂无说话人</div>';
+                return;
+            }
+            
+            list.innerHTML = state.speakers.slice(0, 10).map(sp => `
+                <div class="speaker-item">
+                    <div class="speaker-avatar ${getSpeakerClass(sp.id)}">${sp.name.charAt(0)}</div>
+                    <div class="speaker-info">
+                        <div class="speaker-name">${sp.name}</div>
+                        <div class="speaker-count">${sp.sample_count} 个样本</div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function renderSpeakerCards() {
+            const grid = document.getElementById('speakersGrid');
+            
+            if (state.speakers.length === 0) {
+                grid.innerHTML = '<div style="color: var(--text-muted); font-size: 12px; text-align: center; padding: 40px; grid-column: 1 / -1;">暂无说话人数据</div>';
+                return;
+            }
+            
+            grid.innerHTML = state.speakers.map(sp => `
+                <div class="speaker-card">
+                    <div class="speaker-card-header">
+                        <div class="speaker-card-avatar ${getSpeakerClass(sp.id)}">${sp.name.charAt(0)}</div>
+                        <div class="speaker-card-info">
+                            <div class="speaker-card-name">${sp.name}</div>
+                            <div class="speaker-card-id">${sp.id}</div>
+                        </div>
+                    </div>
+                    <div class="speaker-card-stats">
+                        <div class="stat-box">
+                            <div class="stat-box-label">样本数</div>
+                            <div class="stat-box-value">${sp.sample_count}</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-box-label">会话</div>
+                            <div class="stat-box-value">${sp.session_id ? sp.session_id.substring(0, 8) : '--'}</div>
+                        </div>
+                    </div>
+                    <div class="speaker-card-actions">
+                        <button class="btn btn-small btn-secondary" onclick="openRenameModal('${sp.id}', '${sp.name}')">重命名</button>
+                        <button class="btn btn-small btn-danger" onclick="deleteSpeaker('${sp.id}')">删除</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Speaker Management
+        function openRenameModal(speakerId, currentName) {
+            state.renameTarget = speakerId;
+            document.getElementById('renameInput').value = currentName;
+            document.getElementById('renameModal').classList.add('active');
+            document.getElementById('renameInput').focus();
+        }
+
+        async function renameSpeaker(speakerId, newName) {
+            try {
+                const res = await fetch(`http://${HOST}/v1/speakers/${speakerId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: newName })
+                });
+                
+                if (res.ok) {
+                    loadSpeakers();
+                    log(`已重命名说话人: ${speakerId} -> ${newName}`);
+                } else {
+                    log('重命名失败', 'SYSTEM');
+                }
+            } catch (e) {
+                log('请求失败', 'SYSTEM');
+            }
+        }
+
+        async function deleteSpeaker(speakerId) {
+            if (!confirm(`确定删除说话人 ${speakerId}?`)) return;
+            
+            try {
+                const res = await fetch(`http://${HOST}/v1/speakers/${speakerId}`, {
+                    method: 'DELETE'
+                });
+                
+                if (res.ok) {
+                    loadSpeakers();
+                    log(`已删除说话人: ${speakerId}`);
+                } else {
+                    log('删除失败', 'SYSTEM');
+                }
+            } catch (e) {
+                log('请求失败', 'SYSTEM');
+            }
+        }
+
+        // Event Listeners
+        document.getElementById('startBtn').addEventListener('click', () => connectStream());
+        document.getElementById('stopBtn').addEventListener('click', disconnectStream);
+        document.getElementById('clearBtn').addEventListener('click', () => clearTerminal('terminal'));
+        document.getElementById('clearUploadResult').addEventListener('click', () => clearTerminal('uploadTerminal'));
+        document.getElementById('refreshSpeakers').addEventListener('click', loadSpeakers);
+        document.getElementById('clearHistory').addEventListener('click', () => {
+            state.transcriptionHistory = [];
+            renderTranscriptionHistory();
+        });
+        
+        // Engine switch listener
+        document.getElementById('engineSelect').addEventListener('change', (e) => {
+            switchEngine(e.target.value);
+        });
+
+        document.getElementById('cancelRename').addEventListener('click', () => {
+            document.getElementById('renameModal').classList.remove('active');
+        });
+
+        document.getElementById('confirmRename').addEventListener('click', () => {
+            const newName = document.getElementById('renameInput').value.trim();
+            if (newName && state.renameTarget) {
+                renameSpeaker(state.renameTarget, newName);
+            }
+            document.getElementById('renameModal').classList.remove('active');
+        });
+
+        // Select file button for upload page
+        document.getElementById('selectFileBtn').addEventListener('click', () => {
+            document.getElementById('audioFileMain').click();
+        });
+
+        // Upload Zones
+        function setupUploadZone(zoneId, inputId) {
+            const zone = document.getElementById(zoneId);
+            const input = document.getElementById(inputId);
+            
+            if (!zone || !input) return;
+            
+            zone.addEventListener('click', () => input.click());
+            
+            zone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                zone.classList.add('dragover');
+            });
+            
+            zone.addEventListener('dragleave', () => {
+                zone.classList.remove('dragover');
+            });
+            
+            zone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                zone.classList.remove('dragover');
+                const file = e.dataTransfer.files[0];
+                if (file) uploadFile(file);
+            });
+            
+            input.addEventListener('change', () => {
+                const file = input.files[0];
+                if (file) uploadFile(file);
+                input.value = '';
+            });
+        }
+
+        setupUploadZone('uploadZone', 'audioFile');
+        setupUploadZone('uploadZoneMain', 'audioFileMain');
+
+        // Initialize
+        window.addEventListener('load', () => {
+            initMatrixRain();
+            initVisualizer();
+            loadModelInfo();
+            loadSpeakers();
+            log('系统已就绪。');
+        });
+
+        window.addEventListener('resize', () => {
+            const canvas = document.getElementById('visualizerCanvas');
+            canvas.width = canvas.offsetWidth * 2;
+            canvas.height = canvas.offsetHeight * 2;
+        });
     </script>
 </body>
 </html>
