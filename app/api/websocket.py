@@ -10,13 +10,13 @@ from starlette.websockets import WebSocketState
 from app.config import config
 from app.constants import SYSTEM_SPEAKER
 from app.services import SessionContext
+from engine.speaker.speaker_factory import get_speaker_engine
 
 logger = logging.getLogger("Matrix_Core")
 
 router = APIRouter()
 
 asr_engine = None
-spk_engine = None
 inference_lock = None
 
 # client_id 验证：只允许字母、数字、下划线，最长 64 字符
@@ -36,15 +36,14 @@ def validate_client_id(client_id: str) -> str:
 
 def check_engines():
     """检查引擎是否已初始化"""
-    if asr_engine is None or spk_engine is None or inference_lock is None:
+    if asr_engine is None or inference_lock is None:
         raise RuntimeError("Engines not initialized. Call init_engines() first.")
 
 
 def init_engines(asr, spk, lock):
     """初始化引擎实例"""
-    global asr_engine, spk_engine, inference_lock
+    global asr_engine, inference_lock
     asr_engine = asr
-    spk_engine = spk
     inference_lock = lock
 
 
@@ -130,7 +129,7 @@ async def audio_processor(
             # 超时且有待处理的语音，强制识别
             if len(speech_buffer) > 0:
                 await _process_speech_segment(
-                    websocket, ctx, speech_buffer, client_id
+                    websocket, ctx, speech_buffer, client_id, sample_rate
                 )
                 speech_buffer = np.array([], dtype=np.float32)
                 ctx.last_full_text = ""  # 超时后重置上下文
@@ -190,7 +189,7 @@ async def audio_processor(
                 if len(speech_buffer) >= max_buffer:
                     logger.debug(f"[PROCESSOR] {client_id} 达到上限，强制识别")
                     await _process_speech_segment(
-                        websocket, ctx, speech_buffer, client_id
+                        websocket, ctx, speech_buffer, client_id, sample_rate
                     )
                     # 保留最后 0.5 秒作为上下文
                     keep_samples = int(sample_rate * 0.5)
@@ -208,7 +207,7 @@ async def audio_processor(
                     # 触发 ASR
                     if len(speech_buffer) > sample_rate * 0.1:  # 至少 0.1 秒
                         await _process_speech_segment(
-                            websocket, ctx, speech_buffer, client_id
+                            websocket, ctx, speech_buffer, client_id, sample_rate
                         )
                     
                     # 重置状态
@@ -216,7 +215,7 @@ async def audio_processor(
                     speech_buffer = np.array([], dtype=np.float32)
                     silence_frame_count = 0
                     ctx.last_full_text = ""  # 语音段结束，重置上下文
-                    spk_engine.reset_buffer(client_id)
+                    get_speaker_engine().reset_buffer(client_id)
                     logger.info(f"[RESET] {client_id} 语义重置（语音段结束）")
 
     # 打印统计
@@ -229,25 +228,36 @@ async def _process_speech_segment(
     websocket: WebSocket,
     ctx: SessionContext,
     audio_data: np.ndarray,
-    client_id: str
+    client_id: str,
+    sample_rate: int = 16000
 ):
     """处理一个语音段"""
     if len(audio_data) < 1600:  # 至少 0.1 秒
         return
     
+    # 计算音频时长
+    audio_duration = len(audio_data) / sample_rate
+    
     # 并行执行 ASR 和声纹提取
     async with inference_lock:
         try:
             asr_task = asr_engine.run_asr(audio_data, use_preprocessing=True)
-            spk_task = asyncio.to_thread(spk_engine.extract_feat, audio_data)
-            full_text, embedding = await asyncio.gather(asr_task, spk_task)
+            spk_task = asyncio.to_thread(get_speaker_engine().extract_feat, audio_data)
+            full_text, emb_result = await asyncio.gather(asr_task, spk_task)
         except Exception as e:
             logger.error(f"[ENGINE ERROR] {e}")
             return
     
+    # 处理声纹提取结果（extract_feat 现在返回 tuple）
+    if isinstance(emb_result, tuple):
+        embedding, _ = emb_result  # 忽略返回的时长，使用我们计算的
+    else:
+        embedding = emb_result  # 兼容旧版引擎
+    
     # 处理识别结果
     if full_text and full_text.strip():
-        spk_id = spk_engine.compare_and_identify(embedding, ctx.client_id)
+        # 调用 compare_and_identify，传递音频时长
+        spk_id = get_speaker_engine().compare_and_identify(embedding, ctx.client_id, audio_duration)
         incr_text = ctx.get_incremental_text(full_text)
         
         if incr_text:
@@ -370,5 +380,5 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
         await asyncio.gather(processor_task, monitor_task, return_exceptions=True)
         
         # 清理客户端资源，防止内存泄漏
-        spk_engine.cleanup_client(client_id)
+        get_speaker_engine().cleanup_client(client_id)
         logger.info(f"[WS] 用户 {client_id} 连接已释放")

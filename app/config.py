@@ -123,18 +123,36 @@ class SpeakerConfig:
 
 
 @dataclass
+class RateLimitConfig:
+    """速率限制配置"""
+    enabled: bool = True
+    requests_per_minute: int = 60      # 每分钟请求数
+    requests_per_hour: int = 1000      # 每小时请求数
+    
+    @classmethod
+    def from_env(cls) -> "RateLimitConfig":
+        return cls(
+            enabled=get_env_bool("RATE_LIMIT_ENABLED", True),
+            requests_per_minute=get_env_int("RATE_LIMIT_REQUESTS_PER_MINUTE", 60),
+            requests_per_hour=get_env_int("RATE_LIMIT_REQUESTS_PER_HOUR", 1000),
+        )
+
+
+@dataclass
 class AppConfig:
     """应用配置"""
     server: ServerConfig = field(default_factory=ServerConfig)
     audio: AudioConfig = field(default_factory=AudioConfig)
     speaker: SpeakerConfig = field(default_factory=SpeakerConfig)
+    rate_limit: RateLimitConfig = field(default_factory=RateLimitConfig)
     
     @classmethod
     def load(cls) -> "AppConfig":
         return cls(
             server=ServerConfig.from_env(),
             audio=AudioConfig.from_env(),
-            speaker=SpeakerConfig.from_env()
+            speaker=SpeakerConfig.from_env(),
+            rate_limit=RateLimitConfig.from_env()
         )
 
 

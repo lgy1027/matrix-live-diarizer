@@ -8,12 +8,19 @@ import torch
 import chromadb
 import time
 import os
+import logging
 from collections import defaultdict
+from typing import List, Dict, Optional, Tuple
 
+from engine.speaker.base_engine import BaseSpeakerEngine
+
+logger = logging.getLogger("Matrix_Speaker")
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
 
-class WespeakerEngine:
+class WespeakerEngine(BaseSpeakerEngine):
+    """Wespeaker ResNet34 声纹引擎 - 继承基类"""
+    
     _instance = None
     
     def __new__(cls):
@@ -35,31 +42,39 @@ class WespeakerEngine:
             cls._instance.match_history = defaultdict(list)
             cls._instance.HISTORY_SIZE = 3
             
-            print("[Wespeaker] 初始化完成")
+            cls._instance.ENGINE_NAME = "Wespeaker"
+            
+            logger.info("[Wespeaker] 初始化完成")
         return cls._instance
 
     def _init_model(self):
         """初始化模型"""
-        print("[Wespeaker] 加载模型...")
+        logger.info("[Wespeaker] 加载模型...")
         from modelscope.models import Model
         model_id = 'iic/speech_resnet34_sv_zh-cn_3dspeaker_16k'
         self.model = Model.from_pretrained(model_id, device='cpu')
         self.model.eval()
-        print("[Wespeaker] ResNet34 模型加载成功")
+        logger.info("[Wespeaker] ResNet34 模型加载成功")
 
-    def extract_feat(self, audio_data: np.ndarray) -> np.ndarray:
-        """提取声纹特征"""
+    @property
+    def _model_name(self) -> str:
+        return "Wespeaker"
+
+    def extract_feat(self, audio_data: np.ndarray) -> Tuple[np.ndarray, float]:
+        """提取声纹特征，返回 (embedding, 音频时长)"""
         try:
+            audio_duration = len(audio_data) / 16000.0
+            
             tensor = torch.FloatTensor(audio_data).unsqueeze(0)
             with torch.no_grad():
                 outputs = self.model(tensor)
                 emb = outputs['spk_embedding'] if isinstance(outputs, dict) else outputs
                 final_emb = emb.cpu().numpy().flatten()
                 final_emb = final_emb / (np.linalg.norm(final_emb) + 1e-6)
-                return final_emb
+                return final_emb, audio_duration
         except Exception as e:
-            print(f"[Wespeaker] 提取异常: {e}")
-            return None
+            logger.error(f"[Wespeaker] 提取异常: {e}")
+            return None, 0
 
     def get_smoothed_embedding(self, emb: np.ndarray, client_id: str) -> np.ndarray:
         """滑动窗口加权平均"""
@@ -86,28 +101,36 @@ class WespeakerEngine:
             del self.emb_buffer[client_id]
         if client_id in self.match_history:
             del self.match_history[client_id]
-        print(f"[Wespeaker] 已清理客户端 {client_id} 的缓冲区")
+        logger.info(f"[Wespeaker] 已清理客户端 {client_id} 的缓冲区")
 
-    def _get_dynamic_threshold(self, count: int) -> tuple:
-        """动态阈值"""
-        base_low = 0.48
-        base_high = 0.58
+    def _get_dynamic_threshold(self, count: int, is_reliable: bool = True) -> tuple:
+        """动态阈值 - 可靠样本使用更严格阈值"""
+        base_low = 0.44 if is_reliable else 0.54
+        base_high = 0.54 if is_reliable else 0.64
         adjustment = min(0.05, count * 0.005)
         return base_low + adjustment, base_high + adjustment
 
-    def compare_and_identify(self, current_emb, client_id: str) -> str:
-        """说话人匹配与识别"""
+    def compare_and_identify(self, current_emb, client_id: str, audio_duration: float = 0) -> str:
+        """说话人匹配与识别
+        
+        Args:
+            current_emb: 当前声纹特征
+            client_id: 客户端ID
+            audio_duration: 音频时长（秒）
+        """
         if current_emb is None: 
             return "Unknown"
         
-        MIN_SAMPLES_FOR_EDGE = 3
+        # 判断是否为可靠样本
+        is_reliable = audio_duration >= 1.5
+        MIN_SAMPLES_FOR_EDGE = 2
         
         smoothed_emb = self.get_smoothed_embedding(current_emb, client_id)
         emb_list = smoothed_emb.tolist()
 
         results = self.collection.query(
             query_embeddings=[emb_list],
-            n_results=1,
+            n_results=3,
             where={"session_id": client_id}
         )
 
@@ -117,9 +140,9 @@ class WespeakerEngine:
             metadata = results['metadatas'][0][0]
             count = metadata.get("count", 1)
             
-            low_threshold, high_threshold = self._get_dynamic_threshold(count)
+            low_threshold, high_threshold = self._get_dynamic_threshold(count, is_reliable)
             
-            print(f"[MATCH] Dist={min_dist:.4f}, Low={low_threshold:.2f}, High={high_threshold:.2f}, Best={best_id}, Count={count}")
+            logger.debug(f"[MATCH] Dist={min_dist:.4f}, Low={low_threshold:.2f}, High={high_threshold:.2f}, Best={best_id}, Count={count}")
             
             # 高置信度匹配
             if min_dist < low_threshold:
@@ -136,7 +159,7 @@ class WespeakerEngine:
                     embeddings=[new_mean.tolist()],
                     metadatas=[{"session_id": client_id, "count": count + 1, "last_update": time.time()}]
                 )
-                print(f"[MATCHED] {best_id} (sim: {1-min_dist:.0%})")
+                logger.info(f"[MATCHED] {best_id} (sim: {1-min_dist:.0%})")
                 return best_id
             
             # 边缘匹配
@@ -162,10 +185,10 @@ class WespeakerEngine:
                         embeddings=[new_mean.tolist()],
                         metadatas=[{"session_id": client_id, "count": count + 1, "last_update": time.time()}]
                     )
-                    print(f"[EDGE OK] {best_id} (连续确认 {same_speaker_count} 次)")
+                    logger.info(f"[EDGE OK] {best_id} (连续确认 {same_speaker_count} 次)")
                     return best_id
                 
-                print(f"[EDGE?] Dist={min_dist:.4f} 待确认 (连续匹配 {same_speaker_count} 次)")
+                logger.debug(f"[EDGE?] Dist={min_dist:.4f} 待确认 (连续匹配 {same_speaker_count} 次)")
         
         # 注册新说话人
         new_id = f"Spk_{int(time.time() * 1000) % 10000}"
@@ -174,5 +197,5 @@ class WespeakerEngine:
             embeddings=[emb_list],
             metadatas=[{"session_id": client_id, "count": 1, "last_update": time.time()}]
         )
-        print(f"[NEW SPEAKER] {new_id}")
+        logger.info(f"[NEW SPEAKER] {new_id} ({audio_duration:.1f}s)")
         return new_id
