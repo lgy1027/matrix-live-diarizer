@@ -21,9 +21,12 @@
 - 🎤 **实时转写** - WebSocket 流式传输，说话即转写，低延迟响应
 - 👥 **说话人识别** - 自动区分不同说话人，支持增量学习
 - 🔧 **多引擎支持** - CamPlus / ERes2NetV2 / Wespeaker 三种声纹引擎可切换
-- 📁 **离线处理** - 支持上传音频文件批量处理
+- ⚡ **运行时切换** - 支持 API 动态切换声纹引擎，无需重启服务
+- 📁 **离线处理** - 支持上传音频文件批量处理，自动分段识别
 - 🎯 **智能 VAD** - Silero VAD 语音活动检测，精准识别语音段
 - 🧹 **幻觉过滤** - 自动过滤 ASR 常见幻觉输出，提升准确性
+- 🔐 **速率限制** - 内置请求速率限制，防止滥用
+- 🏥 **健康检查** - 提供存活与就绪检查端点，支持容器编排
 
 ## 🚀 快速开始
 
@@ -49,11 +52,14 @@ pip install -r requirements.txt
 # 默认使用 CamPlus 引擎
 python main.py
 
-# 使用 ERes2NetV2 高精度引擎
+# 使用 ERes2NetV2 高精度引擎 (Linux/macOS)
 SPEAKER_ENGINE=eres2net python main.py
 
+# 使用 ERes2NetV2 高精度引擎 (Windows PowerShell)
+$env:SPEAKER_ENGINE="eres2net"; python main.py
+
 # 使用 Wespeaker 引擎
-SPEAKER_ENGINE=wespeaker python main.py
+$env:SPEAKER_ENGINE="wespeaker"; python main.py
 ```
 
 服务启动后：
@@ -84,6 +90,14 @@ INFO:     Uvicorn running on http://0.0.0.0:8000
 4. 点击 **Upload File** 上传音频文件处理
 
 > 💡 **提示**：Web 界面会自动连接到 `127.0.0.1:8000` 的后端服务
+
+![首页](docs/images/首页.png)
+
+![录音识别](docs/images/录音文件识别.png)
+
+![说话人](docs/images/说话人管理.png)
+
+![设置](docs/images/系统设置.png)
 
 ### API 接口
 
@@ -117,8 +131,10 @@ curl -X POST "http://127.0.0.1:8000/v1/upload" \
 {
   "status": "success",
   "filename": "audio.wav",
-  "speaker": "Spk_1234",
-  "text": "完整的转写文本"
+  "speakers": ["Spk_001", "Spk_002"],
+  "segments": [
+    {"speaker": "Spk_001", "text": "你好", "start_time": 0.0, "end_time": 1.5}
+  ]
 }
 ```
 
@@ -128,17 +144,90 @@ curl -X POST "http://127.0.0.1:8000/v1/upload" \
 curl http://127.0.0.1:8000/v1/models
 ```
 
+#### 健康检查
+
+```bash
+# 存活检查
+curl http://127.0.0.1:8000/health
+
+# 就绪检查
+curl http://127.0.0.1:8000/ready
+```
+
+#### 说话人管理
+
+```bash
+# 获取说话人列表
+curl "http://127.0.0.1:8000/v1/speakers"
+curl "http://127.0.0.1:8000/v1/speakers?session_id=session_a"
+
+# 获取单个说话人
+curl http://127.0.0.1:8000/v1/speakers/Spk_001
+
+# 重命名说话人
+curl -X PATCH http://127.0.0.1:8000/v1/speakers/Spk_001 \
+  -H "Content-Type: application/json" \
+  -d '{"name": "张三"}'
+
+# 删除说话人
+curl -X DELETE http://127.0.0.1:8000/v1/speakers/Spk_001
+```
+
+#### 引擎管理
+
+```bash
+# 获取所有引擎信息
+curl http://127.0.0.1:8000/v1/engines
+
+# 切换声纹引擎（运行时切换）
+curl -X PUT http://127.0.0.1:8000/v1/engine \
+  -H "Content-Type: application/json" \
+  -d '{"engine_type": "eres2net"}'
+```
+
 <details>
 <summary>🔧 更多配置选项</summary>
+
+**服务器配置**
 
 | 参数 | 默认值 | 环境变量 | 说明 |
 |------|--------|----------|------|
 | host | 0.0.0.0 | HOST | 监听地址 |
 | port | 8000 | PORT | 监听端口 |
+| workers | 1 | WORKERS | 工作进程数 |
+| debug | false | DEBUG | 调试模式 |
+
+**音频处理配置**
+
+| 参数 | 默认值 | 环境变量 | 说明 |
+|------|--------|----------|------|
+| sample_rate | 16000 | AUDIO_SAMPLE_RATE | 采样率 |
+| buffer_threshold | 32000 | AUDIO_BUFFER_THRESHOLD | 音频缓冲阈值（采样点） |
+| silence_threshold | 0.008 | AUDIO_SILENCE_THRESHOLD | 静音检测阈值 |
+| timeout_seconds | 30.0 | AUDIO_TIMEOUT_SECONDS | 无音频超时断开 |
+| max_buffer_seconds | 10 | AUDIO_MAX_BUFFER_SECONDS | 缓冲区上限（秒） |
+| max_segment_seconds | 5 | AUDIO_MAX_SEGMENT_SECONDS | 单语音段最大长度（秒） |
+
+**VAD 配置**
+
+| 参数 | 默认值 | 环境变量 | 说明 |
+|------|--------|----------|------|
+| vad_threshold | 0.5 | VAD_THRESHOLD | VAD 灵敏度 |
+| min_speech_duration_ms | 200 | VAD_MIN_SPEECH_DURATION | 最小语音时长 |
+
+**速率限制配置**
+
+| 参数 | 默认值 | 环境变量 | 说明 |
+|------|--------|----------|------|
+| rate_limit_enabled | true | RATE_LIMIT_ENABLED | 是否启用速率限制 |
+| requests_per_minute | 60 | RATE_LIMIT_REQUESTS_PER_MINUTE | 每分钟请求数 |
+| requests_per_hour | 1000 | RATE_LIMIT_REQUESTS_PER_HOUR | 每小时请求数 |
+
+**声纹引擎配置**
+
+| 参数 | 默认值 | 环境变量 | 说明 |
+|------|--------|----------|------|
 | speaker_engine | campplus | SPEAKER_ENGINE | 声纹引擎类型 |
-| buffer_threshold | 32000 | - | 音频缓冲阈值（采样点） |
-| silence_threshold | 0.008 | - | 静音检测阈值 |
-| timeout | 30s | - | 无音频超时断开 |
 
 </details>
 
@@ -150,7 +239,13 @@ matrix-live-diarizer/
 ├── app/                        # FastAPI 应用层
 │   ├── api/
 │   │   ├── websocket.py        # WebSocket 实时流接口
-│   │   └── upload.py           # 文件上传接口
+│   │   ├── upload.py           # 文件上传接口
+│   │   ├── speakers.py         # 说话人管理接口
+│   │   └── health.py           # 健康检查接口
+│   ├── middleware/
+│   │   └── rate_limit.py       # 速率限制中间件
+│   ├── schemas/
+│   │   └── response.py         # Pydantic 响应模型
 │   ├── services/
 │   │   └── session.py          # 会话上下文管理
 │   ├── config.py               # 配置管理
@@ -158,10 +253,12 @@ matrix-live-diarizer/
 ├── engine/                     # 推理引擎层
 │   ├── asr_engine.py           # ASR 引擎 (Qwen3-ASR)
 │   └── speaker/                # 声纹引擎模块
-│       ├── speaker_factory.py  # 引擎工厂
+│       ├── speaker_factory.py  # 引擎工厂与管理器
+│       ├── base_engine.py      # 引擎基类
 │       ├── campplus_engine.py  # CamPlus 引擎
 │       ├── eres2net_engine.py  # ERes2NetV2 引擎
 │       └── wespeaker_engine.py # Wespeaker 引擎
+├── tests/                      # 测试用例
 └── web/
     └── index.html              # Web 前端界面
 ```
