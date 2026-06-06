@@ -51,3 +51,25 @@ def export_srt(segments: Iterable[dict], speaker_aliases: dict) -> str:
         out_lines.append("")
         idx += 1
     return "\n".join(out_lines)
+
+
+def export_vtt(segments: Iterable[dict], speaker_aliases: dict) -> str:
+    """WebVTT 字幕格式"""
+    out_lines = ["WEBVTT", ""]
+    idx = 1
+    for seg in segments:
+        text = (seg.get("text") or "").strip()
+        if not text:
+            continue
+        start = _format_vtt_time(seg["start_time"])
+        end = _format_vtt_time(seg["end_time"])
+        out_lines.append(str(idx))
+        out_lines.append(f"{start} --> {end}")
+        if seg.get("speaker_id"):
+            name = speaker_aliases.get(seg["speaker_id"], seg["speaker_id"])
+            out_lines.append(f"<v {name}>{text}</v>")
+        else:
+            out_lines.append(text)
+        out_lines.append("")
+        idx += 1
+    return "\n".join(out_lines)
