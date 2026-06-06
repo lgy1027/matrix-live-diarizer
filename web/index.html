@@ -584,6 +584,7 @@ const STRINGS = {
     'view.library.meta.turns': 'Turns',
     'view.library.meta.created': 'Created',
     'view.library.meta.source': 'Source',
+    'view.library.meta.size': 'Size',
     'view.library.source.live': 'Live',
     'view.library.source.upload': 'Upload',
     'view.library.delete.confirm': 'Delete this session? Cannot be undone.',
@@ -813,6 +814,7 @@ const STRINGS = {
     'view.library.meta.turns': 'Turns',
     'view.library.meta.created': 'Created',
     'view.library.meta.source': 'Source',
+    'view.library.meta.size': 'Size',
     'view.library.source.live': 'Live',
     'view.library.source.upload': 'Upload',
     'view.library.delete.confirm': 'Delete this session? Cannot be undone.',
@@ -1454,11 +1456,11 @@ function renderLibrary() {
         <div class="when">${esc(fmtRel(it.created_at))}</div>
       </div>
       <div class="meta">
-        <span><b>${esc(src)}</b></span><span class="sep">·</span>
-        <span>${dur}</span><span class="sep">·</span>
-        <span>${spk} ${esc(spkLabel)}</span><span class="sep">·</span>
-        <span>${segs} ${esc(t("library.turns"))}</span><span class="sep">·</span>
-        <span>${fmtSize(it.size_mb)}</span>
+        <span title="${esc(t('view.library.meta.source'))}"><b>${esc(src)}</b></span><span class="sep">·</span>
+        <span title="${esc(t('view.library.meta.duration'))}">${dur}</span><span class="sep">·</span>
+        <span title="${esc(t('view.library.meta.speakers'))}">${spk} ${esc(spkLabel)}</span><span class="sep">·</span>
+        <span title="${esc(t('view.library.meta.turns'))}">${segs} ${esc(t("library.turns"))}</span><span class="sep">·</span>
+        <span title="${esc(t('view.library.meta.size'))}">${fmtSize(it.size_mb)}</span>
       </div>
       <div class="actions">
         <button class="btn ghost exp" data-fmt="srt">${esc(t("btn.srt"))}</button>
