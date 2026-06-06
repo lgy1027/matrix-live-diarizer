@@ -46,9 +46,10 @@ aside.nav{background:var(--ink-2);border-right:1px solid var(--border-soft);disp
 .nav .spacer{flex:1}
 main.col{display:grid;grid-template-rows:auto 1fr auto;min-width:0;height:100vh}
 header.bar{height:56px;padding:0 28px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border-soft);background:var(--ink)}
-.bar .crumb{font-family:var(--mono);font-size:11px;letter-spacing:.08em;color:var(--text-3);text-transform:uppercase}
-.bar .crumb span{color:var(--text-2);margin:0 6px}
-.bar .crumb b{color:var(--text);font-weight:500}
+.bar .crumb{display:flex;align-items:baseline;gap:8px;font-size:12px}
+.bar .crumb #crumbView{color:var(--text-3);font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;font-weight:500}
+.bar .crumb .sep{color:var(--text-3);font-family:var(--mono);font-size:11px}
+.bar .crumb #crumbSub{color:var(--text);font-weight:500;font-size:13px}
 .dot{width:6px;height:6px;border-radius:50%;background:var(--text-3)}
 .dot.live{background:var(--green);box-shadow:0 0 0 3px rgba(107,203,119,.18);animation:pulse 2s ease-in-out infinite}
 .dot.busy{background:var(--amber);box-shadow:0 0 0 3px var(--amber-soft);animation:pulse 1s ease-in-out infinite}
@@ -342,7 +343,7 @@ footer.bar-b{height:32px;padding:0 28px;display:flex;align-items:center;justify-
   <main class="col">
     <header class="bar">
       <div class="crumb">
-        <span>/</span><b id="crumbView">Live</b><span>/</span><span id="crumbSub">Matrix Studio</span>
+        <span id="crumbView">Live</span><span class="sep">·</span><b id="crumbSub">Matrix Studio</b>
       </div>
       <div class="lang-switcher" role="group" aria-label="Language">
         <button class="lang-btn" data-lang="zh" aria-label="中文">中文</button>
