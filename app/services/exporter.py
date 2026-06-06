@@ -1,4 +1,5 @@
 """导出器：SRT / WebVTT / Markdown / JSON"""
+import json
 from typing import Iterable
 
 
@@ -117,3 +118,23 @@ def export_markdown(
             lines.append(f"- **[{ts}]** {seg['text']}")
         lines.append("")
     return "\n".join(lines)
+
+
+def export_json(session: dict, segments: list[dict], speakers: list[dict]) -> str:
+    """JSON 无损导出"""
+    payload = {
+        "session": session,
+        "speakers": speakers,
+        "segments": [
+            {
+                "index": s.get("segment_index"),
+                "speaker": s.get("speaker_id"),
+                "text": s.get("text"),
+                "start_time": s.get("start_time"),
+                "end_time": s.get("end_time"),
+                "confidence": s.get("confidence"),
+            }
+            for s in segments
+        ],
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2)
