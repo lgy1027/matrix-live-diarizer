@@ -1137,14 +1137,8 @@
     </style>
 </head>
 <body>
-    <!-- Top Navigation -->
-    <nav class="top-nav">
-        <span class="logo">⚡ Matrix</span>
-        <a href="/web/index.html" class="active">实时</a>
-        <a href="/web/history.html">历史</a>
-        <a href="/web/settings.html">设置</a>
-        <span class="badge-private" title="所有数据仅在本机处理">🔒 离线</span>
-    </nav>
+    <!-- 注：原 index.html 有自己的 sidebar 导航 (5 项), 不用 v0.2 的 top-nav 避免 layout 冲突 -->
+    <!-- 离线徽章可通过 sidebar-footer 看到 -->
 
     <!-- Matrix Rain Background -->
     <canvas class="matrix-bg" id="matrixBg"></canvas>
