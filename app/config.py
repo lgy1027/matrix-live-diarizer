@@ -39,6 +39,14 @@ def get_env_bool(key: str, default: bool) -> bool:
     return val in ("true", "1", "yes", "on")
 
 
+def get_env_str_list(key: str, default: tuple = ()) -> tuple:
+    """从逗号分隔的环境变量读取字符串列表"""
+    val = os.getenv(key)
+    if not val:
+        return default
+    return tuple(h.strip() for h in val.split(",") if h.strip())
+
+
 @dataclass
 class ServerConfig:
     """服务器配置"""
@@ -161,7 +169,7 @@ class LLMConfig:
     timeout_sec: int = 60
     max_input_tokens: int = 8000
     mock: bool = False
-    allowed_hosts: tuple = ("127.0.0.1", "::1", "localhost")
+    allowed_hosts: tuple[str, ...] = ("127.0.0.1", "::1", "localhost")
 
     @classmethod
     def from_env(cls) -> "LLMConfig":
@@ -172,6 +180,8 @@ class LLMConfig:
             timeout_sec=get_env_int("LLM_TIMEOUT_SEC", 60),
             max_input_tokens=get_env_int("LLM_MAX_INPUT_TOKENS", 8000),
             mock=get_env_bool("LLM_MOCK", False),
+            allowed_hosts=get_env_str_list("LLM_ALLOWED_HOSTS",
+                                          ("127.0.0.1", "::1", "localhost")),
         )
 
 
