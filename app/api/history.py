@@ -40,11 +40,11 @@ def list_history(
     norm_source = _normalize_source(source)
     norm_q = _normalize_q(q)
     offset = (page - 1) * page_size
-    items = repo.list_sessions(
+    # 用 enrich 版本：返回 duration/segments_count/speakers
+    total, items = repo.get_enriched_sessions(
         source=norm_source, q=norm_q, limit=page_size, offset=offset
     )
-    all_items = repo.list_sessions(source=norm_source, q=norm_q, limit=10_000, offset=0)
-    return HistoryListResponse(total=len(all_items), items=items)
+    return HistoryListResponse(total=total, items=items)
 
 
 @router.delete("/v1/history/{session_id}")

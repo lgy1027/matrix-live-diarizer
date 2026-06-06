@@ -77,3 +77,62 @@ def test_update_title(repo):
     sid = repo.create_session(source="websocket")
     repo.update_session(sid, title="新标题")
     assert repo.get_session(sid)["title"] == "新标题"
+
+
+def test_get_enriched_sessions_includes_aggregates(repo):
+    """enrich 应该返回 duration/segments_count/speakers"""
+    sid = repo.create_session(
+        source="websocket", title="会议", duration_sec=120.5
+    )
+    repo.insert_segment(sid, 0, "你好", 0.0, 5.0, speaker_id="Spk_001")
+    repo.insert_segment(sid, 1, "world", 5.0, 10.0, speaker_id="Spk_002")
+    repo.insert_segment(sid, 2, "hi", 10.0, 12.0, speaker_id="Spk_001")  # 重复说话人
+
+    total, items = repo.get_enriched_sessions()
+    assert total == 1
+    s = items[0]
+    assert s["duration"] == 120.5
+    assert s["segments_count"] == 3
+    assert set(s["speakers"]) == {"Spk_001", "Spk_002"}
+    assert len(s["speakers"]) == 2  # distinct
+
+
+def test_get_enriched_sessions_no_segments(repo):
+    """无段时 duration/segments_count/speakers 仍正确（默认 0/空）"""
+    repo.create_session(source="websocket", title="空", duration_sec=10.0)
+    total, items = repo.get_enriched_sessions()
+    s = items[0]
+    assert s["duration"] == 10.0
+    assert s["segments_count"] == 0
+    assert s["speakers"] == []
+
+
+def test_get_enriched_sessions_filter_source_and_pagination(repo):
+    """source 过滤 + 分页正常"""
+    for i in range(5):
+        repo.create_session(source="websocket")
+    for i in range(3):
+        repo.create_session(source="upload", original_filename=f"f{i}.wav")
+
+    total, items = repo.get_enriched_sessions(source="websocket", limit=2, offset=0)
+    assert total == 5
+    assert len(items) == 2
+
+
+def test_get_enriched_sessions_batch_aggregation(repo):
+    """确认是批量聚合（一次 SQL 查所有 segments），不是 N+1"""
+    sids = []
+    for i in range(10):
+        sid = repo.create_session(source="websocket", title=f"s{i}")
+        # 每 session 同一说话人 3 段（确认 segments_count 正确）
+        # 不同 session 不同说话人（确认 speakers 正确）
+        for j in range(3):
+            repo.insert_segment(sid, j, f"text-{i}-{j}", 0, 1, speaker_id=f"Spk_{i%3}")
+        sids.append(sid)
+
+    total, items = repo.get_enriched_sessions(limit=100)
+    assert total == 10
+    # 每个 session: 3 段 + 1 个 distinct speaker (Spk_{i%3} 在同 session 内固定)
+    for s in items:
+        assert s["segments_count"] == 3
+        assert len(s["speakers"]) == 1

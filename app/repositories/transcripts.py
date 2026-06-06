@@ -106,3 +106,78 @@ class TranscriptRepository:
                 (session_id,),
             ).fetchall()
         return [dict(r) for r in rows]
+
+    def get_enriched_sessions(self, source=None, q=None, limit=50, offset=0) -> tuple[int, list[dict]]:
+        """返回 (total, items)，items 中每个 session 含
+        - duration: 时长（秒）— 前端用
+        - segments_count: 段数
+        - speakers: distinct speaker_id 列表（不含 None）
+        - size_mb: 文件大小（仅 upload，本地计算文件 size）
+        - size 字段在 sessions 表里没有；可由 frontend 按需计算
+        """
+        # 1. 主查询
+        sql = "SELECT * FROM sessions WHERE is_archived = 0"
+        params: list = []
+        if source:
+            sql += " AND source = ?"
+            params.append(source)
+        if q:
+            sql += " AND (title LIKE ? OR original_filename LIKE ?)"
+            like = f"%{q}%"
+            params.extend([like, like])
+        sql += " ORDER BY created_at DESC"
+        items_sql = sql + " LIMIT ? OFFSET ?"
+        count_sql = "SELECT COUNT(*) FROM (" + sql + ")"
+        items_params = params + [limit, offset]
+
+        with self.db.connect() as conn:
+            total = conn.execute(count_sql, params).fetchone()[0]
+            rows = conn.execute(items_sql, items_params).fetchall()
+            if not rows:
+                return total, []
+            # 2. 批量聚合 segments（一次查询所有 session）
+            ids = [r["id"] for r in rows]
+            placeholders = ",".join("?" * len(ids))
+            agg_rows = conn.execute(
+                f"""SELECT session_id,
+                          COUNT(*) AS segments_count,
+                          COUNT(DISTINCT speaker_id) AS unique_speakers,
+                          GROUP_CONCAT(DISTINCT speaker_id) AS speaker_ids
+                   FROM segments
+                   WHERE session_id IN ({placeholders})
+                   GROUP BY session_id""",
+                ids,
+            ).fetchall()
+            agg_by_sid = {r["session_id"]: dict(r) for r in agg_rows}
+
+        # 3. enrich
+        items = []
+        for r in rows:
+            s = dict(r)
+            # 字段重命名：duration_sec → duration（前端用）
+            s["duration"] = s.get("duration_sec") or 0
+            # 聚合
+            agg = agg_by_sid.get(s["id"], {})
+            s["segments_count"] = agg.get("segments_count", 0)
+            speaker_ids_str = agg.get("speaker_ids") or ""
+            s["speakers"] = [x for x in speaker_ids_str.split(",") if x]
+            items.append(s)
+        return total, items
+
+    def get_speaker_count(self, session_id: str) -> int:
+        """返回 distinct speaker_id 数（不含 NULL）"""
+        with self.db.connect() as conn:
+            row = conn.execute(
+                """SELECT COUNT(DISTINCT speaker_id) FROM segments
+                   WHERE session_id = ? AND speaker_id IS NOT NULL""",
+                (session_id,),
+            ).fetchone()
+        return row[0] if row else 0
+
+    def get_segment_count(self, session_id: str) -> int:
+        with self.db.connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM segments WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+        return row[0] if row else 0
