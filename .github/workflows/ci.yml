@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main, feature/**]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # 不安装 torch / modelscope — 用 mock 跑测试
+          pip install fastapi 'uvicorn>=0.23.0' 'python-multipart>=0.0.6' \
+                      'transformers>=4.30.0' chromadb 'pydantic>=2.0.0' \
+                      'python-dotenv>=1.0.0' pytest pytest-asyncio httpx
+
+      - name: Run tests
+        env:
+          SPEAKER_ENGINE: campplus
+          STORAGE_DB_PATH: ./data/test.db
+          LLM_MOCK: "true"
+        run: |
+          mkdir -p data
+          pytest tests/ -v --tb=short --ignore=tests/test_engine_switch.py --ignore=tests/test_exceptions.py --ignore=tests/test_logging.py --ignore=tests/test_upload_security.py --ignore=tests/test_base_engine.py
+
+      - name: Privacy audit
+        run: |
+          pytest tests/test_privacy_audit.py -v
