@@ -1,5 +1,6 @@
 """WebSocket 实时音频流路由"""
 import asyncio
+import json
 import time
 import re
 import numpy as np
@@ -259,7 +260,7 @@ async def _process_speech_segment(
         # 调用 compare_and_identify，传递音频时长
         spk_id = get_speaker_engine().compare_and_identify(embedding, ctx.client_id, audio_duration)
         incr_text = ctx.get_incremental_text(full_text)
-        
+
         if incr_text:
             try:
                 await websocket.send_json({
@@ -270,6 +271,23 @@ async def _process_speech_segment(
                 logger.info(f"[{client_id} | {spk_id}]: {incr_text}")
             except Exception as e:
                 logger.debug(f"[PROCESSOR] 发送结果失败: {e}")
+
+        # 自动存档到 SQLite（仅当会话已被命名且启用了历史）
+        session_id = getattr(websocket, "_session_id", None)
+        if session_id and config.storage.history_enabled and full_text:
+            try:
+                repo = websocket.app.state.transcript_repo
+                segs = repo.list_segments(session_id)
+                repo.insert_segment(
+                    session_id,
+                    segment_index=len(segs),
+                    text=full_text,
+                    start_time=0.0,  # v0.2 MVP: 不记精确时间
+                    end_time=audio_duration,
+                    speaker_id=spk_id,
+                )
+            except Exception as e:
+                logger.warning(f"[WS] 存档失败: {e}")
 
 
 @router.websocket("/ws/v1/stream/{client_id}")
@@ -332,17 +350,39 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                 break
             
             msg_type = message.get("type")
-            
+
             if msg_type == "websocket.receive":
-                # 获取二进制数据
+                if "text" in message:
+                    # 文本命令：{"action": "rename", "title": "..."}
+                    try:
+                        cmd = json.loads(message["text"])
+                        if isinstance(cmd, dict) and cmd.get("action") == "rename":
+                            new_title = cmd.get("title")
+                            if not hasattr(websocket, "_session_id"):
+                                # 第一次命名：创建会话
+                                repo = websocket.app.state.transcript_repo
+                                sid = repo.create_session(
+                                    source="websocket",
+                                    title=new_title,
+                                    client_id=client_id,
+                                )
+                                websocket._session_id = sid
+                                logger.info(f"[WS] {client_id} 命名会话: {sid} ({new_title})")
+                            else:
+                                websocket.app.state.transcript_repo.update_session(
+                                    websocket._session_id, title=new_title
+                                )
+                                logger.info(f"[WS] {client_id} 重命名: {new_title}")
+                            await websocket.send_json({"type": "renamed", "title": new_title})
+                    except (json.JSONDecodeError, KeyError, AttributeError) as e:
+                        logger.debug(f"[WS] 文本命令解析失败: {e}")
+                    continue  # 跳过后续 bytes 处理
+
                 if "bytes" in message:
                     data = message["bytes"]
-                elif "text" in message:
-                    # 文本消息，忽略
-                    continue
                 else:
                     continue
-                
+
                 # 尝试放入队列
                 try:
                     queue.put_nowait(data)
