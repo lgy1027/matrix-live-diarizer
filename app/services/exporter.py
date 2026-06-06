@@ -73,3 +73,47 @@ def export_vtt(segments: Iterable[dict], speaker_aliases: dict) -> str:
         out_lines.append("")
         idx += 1
     return "\n".join(out_lines)
+
+
+def _format_mm_ss(seconds: float) -> str:
+    """MM:SS 格式（Markdown 时间戳用）"""
+    m, s = divmod(int(seconds), 60)
+    return f"{m:02d}:{s:02d}"
+
+
+def export_markdown(
+    segments: Iterable[dict],
+    speaker_aliases: dict,
+    title: str,
+    duration_sec: float,
+    speaker_count: int,
+) -> str:
+    """Markdown 格式：按说话人分组"""
+    lines = [
+        f"# {title or '未命名会话'}",
+        "",
+        f"**Duration**: {_format_mm_ss(duration_sec)}  ",
+        f"**Speakers**: {speaker_count}",
+        "",
+        "---",
+        "",
+    ]
+    # 按说话人分组，保持时间顺序
+    groups: dict[str | None, list[dict]] = {}
+    for seg in segments:
+        text = (seg.get("text") or "").strip()
+        if not text:
+            continue
+        spk = seg.get("speaker_id")
+        groups.setdefault(spk, []).append(seg)
+
+    for spk_id, segs in groups.items():
+        if spk_id:
+            name = speaker_aliases.get(spk_id, spk_id)
+            lines.append(f"## {name}")
+            lines.append("")
+        for seg in segs:
+            ts = _format_mm_ss(seg["start_time"])
+            lines.append(f"- **[{ts}]** {seg['text']}")
+        lines.append("")
+    return "\n".join(lines)
