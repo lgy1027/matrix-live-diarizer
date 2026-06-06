@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>会话详情 - Matrix Live Diarizer</title>
+  <link rel="stylesheet" href="/web/css/common.css">
+  <style>
+    .tabs { display: flex; gap: 0.5rem; border-bottom: 1px solid #2a2a2a; margin-bottom: 1rem; }
+    .tab { padding: 0.75rem 1.5rem; cursor: pointer; color: #888; }
+    .tab.active { color: #4ade80; border-bottom: 2px solid #4ade80; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    .segment { padding: 0.5rem; border-left: 3px solid #4ade80; margin: 0.5rem 0; background: #1a1a1a; }
+    .segment .meta { color: #888; font-size: 0.85rem; }
+    .stat-bar { display: flex; align-items: center; gap: 0.5rem; margin: 0.5rem 0; }
+    .stat-bar .name { width: 120px; }
+    .stat-bar .bar { background: #4ade80; height: 20px; min-width: 2px; }
+    .stat-bar .pct { color: #888; font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+  <nav class="top-nav">
+    <span class="logo">⚡ Matrix</span>
+    <a href="/web/index.html">实时</a>
+    <a href="/web/history.html">历史</a>
+    <a href="/web/settings.html">设置</a>
+    <span class="badge-private">🔒 离线</span>
+  </nav>
+  <div class="container">
+    <a href="/web/history.html" style="color:#888;">← 返回</a>
+    <h1 id="title">加载中...</h1>
+    <div id="meta" class="card"></div>
+    <div class="tabs">
+      <div class="tab active" data-tab="text">📝 转写</div>
+      <div class="tab" data-tab="stats">📊 统计</div>
+      <div class="tab" data-tab="export">📤 导出</div>
+      <div class="tab" data-tab="ai" id="tab-ai" style="display:none">✨ AI</div>
+    </div>
+    <div class="tab-content active" id="text"></div>
+    <div class="tab-content" id="stats"></div>
+    <div class="tab-content" id="export">
+      <div class="card">
+        <button class="btn" onclick="dl('srt')">SRT 字幕</button>
+        <button class="btn" onclick="dl('vtt')">WebVTT 字幕</button>
+        <button class="btn" onclick="dl('markdown')">Markdown</button>
+        <button class="btn" onclick="dl('json')">JSON (无损)</button>
+      </div>
+    </div>
+    <div class="tab-content" id="ai">
+      <div class="card">
+        <button class="btn" onclick="llm('summarize')">生成摘要</button>
+        <button class="btn" onclick="llm('action-items')">提取行动项</button>
+        <button class="btn" onclick="llm('minutes')">生成纪要</button>
+        <div id="llm-result" style="margin-top:1rem; white-space:pre-wrap;"></div>
+      </div>
+    </div>
+  </div>
+  <script src="/web/js/api.js"></script>
+  <script src="/web/js/detail.js"></script>
+</body>
+</html>
