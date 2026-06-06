@@ -457,6 +457,10 @@ footer.bar-b{height:32px;padding:0 28px;display:flex;align-items:center;justify-
             <span data-i18n="voice.head.title">Voice Library</span><br><span style="color:var(--text-2)" data-i18n="voice.head.sub">enrolled speakers</span>
           </div>
         </div>
+        <div class="row" style="display:flex;gap:8px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
+          <button class="btn ghost" id="btnCleanupNoisy" data-i18n="view.voice.cleanup">清理低质量声纹</button>
+          <span style="color:var(--text-2);font-size:11px" data-i18n="view.voice.cleanupHint">删除样本 ≤ 5 的声纹（可清空 segments 引用）</span>
+        </div>
         <div class="voice-grid" id="voiceGrid">
           <div class="new-card" id="newSpkCard">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
@@ -608,6 +612,13 @@ const STRINGS = {
     'view.voice.card.samples': 'samples',
     'view.voice.card.lastSeen': 'last seen',
     'view.voice.stats': '{0} 说话人 · {1} 会话',
+    'view.voice.cleanup': '清理低质量声纹',
+    'view.voice.cleanupHint': '删除样本 ≤ 5 的声纹（可清空 segments 引用）',
+    'view.voice.cleanupRunning': '清理中...',
+    'view.voice.cleanupEmpty': '没有低质量声纹需要清理',
+    'view.voice.cleanupConfirm': '将删除 {0} 个低质量声纹（样本 ≤ 5），\n并清空它们在 segments 表中的引用。\n\n将删除：\n{1}{2}\n\n是否继续？',
+    'view.voice.cleanupConfirmMore': '\n...',
+    'view.voice.cleanupDone': '已删除 {0} 个声纹，清空 {1} 个段引用',
     'view.settings.title': '设置<em>.</em>',
     'view.settings.engine': 'Engine',
     'view.settings.engineDesc': 'Speaker identification model. Affects accuracy and speed.',
@@ -838,6 +849,13 @@ const STRINGS = {
     'view.voice.card.samples': 'samples',
     'view.voice.card.lastSeen': 'last seen',
     'view.voice.stats': '{0} speakers · {1} sessions',
+    'view.voice.cleanup': 'Cleanup noisy speakers',
+    'view.voice.cleanupHint': 'Delete speakers with ≤ 5 samples (clears segment refs)',
+    'view.voice.cleanupRunning': 'Cleaning...',
+    'view.voice.cleanupEmpty': 'No noisy speakers to clean up',
+    'view.voice.cleanupConfirm': 'Will delete {0} noisy speakers (≤ 5 samples)\nand clear their segment references.\n\nDeleting:\n{1}{2}\n\nContinue?',
+    'view.voice.cleanupConfirmMore': '\n...',
+    'view.voice.cleanupDone': 'Deleted {0} speakers, cleared {1} segment references',
     'view.settings.title': 'Settings',
     'view.settings.engine': 'Engine',
     'view.settings.engineDesc': 'Speaker identification model. Affects accuracy and speed.',
@@ -1828,6 +1846,48 @@ document.addEventListener("click", (e) => {
 /* apply on boot */
 applyI18n();
 updateLangSwitcherUI();
+
+/* ========== cleanup noisy speakers ========== */
+async function cleanupNoisySpeakers() {
+  const btn = $("#btnCleanupNoisy");
+  if (!btn) return;
+  btn.disabled = true;
+  const origText = btn.textContent;
+  btn.textContent = t("view.voice.cleanupRunning");
+  try {
+    // 1. dry_run 预览候选
+    const dry = await Matrix.api.post("speakers/cleanup", {
+      max_count: 5,
+      dry_run: true,
+    });
+    if (!dry.candidates || dry.candidates.length === 0) {
+      toast(t("view.voice.cleanupEmpty"), "ok");
+      return;
+    }
+    // 2. 确认对话框
+    const list = dry.candidates.slice(0, 10).join("\n");
+    const more = dry.candidates.length > 10 ? t("view.voice.cleanupConfirmMore") : "";
+    const msg = t("view.voice.cleanupConfirm", dry.candidates.length, list, more);
+    if (!confirm(msg)) return;
+    // 3. 真删 (cascade=true)
+    const result = await Matrix.api.post("speakers/cleanup", {
+      max_count: 5,
+      dry_run: false,
+      cascade: true,
+    });
+    // 4. 重新加载
+    await loadVoice();
+    // 5. 提示结果
+    toast(t("view.voice.cleanupDone", result.deleted.length, result.cascade_segments_cleared || 0), "ok");
+  } catch (e) {
+    toast(t("toast.error") + ": " + (e.message || e), "error");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = origText;
+  }
+}
+
+document.getElementById("btnCleanupNoisy")?.addEventListener("click", cleanupNoisySpeakers);
 </script>
 </body>
 </html>

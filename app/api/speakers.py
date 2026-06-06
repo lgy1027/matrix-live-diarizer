@@ -1,5 +1,6 @@
 """说话人管理 API"""
-from fastapi import APIRouter, HTTPException, Query, Path
+import logging
+from fastapi import APIRouter, HTTPException, Query, Path, Request
 from pydantic import BaseModel
 from typing import Optional, List
 
@@ -13,6 +14,8 @@ from app.schemas.response import (
     EngineSwitchResponse,
     EnginesListResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -33,6 +36,7 @@ class CleanupRequest(BaseModel):
     max_count: int = 5                       # 只删 count <= 此值的（默认 5，删低质量/单样本）
     speaker_ids: Optional[List[str]] = None   # 显式指定要删的 ID（覆盖 max_count 过滤）
     dry_run: bool = True                      # True=只返回将删的，不真删
+    cascade: bool = False                     # True 时：真删前先清空 segments.speaker_id 引用
 
 
 class CleanupResponse(BaseModel):
@@ -42,6 +46,7 @@ class CleanupResponse(BaseModel):
     deleted: List[str]                       # 实际删除的（dry_run=True 时为空）
     total_before: int
     total_after: int
+    cascade_segments_cleared: int = 0        # cascade 清掉的 segment 引用数
 
 
 @router.get("/v1/speakers", response_model=SpeakerListResponse)
@@ -99,7 +104,7 @@ async def delete_speaker(speaker_id: str = SPEAKER_ID_PATH):
 
 
 @router.post("/v1/speakers/cleanup", response_model=CleanupResponse)
-async def cleanup_speakers(body: CleanupRequest):
+async def cleanup_speakers(body: CleanupRequest, request: Request):
     """批量清理声纹（修复重复/低质量样本）
 
     三种过滤模式（优先级从高到低）：
@@ -108,6 +113,9 @@ async def cleanup_speakers(body: CleanupRequest):
     3. 仅 max_count: 删所有 session 中 count <= max_count 的
 
     默认 dry_run=True（先看候选再删）。
+
+    cascade=True 时：真删前先清空 segments.speaker_id 引用（避免孤立 Spk_xxx 引用）。
+    cascade_segments_cleared 字段返回清掉的段数。
     """
     engine = get_speaker_engine()
     all_speakers = engine.list_speakers(session_id=body.session_id)
@@ -131,11 +139,25 @@ async def cleanup_speakers(body: CleanupRequest):
             deleted=[],
             total_before=total_before,
             total_after=total_before,
+            cascade_segments_cleared=0,
         )
 
     # 真删
+    transcript_repo = request.app.state.transcript_repo
+    cascade_segments_cleared = 0
     deleted = []
     for sid in candidate_ids:
+        # cascade：先清 segments 引用（避免孤立引用）
+        if body.cascade:
+            try:
+                cleared = transcript_repo.clear_speaker_id_from_segments(sid)
+                if cleared > 0:
+                    logger.info(f"[CASCADE] {sid}: 清空 {cleared} 个 segment 引用")
+                cascade_segments_cleared += cleared
+            except Exception as e:
+                # 单个 speaker 失败不阻塞整体清理流程
+                logger.warning(f"[CASCADE] {sid} 清空失败: {e}")
+        # 再删 ChromaDB
         if engine.delete_speaker(sid):
             deleted.append(sid)
 
@@ -146,6 +168,7 @@ async def cleanup_speakers(body: CleanupRequest):
         deleted=deleted,
         total_before=total_before,
         total_after=total_after,
+        cascade_segments_cleared=cascade_segments_cleared,
     )
 
 
