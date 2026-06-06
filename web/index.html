@@ -49,7 +49,6 @@ header.bar{height:56px;padding:0 28px;display:flex;align-items:center;justify-co
 .bar .crumb{font-family:var(--mono);font-size:11px;letter-spacing:.08em;color:var(--text-3);text-transform:uppercase}
 .bar .crumb span{color:var(--text-2);margin:0 6px}
 .bar .crumb b{color:var(--text);font-weight:500}
-.bar .status-pill{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;color:var(--text-2);text-transform:uppercase;letter-spacing:.06em}
 .dot{width:6px;height:6px;border-radius:50%;background:var(--text-3)}
 .dot.live{background:var(--green);box-shadow:0 0 0 3px rgba(107,203,119,.18);animation:pulse 2s ease-in-out infinite}
 .dot.busy{background:var(--amber);box-shadow:0 0 0 3px var(--amber-soft);animation:pulse 1s ease-in-out infinite}
@@ -283,6 +282,40 @@ footer.bar-b{height:32px;padding:0 28px;display:flex;align-items:center;justify-
   .lib-stats{gap:28px}
   .lib-stats .item .n{font-size:48px}
 }
+
+/* language switcher (top-right, segmented control) */
+.lang-switcher{
+  display:inline-flex;
+  gap:2px;
+  padding:3px;
+  background:rgba(20,17,15,.6);
+  border:1px solid var(--border-soft);
+  border-radius:6px;
+  backdrop-filter:blur(8px);
+  -webkit-backdrop-filter:blur(8px);
+}
+.lang-btn{
+  background:transparent;
+  border:none;
+  color:var(--text-2);
+  padding:5px 12px;
+  font-family:'Outfit',sans-serif;
+  font-size:11px;
+  font-weight:500;
+  letter-spacing:0.5px;
+  cursor:pointer;
+  border-radius:4px;
+  transition:all .2s;
+}
+.lang-btn:hover{
+  color:var(--text);
+  background:var(--ink-3);
+}
+.lang-btn.active{
+  color:var(--ink);
+  background:var(--amber);
+  font-weight:600;
+}
 </style>
 </head>
 <body>
@@ -311,9 +344,9 @@ footer.bar-b{height:32px;padding:0 28px;display:flex;align-items:center;justify-
       <div class="crumb">
         <span>/</span><b id="crumbView">Live</b><span>/</span><span id="crumbSub">Matrix Studio</span>
       </div>
-      <div class="status-pill">
-        <span class="dot" id="topoDot"></span>
-        <span id="topoText">Engine · connecting</span>
+      <div class="lang-switcher" role="group" aria-label="Language">
+        <button class="lang-btn" data-lang="zh" aria-label="中文">中文</button>
+        <button class="lang-btn" data-lang="en" aria-label="English">EN</button>
       </div>
     </header>
 
@@ -471,19 +504,7 @@ footer.bar-b{height:32px;padding:0 28px;display:flex;align-items:center;justify-
     <footer class="bar-b">
       <span data-i18n="footer.version">Matrix · v0.2</span>
       <span id="footerConn">ws · idle</span>
-      <span style="display:flex;align-items:center;gap:12px">
-        <span data-i18n="footer.studio">made for studio ears</span>
-        <span style="display:inline-flex;gap:4px;align-items:center">
-          <button class="lang-btn" data-lang="zh" aria-label="中文"
-                  style="background:transparent;border:1px solid var(--border-soft);color:var(--text-2);
-                         padding:2px 8px;font-family:'Outfit',sans-serif;font-size:10px;
-                         letter-spacing:0.5px;cursor:pointer;transition:all 0.2s;border-radius:3px">中文</button>
-          <button class="lang-btn" data-lang="en" aria-label="English"
-                  style="background:transparent;border:1px solid var(--border-soft);color:var(--text-2);
-                         padding:2px 8px;font-family:'Outfit',sans-serif;font-size:10px;
-                         letter-spacing:0.5px;cursor:pointer;transition:all 0.2s;border-radius:3px">EN</button>
-        </span>
-      </span>
+      <span data-i18n="footer.studio">made for studio ears</span>
     </footer>
   </main>
 </div>
@@ -1007,11 +1028,7 @@ function setLang(lang) {
 
 function updateLangSwitcherUI() {
   document.querySelectorAll('.lang-btn').forEach(btn => {
-    const active = btn.dataset.lang === currentLang;
-    btn.classList.toggle('active', active);
-    btn.style.background = active ? 'var(--amber-soft)' : 'transparent';
-    btn.style.color = active ? 'var(--amber)' : 'var(--text-2)';
-    btn.style.borderColor = active ? 'var(--amber)' : 'var(--border-soft)';
+    btn.classList.toggle('active', btn.dataset.lang === currentLang);
   });
 }
 
@@ -1275,10 +1292,6 @@ function updateRecUI() {
   $("#recStatus").textContent = state.rec
     ? t("view.live.status.recording")
     : (state.segments.length ? t("view.live.status.stopped") : t("view.live.status.ready"));
-  $("#topoDot").className = "dot " + (state.rec ? "busy" : (state.currentEngine ? "live" : ""));
-  $("#topoText").textContent = state.rec
-    ? t("view.live.wavePH.rec", state.currentEngine || "—").replace(/^● recording · /, "Stream · ")
-    : (state.currentEngine ? "Engine · " + state.currentEngine : "Engine · —");
 }
 
 $("#recBtn").addEventListener("click", () => state.rec ? stopRec() : startRec());
@@ -1671,8 +1684,6 @@ async function loadSettings() {
     state.engines = r.engines || {};
     state.currentEngine = r.current;
     renderEngines(r);
-    $("#topoText").textContent = t("topo.engine") + " · " + r.current;
-    $("#topoDot").className = "dot " + (r.current ? "live" : "dead");
     $("#metaEngine").textContent = r.current || "—";
     $("#aboutSpk").textContent = t("settings.about.engines", Object.keys(r.engines || {}).length);
   } catch (e) {
@@ -1783,17 +1794,8 @@ setInterval(() => { if (state.rec) pulseWave(state.recRMS); }, 50);
 (async function boot() {
   loadRecent();
   try {
-    const h = await fetch("/health").then(r => r.ok ? r.json() : null);
-    if (h && h.status === "ok") {
-      $("#topoDot").className = "dot live";
-      $("#topoText").textContent = t("topo.ready");
-    }
-  } catch (e) { /* ignore */ }
-  try {
     const r = await Matrix.api.get("engines");
     state.currentEngine = r.current;
-    $("#topoText").textContent = t("topo.engine") + " · " + r.current;
-    $("#topoDot").className = "dot " + (r.current ? "live" : "dead");
     $("#metaEngine").textContent = r.current || "—";
   } catch (e) { /* engine endpoint might 404 in some configs */ }
 })();
