@@ -128,7 +128,7 @@ class RateLimitConfig:
     enabled: bool = True
     requests_per_minute: int = 60      # 每分钟请求数
     requests_per_hour: int = 1000      # 每小时请求数
-    
+
     @classmethod
     def from_env(cls) -> "RateLimitConfig":
         return cls(
@@ -139,20 +139,77 @@ class RateLimitConfig:
 
 
 @dataclass
+class StorageConfig:
+    """SQLite 存储配置"""
+    db_path: str = "./data/matrix.db"
+    history_enabled: bool = True
+
+    @classmethod
+    def from_env(cls) -> "StorageConfig":
+        return cls(
+            db_path=get_env_str("STORAGE_DB_PATH", "./data/matrix.db"),
+            history_enabled=get_env_bool("STORAGE_HISTORY_ENABLED", True),
+        )
+
+
+@dataclass
+class LLMConfig:
+    """本地 LLM 插件配置"""
+    enabled: bool = False
+    endpoint: str = "http://127.0.0.1:11434/v1"
+    model: str = "qwen2.5:1.5b"
+    timeout_sec: int = 60
+    max_input_tokens: int = 8000
+    mock: bool = False
+    allowed_hosts: tuple = ("127.0.0.1", "::1", "localhost")
+
+    @classmethod
+    def from_env(cls) -> "LLMConfig":
+        return cls(
+            enabled=get_env_bool("LLM_ENABLED", False),
+            endpoint=get_env_str("LLM_ENDPOINT", "http://127.0.0.1:11434/v1"),
+            model=get_env_str("LLM_MODEL", "qwen2.5:1.5b"),
+            timeout_sec=get_env_int("LLM_TIMEOUT_SEC", 60),
+            max_input_tokens=get_env_int("LLM_MAX_INPUT_TOKENS", 8000),
+            mock=get_env_bool("LLM_MOCK", False),
+        )
+
+
+@dataclass
+class HistoryConfig:
+    """历史存档策略"""
+    retention_days: int = 0
+    auto_archive: bool = False
+
+    @classmethod
+    def from_env(cls) -> "HistoryConfig":
+        return cls(
+            retention_days=get_env_int("HISTORY_RETENTION_DAYS", 0),
+            auto_archive=get_env_bool("HISTORY_AUTO_ARCHIVE", False),
+        )
+
+
+@dataclass
 class AppConfig:
     """应用配置"""
     server: ServerConfig = field(default_factory=ServerConfig)
     audio: AudioConfig = field(default_factory=AudioConfig)
     speaker: SpeakerConfig = field(default_factory=SpeakerConfig)
     rate_limit: RateLimitConfig = field(default_factory=RateLimitConfig)
-    
+    storage: StorageConfig = field(default_factory=StorageConfig)
+    llm: LLMConfig = field(default_factory=LLMConfig)
+    history: HistoryConfig = field(default_factory=HistoryConfig)
+
     @classmethod
     def load(cls) -> "AppConfig":
         return cls(
             server=ServerConfig.from_env(),
             audio=AudioConfig.from_env(),
             speaker=SpeakerConfig.from_env(),
-            rate_limit=RateLimitConfig.from_env()
+            rate_limit=RateLimitConfig.from_env(),
+            storage=StorageConfig.from_env(),
+            llm=LLMConfig.from_env(),
+            history=HistoryConfig.from_env(),
         )
 
 
