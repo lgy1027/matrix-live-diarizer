@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Matrix Live Diarizer</title>
+    <link rel="stylesheet" href="/web/css/common.css">
     <style>
         :root {
             --matrix-green: #00ff41;
@@ -1081,9 +1082,70 @@
             font-size: 10px;
             color: var(--text-muted);
         }
+
+        /* ========== TOP NAV (inline fallback) ========== */
+        .top-nav {
+            display: flex;
+            align-items: center;
+            gap: 18px;
+            height: 44px;
+            padding: 0 24px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-subtle);
+            font-family: inherit;
+            flex: 0 0 100%;
+            width: 100%;
+        }
+
+        .top-nav .logo {
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 3px;
+            color: var(--matrix-green);
+            text-shadow: 0 0 20px var(--matrix-glow);
+        }
+
+        .top-nav a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 12px;
+            letter-spacing: 0.5px;
+            padding: 4px 8px;
+            border-radius: 3px;
+            transition: color 0.2s ease, background 0.2s ease;
+        }
+
+        .top-nav a:hover {
+            color: var(--text-primary);
+            background: rgba(0, 255, 65, 0.05);
+        }
+
+        .top-nav a.active {
+            color: var(--matrix-green);
+            background: rgba(0, 255, 65, 0.1);
+        }
+
+        .badge-private {
+            margin-left: auto;
+            font-size: 10px;
+            color: var(--text-muted);
+            letter-spacing: 0.5px;
+            padding: 3px 8px;
+            border: 1px solid var(--border-subtle);
+            border-radius: 3px;
+        }
     </style>
 </head>
 <body>
+    <!-- Top Navigation -->
+    <nav class="top-nav">
+        <span class="logo">⚡ Matrix</span>
+        <a href="/web/index.html" class="active">实时</a>
+        <a href="/web/history.html">历史</a>
+        <a href="/web/settings.html">设置</a>
+        <span class="badge-private" title="所有数据仅在本机处理">🔒 离线</span>
+    </nav>
+
     <!-- Matrix Rain Background -->
     <canvas class="matrix-bg" id="matrixBg"></canvas>
 
@@ -1442,7 +1504,9 @@
             speakers: [],
             renameTarget: null,
             uploadHistory: [],  // 上传历史
-            transcriptionHistory: []  // 转写历史
+            transcriptionHistory: [],  // 转写历史
+            pendingTitle: null,  // 待发送的会话命名（连接成功后发 rename）
+            currentSessionId: null  // 当前 session_id（ws 返回时记录）
         };
 
         const RECONNECT_CONFIG = {
@@ -1668,12 +1732,22 @@
                 clearTimeout(state.reconnectTimer);
                 state.reconnectTimer = null;
             }
-            
+
             if (isReconnect) {
                 log('正在重连...');
             }
             state.isManualDisconnect = false;
-            
+
+            // 命名弹窗：仅在非重连时询问；用户留空用默认时间戳
+            if (!isReconnect) {
+                const title = prompt("为这次会话命名（留空用默认时间戳）：", "");
+                if (title !== null) {
+                    state.pendingTitle = title.trim() || null;
+                } else {
+                    state.pendingTitle = null;  // 用户取消则用默认
+                }
+            }
+
             const uid = Math.random().toString(36).substring(7);
             state.socket = new WebSocket(`ws://${HOST}/ws/v1/stream/${uid}`);
 
@@ -1683,11 +1757,28 @@
                 document.getElementById('startBtn').disabled = true;
                 document.getElementById('stopBtn').disabled = false;
                 state.reconnectCount = 0;
+
+                // 发送命名（如果有）
+                if (state.pendingTitle !== null && state.pendingTitle !== undefined) {
+                    try {
+                        state.socket.send(JSON.stringify({ action: "rename", title: state.pendingTitle }));
+                    } catch (e) {
+                        console.warn('发送 rename 失败:', e);
+                    }
+                }
             };
 
             state.socket.onmessage = (e) => {
-                const data = JSON.parse(e.data);
-                if (data.text) {
+                let data;
+                try { data = JSON.parse(e.data); } catch { return; }
+
+                // 记录 session_id（用于停止后跳转详情页）
+                if (data.type === "ready" && data.session_id) {
+                    state.currentSessionId = data.session_id;
+                } else if (data.type === "renamed" && data.session_id) {
+                    state.currentSessionId = data.session_id;
+                    log(`会话已命名: ${data.title || '(默认时间戳)'}`, 'SYSTEM');
+                } else if (data.text) {
                     state.renderQueue.push({ speaker: data.speaker, text: data.text, target: 'terminal' });
                     if (!state.isTyping) typeWriter();
                 }
@@ -1777,18 +1868,27 @@
 
         function disconnectStream() {
             state.isManualDisconnect = true;
-            
+
             if (state.reconnectTimer) {
                 clearTimeout(state.reconnectTimer);
                 state.reconnectTimer = null;
             }
-            
+
+            const sessionIdToJump = state.currentSessionId;
+
             if (state.socket) {
                 state.socket.close();
                 state.socket = null;
             }
             resetUI(true);
             state.isManualDisconnect = true;
+
+            // 询问是否跳转到详情页
+            if (sessionIdToJump) {
+                if (confirm("转写已结束。是否跳转到详情页查看？")) {
+                    location.href = `/web/detail.html?id=${encodeURIComponent(sessionIdToJump)}`;
+                }
+            }
         }
 
         function resetUI(full = true) {
