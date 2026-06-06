@@ -980,8 +980,8 @@ let currentLang = (() => {
     const saved = localStorage.getItem('matrix.lang');
     if (saved && STRINGS[saved]) return saved;
   } catch (e) { /* localStorage may be blocked */ }
-  const browser = (navigator.language || 'en').toLowerCase();
-  return browser.startsWith('zh') ? 'zh' : 'en';
+  // 默认英文；用户手动切换后会写入 localStorage
+  return 'en';
 })();
 
 function t(key, ...args) {
