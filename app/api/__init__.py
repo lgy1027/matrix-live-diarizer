@@ -4,9 +4,11 @@ from app.api.websocket import router as ws_router
 from app.api.upload import router as upload_router
 from app.api.speakers import router as speakers_router
 from app.api.health import router as health_router
+from app.api.exports import router as exports_router
 
 api_router = APIRouter()
 api_router.include_router(health_router)
 api_router.include_router(ws_router)
 api_router.include_router(upload_router)
 api_router.include_router(speakers_router)
+api_router.include_router(exports_router)
