@@ -82,7 +82,7 @@ footer.bar-b{height:32px;padding:0 28px;display:flex;align-items:center;justify-
 .live-wrap{padding:32px 36px 36px;max-width:1480px}
 .live-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(280px,1fr);gap:40px;align-items:start}
 .live-main{min-width:0}
-.live-title{font-family:var(--serif);font-variation-settings:'SOFT' 50,'WONK' 1,'opsz' 144;font-size:clamp(40px,5vw,64px);line-height:1;letter-spacing:-.02em;font-weight:400;margin-bottom:12px}
+.live-title{font-family:var(--serif);font-variation-settings:'SOFT' 50,'WONK' 1,'opsz' 144;font-size:clamp(40px,5vw,64px);line-height:1;letter-spacing:-.02em;font-weight:400;margin-bottom:12px;min-width:420px;display:inline-block}
 .live-title em{font-style:italic;color:var(--amber);font-variation-settings:'SOFT' 100,'WONK' 1}
 .live-meta{display:flex;flex-wrap:wrap;gap:18px;align-items:center;font-family:var(--mono);font-size:11px;color:var(--text-2);letter-spacing:.04em;text-transform:uppercase;padding-bottom:18px;border-bottom:1px solid var(--border-soft);margin-bottom:24px}
 .live-meta b{color:var(--text);font-weight:500}
@@ -237,7 +237,7 @@ footer.bar-b{height:32px;padding:0 28px;display:flex;align-items:center;justify-
 
 /* SETTINGS */
 .set-wrap{padding:32px 36px 48px;max-width:720px;margin:0 auto}
-.set-wrap > h1{font-family:var(--serif);font-variation-settings:'SOFT' 50,'WONK' 1,'opsz' 144;font-size:48px;font-weight:400;letter-spacing:-.02em;line-height:1;margin-bottom:8px}
+.set-wrap > h1{font-family:var(--serif);font-variation-settings:'SOFT' 50,'WONK' 1,'opsz' 144;font-size:48px;font-weight:400;letter-spacing:-.02em;line-height:1;margin-bottom:8px;min-width:260px;display:inline-block}
 .set-wrap > h1 em{color:var(--amber);font-style:italic}
 .set-wrap > .sub{font-family:var(--mono);font-size:11px;color:var(--text-2);letter-spacing:.06em;text-transform:uppercase;margin-bottom:40px;padding-bottom:24px;border-bottom:1px solid var(--border)}
 .set-row{padding:28px 0;border-bottom:1px solid var(--border)}
@@ -469,7 +469,6 @@ footer.bar-b{height:32px;padding:0 28px;display:flex;align-items:center;justify-
     <section class="view" id="view-settings">
       <div class="set-wrap">
         <h1 data-i18n-html="view.settings.title">Settings<em>.</em></h1>
-        <div class="sub" data-i18n="settings.subtitle">// runtime configuration</div>
 
         <div class="set-row">
           <div class="l"><span data-i18n="settings.engine.label">Speaker</span> <em data-i18n="view.settings.engine">Engine</em></div>
@@ -518,12 +517,12 @@ footer.bar-b{height:32px;padding:0 28px;display:flex;align-items:center;justify-
 const STRINGS = {
   zh: {
     'app.name': 'Matrix',
-    'app.tagline': 'Live Transcription',
+    'app.tagline': '实时转写',
     'nav.live': '实时',
     'nav.library': '文稿',
     'nav.voice': '声纹',
     'nav.settings': '设置',
-    'view.live.title': 'Live <em>Transcription</em>',
+    'view.live.title': '实时 <em>转写</em>',
     'view.live.title.pre': '实时',
     'view.live.title.post': '转写',
     'view.live.meta.room': '房间',
@@ -570,7 +569,7 @@ const STRINGS = {
     'btn.back': '返回',
     'btn.try': '重试',
     'btn.ai': 'AI',
-    'view.library.title': 'Library',
+    'view.library.title': '文稿库',
     'view.library.allSessions': 'transcripts & exports',
     'view.library.tab.transcript': 'Transcript',
     'view.library.tab.stats': 'Statistics',
@@ -599,15 +598,15 @@ const STRINGS = {
     'view.library.ai.disabled': 'Local LLM not enabled. Configure in Settings.',
     'view.library.ai.generating': 'Generating...',
     'view.library.ai.result': 'Result',
-    'view.voice.title': 'Voice Library',
+    'view.voice.title': '声纹库',
     'view.voice.addNew': 'New Speaker',
     'view.voice.empty.title': 'No speakers enrolled',
     'view.voice.empty.hint': 'Speakers are identified automatically as you record.',
     'view.voice.card.talkTime': 'talk time',
     'view.voice.card.samples': 'samples',
     'view.voice.card.lastSeen': 'last seen',
-    'view.voice.stats': '{0} speakers · {1} sessions',
-    'view.settings.title': 'Settings',
+    'view.voice.stats': '{0} 说话人 · {1} 会话',
+    'view.settings.title': '设置<em>.</em>',
     'view.settings.engine': 'Engine',
     'view.settings.engineDesc': 'Speaker identification model. Affects accuracy and speed.',
     'view.settings.engine.campplus': 'CamPlus — fastest, 7.2M params',
@@ -740,7 +739,6 @@ const STRINGS = {
     'settings.llm.off': '关闭',
     'settings.llm.on': '开启 (Ollama)',
     'settings.about.engines': '可选引擎 {0} 个',
-    'settings.subtitle': '// 运行时配置',
     'topo.engine': '引擎',
     'topo.stream': '录制中',
     'topo.ready': '引擎 · 就绪',
@@ -970,7 +968,6 @@ const STRINGS = {
     'settings.llm.off': 'Off',
     'settings.llm.on': 'On (Ollama)',
     'settings.about.engines': '{0} engines available',
-    'settings.subtitle': '// runtime configuration',
     'topo.engine': 'Engine',
     'topo.stream': 'Stream',
     'topo.ready': 'Engine · ready',
