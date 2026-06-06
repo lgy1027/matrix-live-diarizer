@@ -74,3 +74,20 @@ def _init_engines(app: FastAPI):
     app.state.asr_engine = asr_engine
     app.state.spk_engine = spk_engine
     app.state.inference_lock = inference_lock
+
+    # 持久化层
+    from app.repositories.database import Database
+    from app.repositories.transcripts import TranscriptRepository
+    from app.repositories.settings import SettingsRepository
+
+    db = Database(config.storage.db_path)
+    db.init_schema()
+    transcript_repo = TranscriptRepository(db)
+    settings_repo = SettingsRepository(db)
+
+    app.state.db = db
+    app.state.transcript_repo = transcript_repo
+    app.state.settings_repo = settings_repo
+
+    logger.info(f"💾 数据库已初始化: {config.storage.db_path}")
+    logger.info("🔒 完全离线模式:所有数据仅在本机处理")
