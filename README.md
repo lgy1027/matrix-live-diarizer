@@ -341,3 +341,23 @@ matrix-live-diarizer/
 **如果这个项目对你有帮助，请给一个 ⭐ Star 支持一下！**
 
 </div>
+
+## v0.2 新功能 (2026-06)
+
+- **转写历史**：所有会话自动存档，可在 `web/history.html` 浏览
+- **4 种导出格式**：SRT 字幕、WebVTT、Markdown、JSON
+- **统计**：说话人时长占比、字数、hot words、静默比
+- **可选 LLM 插件**：本地 LLM 可生成摘要、提取行动项、生成纪要
+- **多页前端**：实时、历史、详情、设置四页
+
+详细设计见 `docs/superpowers/specs/2026-06-06-产出型生产力工具设计.md`。
+
+## 隐私
+
+本项目承诺：你的音频、文本、声纹向量、设置**永远不离开你的电脑**。
+详见 [`docs/PRIVACY.md`](docs/PRIVACY.md)。
+
+## 本地 LLM 集成
+
+可选的 LLM 功能（摘要、行动项、会议纪要）需要本地 LLM 服务。
+详见 [`docs/LLM_SETUP.md`](docs/LLM_SETUP.md)。
