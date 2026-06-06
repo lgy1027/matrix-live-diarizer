@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>设置 - Matrix Live Diarizer</title>
+  <link rel="stylesheet" href="/web/css/common.css">
+</head>
+<body>
+  <nav class="top-nav">
+    <span class="logo">⚡ Matrix</span>
+    <a href="/web/index.html">实时</a>
+    <a href="/web/history.html">历史</a>
+    <a href="/web/settings.html" class="active">设置</a>
+    <span class="badge-private">🔒 离线</span>
+  </nav>
+  <div class="container">
+    <h1>系统设置</h1>
+
+    <div class="card">
+      <h2>声纹引擎</h2>
+      <p>当前: <span id="current-engine">加载中...</span></p>
+      <select id="engine-select">
+        <option value="campplus">CamPlus (快)</option>
+        <option value="eres2net">ERes2NetV2 (高精度)</option>
+        <option value="wespeaker">Wespeaker (经典)</option>
+      </select>
+      <button class="btn" id="btn-switch">切换</button>
+    </div>
+
+    <div class="card">
+      <h2>本地 LLM</h2>
+      <p style="color:#888; font-size:0.9rem;">
+        本项目<strong>不会</strong>将你的数据发送到云端 LLM。endpoint 必须为本机或内网地址。
+      </p>
+      <label><input type="checkbox" id="llm-enabled"> 启用</label>
+      <div style="margin-top:0.5rem;">
+        <input type="text" id="llm-endpoint" placeholder="http://127.0.0.1:11434/v1" style="width:300px;">
+      </div>
+      <div style="margin-top:0.5rem;">
+        模型: <input type="text" id="llm-model" placeholder="qwen2.5:1.5b">
+      </div>
+      <button class="btn" id="btn-test-llm">测试连接</button>
+      <span id="llm-status" style="margin-left:1rem;"></span>
+    </div>
+
+    <div class="card">
+      <h2>历史存储</h2>
+      <label><input type="checkbox" id="history-enabled" disabled> 启用转写历史存档</label>
+      <p style="color:#888; font-size:0.9rem;">
+        通过环境变量 <code>STORAGE_HISTORY_ENABLED</code> 配置（重启后生效）。
+      </p>
+    </div>
+  </div>
+  <script src="/web/js/api.js"></script>
+  <script src="/web/js/settings.js"></script>
+</body>
+</html>
