@@ -1,8 +1,10 @@
 """FastAPI 应用工厂"""
 import asyncio
 import logging
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from transformers import logging as tf_logging
 
 from app.config import config
@@ -46,7 +48,13 @@ def create_app() -> FastAPI:
     
     _init_engines(app)
     app.include_router(api_router)
-    
+
+    # 挂载 web/ 静态目录（多页前端：index/history/detail/settings）
+    web_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web")
+    if os.path.isdir(web_dir):
+        app.mount("/web", StaticFiles(directory=web_dir, html=True), name="web")
+        logger.info(f"🌐 静态文件已挂载: /web → {web_dir}")
+
     return app
 
 
