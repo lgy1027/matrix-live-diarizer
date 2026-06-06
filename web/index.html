@@ -1135,6 +1135,7 @@
             border-radius: 3px;
         }
     </style>
+    <script src="/web/js/api.js"></script>
 </head>
 <body>
     <!-- 注：原 index.html 有自己的 sidebar 导航 (5 项), 不用 v0.2 的 top-nav 避免 layout 冲突 -->
@@ -1298,6 +1299,13 @@
                     <div class="upload-result-area">
                         <div class="result-header">
                             <span class="result-title">转写结果</span>
+                            <div class="result-actions" id="uploadResultActions" style="display:none; gap:6px; margin-right:8px;">
+                                <button class="btn btn-secondary btn-small" data-export="srt">SRT</button>
+                                <button class="btn btn-secondary btn-small" data-export="vtt">VTT</button>
+                                <button class="btn btn-secondary btn-small" data-export="markdown">MD</button>
+                                <button class="btn btn-secondary btn-small" data-export="json">JSON</button>
+                                <button class="btn btn-secondary btn-small" data-llm="summarize">✨ 摘要</button>
+                            </div>
                             <button class="btn btn-secondary btn-small" id="clearUploadResult">清空</button>
                         </div>
                         <div class="result-terminal" id="uploadTerminal"></div>
@@ -1381,8 +1389,8 @@
                         </button>
                     </div>
                     <div class="history-list" id="historyList">
-                        <div style="color: var(--text-muted); font-size: 12px; text-align: center; padding: 40px;">
-                            暂无历史记录
+                        <div id="historyListContent" style="color: var(--text-muted); font-size: 12px; text-align: center; padding: 40px;">
+                            加载中...
                         </div>
                     </div>
                 </div>
@@ -1454,6 +1462,30 @@
                             </div>
                         </div>
                     </div>
+                    <div class="settings-section" id="llmSettingsSection" style="display:none;">
+                        <div class="settings-section-header">
+                            <div class="settings-section-title">本地 LLM 设置</div>
+                            <div class="settings-section-desc">启用本地 LLM 可生成摘要、纪要、行动项。endpoint 仅允许本机或内网。</div>
+                        </div>
+                        <div class="settings-section-body">
+                            <div class="setting-row">
+                                <div>
+                                    <div class="setting-label">LLM 状态</div>
+                                    <div class="setting-desc" id="llmStatus">检测中...</div>
+                                </div>
+                            </div>
+                            <div class="setting-row">
+                                <div>
+                                    <div class="setting-label">设置说明</div>
+                                    <div class="setting-desc">
+                                        修改 <code>LLM_ENABLED</code> / <code>LLM_ENDPOINT</code> / <code>LLM_MODEL</code>
+                                        环境变量并重启服务。
+                                        详见 <a href="https://github.com/lgy1027/matrix-live-diarizer/blob/main/docs/LLM_SETUP.md" target="_blank">LLM 设置指南</a>。
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1502,6 +1534,10 @@
             pendingTitle: null,  // 待发送的会话命名（连接成功后发 rename）
             currentSessionId: null  // 当前 session_id（ws 返回时记录）
         };
+
+        // v0.2 集成：记录最近一次上传的 session_id（用于导出 / LLM）
+        let lastUploadSessionId = null;
+        let lastUploadSegments = 0;
 
         const RECONNECT_CONFIG = {
             maxRetries: 5,
@@ -1615,13 +1651,13 @@
 
         function switchPage(page) {
             state.currentPage = page;
-            
+
             document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
             document.querySelector(`.nav-item[data-page="${page}"]`).classList.add('active');
-            
+
             document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
             document.getElementById(`${page}Page`).classList.add('active');
-            
+
             const titles = {
                 stream: '实时转写',
                 upload: '文件上传',
@@ -1630,6 +1666,14 @@
                 settings: '系统设置'
             };
             document.getElementById('pageTitle').textContent = titles[page];
+
+            // v0.2 集成：tab 切换时加载对应数据
+            if (page === 'history' && typeof loadHistoryList === 'function') {
+                loadHistoryList();
+            }
+            if (page === 'settings' && typeof checkLLMStatusInSettings === 'function') {
+                checkLLMStatusInSettings();
+            }
         }
 
         // Speaker Colors
@@ -1929,7 +1973,7 @@
                 if (data.status === 'success') {
                     // 添加到上传历史
                     addToUploadHistory(file.name, data);
-                    
+
                     // 显示转写结果
                     if (data.segments && data.segments.length > 1) {
                         log(`完成。时长: ${data.duration.toFixed(1)}s，说话人: ${data.speakers?.length || 1}`, 'SYSTEM', 'uploadTerminal');
@@ -1945,12 +1989,20 @@
                         }
                     }
                     if (!state.isTyping) typeWriter();
-                    
+
                     // 刷新说话人列表
                     loadSpeakers();
-                    
+
                     // 添加到转写历史
                     addToTranscriptionHistory(file.name, data);
+
+                    // v0.2 集成：保存 session_id 并显示导出按钮
+                    if (data.session_id) {
+                        lastUploadSessionId = data.session_id;
+                        lastUploadSegments = (data.segments || []).length;
+                        const actions = document.getElementById('uploadResultActions');
+                        if (actions) actions.style.display = 'flex';
+                    }
                 } else {
                     log('失败: ' + (data.message || '未知错误'), 'SYSTEM', 'uploadTerminal');
                 }
@@ -2275,7 +2327,14 @@
         document.getElementById('startBtn').addEventListener('click', () => connectStream());
         document.getElementById('stopBtn').addEventListener('click', disconnectStream);
         document.getElementById('clearBtn').addEventListener('click', () => clearTerminal('terminal'));
-        document.getElementById('clearUploadResult').addEventListener('click', () => clearTerminal('uploadTerminal'));
+        document.getElementById('clearUploadResult').addEventListener('click', () => {
+            clearTerminal('uploadTerminal');
+            // v0.2 集成：清空时重置 session_id 和按钮
+            lastUploadSessionId = null;
+            lastUploadSegments = 0;
+            const actions = document.getElementById('uploadResultActions');
+            if (actions) actions.style.display = 'none';
+        });
         document.getElementById('refreshSpeakers').addEventListener('click', loadSpeakers);
         document.getElementById('clearHistory').addEventListener('click', () => {
             state.transcriptionHistory = [];
@@ -2353,6 +2412,126 @@
             canvas.width = canvas.offsetWidth * 2;
             canvas.height = canvas.offsetHeight * 2;
         });
+
+        // ========== v0.2 集成：导出 + LLM 点击处理 ==========
+        document.addEventListener('click', async (e) => {
+            const exportBtn = e.target.closest('[data-export]');
+            if (exportBtn && lastUploadSessionId) {
+                const fmt = exportBtn.dataset.export;
+                const a = document.createElement('a');
+                a.href = `/v1/exports/${lastUploadSessionId}?format=${fmt}`;
+                a.download = `transcript.${fmt === 'markdown' ? 'md' : fmt}`;
+                a.click();
+                return;
+            }
+            const llmBtn = e.target.closest('[data-llm]');
+            if (llmBtn && lastUploadSessionId) {
+                const op = llmBtn.dataset.llm;
+                llmBtn.disabled = true;
+                const originalText = llmBtn.textContent;
+                llmBtn.textContent = '⏳ 生成中...';
+                try {
+                    const data = await Matrix.api.post(`llm/${op}`, { session_id: lastUploadSessionId });
+                    const term = document.getElementById('uploadTerminal');
+                    if (term && data.text) {
+                        const block = document.createElement('div');
+                        block.className = 'llm-result';
+                        block.style.cssText = 'margin-top:12px; padding:10px; background:rgba(0,212,255,0.08); border-left:3px solid #00d4ff; white-space:pre-wrap; font-size:12px;';
+                        block.textContent = `[AI 摘要]\n\n${data.text}`;
+                        term.appendChild(block);
+                        term.scrollTop = term.scrollHeight;
+                    } else if (term && data.items) {
+                        const block = document.createElement('div');
+                        block.style.cssText = 'margin-top:12px; padding:10px; background:rgba(0,212,255,0.08); border-left:3px solid #00d4ff; white-space:pre-wrap; font-size:12px;';
+                        block.textContent = '[行动项]\n\n' + data.items.join('\n');
+                        term.appendChild(block);
+                    }
+                } catch (err) {
+                    alert('LLM 调用失败: ' + err.message + '\n请检查 settings 中 LLM 配置。');
+                } finally {
+                    llmBtn.disabled = false;
+                    llmBtn.textContent = originalText;
+                }
+            }
+        });
+
+        // ========== v0.2 集成：历史列表 ==========
+        function escapeHtml(s) {
+            return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+        }
+
+        async function loadHistoryList() {
+            const container = document.getElementById('historyListContent');
+            if (!container) return;
+            try {
+                const data = await Matrix.api.get('history?page=1&page_size=50');
+                if (!data.items || !data.items.length) {
+                    container.innerHTML = '<div style="color: var(--text-muted); font-size: 12px; text-align: center; padding: 40px;">暂无历史记录</div>';
+                    return;
+                }
+                container.innerHTML = data.items.map(s => `
+                    <div class="history-item" data-id="${s.id}" style="padding:12px; border:1px solid var(--border-subtle); border-radius:4px; margin-bottom:8px; cursor:pointer; background: var(--bg-card);">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <div>
+                                <div style="font-weight:600; color: var(--matrix-green);">${escapeHtml(s.title || s.original_filename || '未命名')}</div>
+                                <div style="font-size:11px; color: var(--text-muted); margin-top:4px;">
+                                    ${s.source === 'websocket' ? '实时' : '上传'} ·
+                                    ${Matrix.formatDate(s.created_at)} ·
+                                    ${Matrix.formatTime(s.duration_sec || 0)} ·
+                                    ${s.speaker_count || 0} 说话人
+                                </div>
+                            </div>
+                            <div style="display:flex; gap:6px;">
+                                <button class="btn btn-secondary btn-small" onclick="event.stopPropagation(); window.Matrix.api.download('exports/${s.id}?format=srt', '${escapeHtml(s.id)}.srt')">SRT</button>
+                                <button class="btn btn-danger btn-small" onclick="event.stopPropagation(); deleteHistoryItem('${s.id}')">删</button>
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+                container.querySelectorAll('.history-item').forEach(el => {
+                    el.addEventListener('click', () => {
+                        const id = el.dataset.id;
+                        window.open(`/web/detail.html?id=${id}`, '_blank');
+                    });
+                });
+            } catch (e) {
+                container.innerHTML = `<div style="color: var(--red); text-align:center; padding:20px;">加载失败: ${escapeHtml(e.message)}</div>`;
+            }
+        }
+
+        async function deleteHistoryItem(id) {
+            if (!confirm('确认删除？')) return;
+            try {
+                await Matrix.api.del(`history/${id}`);
+                loadHistoryList();
+            } catch (e) {
+                alert('删除失败: ' + e.message);
+            }
+        }
+
+        // ========== v0.2 集成：LLM 状态探测 ==========
+        async function checkLLMStatusInSettings() {
+            try {
+                const status = await Matrix.api.get('llm/status');
+                const section = document.getElementById('llmSettingsSection');
+                const statusEl = document.getElementById('llmStatus');
+                if (!section || !statusEl) return;
+                if (status.enabled) {
+                    section.style.display = '';
+                    if (status.available) {
+                        statusEl.innerHTML = '✅ 已启用并可用';
+                        statusEl.style.color = 'var(--matrix-green)';
+                    } else {
+                        statusEl.innerHTML = '⚠️ 已启用但不可用（检查 endpoint / 模型）';
+                        statusEl.style.color = 'var(--yellow)';
+                    }
+                } else {
+                    section.style.display = 'none';
+                }
+            } catch (e) {
+                // 静默忽略
+            }
+        }
     </script>
 </body>
 </html>
