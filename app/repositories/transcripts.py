@@ -181,3 +181,17 @@ class TranscriptRepository:
                 (session_id,),
             ).fetchone()
         return row[0] if row else 0
+
+    def clear_speaker_id_from_segments(self, speaker_id: str) -> int:
+        """把 segments 表里所有 speaker_id == X 的清空成 NULL
+
+        用于 cascade 删除声纹前清空引用，避免 segments 出现孤立 Spk_xxx 引用。
+        返回被清的段数（无匹配返回 0）。
+        """
+        with self.db.connect() as conn:
+            cur = conn.execute(
+                "UPDATE segments SET speaker_id = NULL WHERE speaker_id = ?",
+                (speaker_id,),
+            )
+            conn.commit()
+        return cur.rowcount
