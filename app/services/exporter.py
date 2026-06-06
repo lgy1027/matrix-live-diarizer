@@ -138,3 +138,43 @@ def export_json(session: dict, segments: list[dict], speakers: list[dict]) -> st
         ],
     }
     return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+class FormatError(ValueError):
+    pass
+
+
+_MIME = {
+    "srt": "text/plain; charset=utf-8",
+    "vtt": "text/vtt; charset=utf-8",
+    "markdown": "text/markdown; charset=utf-8",
+    "json": "application/json; charset=utf-8",
+}
+
+
+def mime_type(fmt: str) -> str:
+    if fmt not in _MIME:
+        raise FormatError(f"不支持的格式: {fmt}")
+    return _MIME[fmt]
+
+
+def export(fmt: str, **kwargs) -> str:
+    if fmt == "srt":
+        return export_srt(kwargs["segments"], kwargs["speaker_aliases"])
+    if fmt == "vtt":
+        return export_vtt(kwargs["segments"], kwargs["speaker_aliases"])
+    if fmt == "markdown":
+        return export_markdown(
+            segments=kwargs["segments"],
+            speaker_aliases=kwargs["speaker_aliases"],
+            title=kwargs.get("title", ""),
+            duration_sec=kwargs.get("duration_sec", 0),
+            speaker_count=kwargs.get("speaker_count", 0),
+        )
+    if fmt == "json":
+        return export_json(
+            session=kwargs["session"],
+            segments=kwargs["segments"],
+            speakers=kwargs["speakers"],
+        )
+    raise FormatError(f"不支持的格式: {fmt}")
