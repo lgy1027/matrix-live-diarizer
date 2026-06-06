@@ -21,6 +21,7 @@ class UploadResponse(BaseModel):
     duration: Optional[float] = None
     segments: Optional[List[SegmentResult]] = None
     speakers: Optional[List[str]] = None
+    session_id: Optional[str] = None
 
 
 class EngineInfo(BaseModel):

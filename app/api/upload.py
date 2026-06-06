@@ -21,22 +21,24 @@ router = APIRouter()
 asr_engine = None
 inference_lock = None
 current_dir = None
+transcript_repo = None
 
 # 文件上传安全配置
 ALLOWED_EXTENSIONS: Set[str] = {'.wav', '.mp3', '.m4a', '.flac', '.ogg', '.aac', '.wma'}
 MAX_FILE_SIZE: int = 500 * 1024 * 1024  # 500MB
 
 
-def init_engines(asr, spk, lock, base_dir: str):
+def init_engines(asr, spk, lock, base_dir: str, repo=None):
     """初始化引擎实例
-    
+
     Note: spk 参数保留用于兼容，但实际使用 get_speaker_engine() 动态获取
     """
-    global asr_engine, inference_lock, current_dir
+    global asr_engine, inference_lock, current_dir, transcript_repo
     asr_engine = asr
     # spk_engine 通过 get_speaker_engine() 动态获取，支持运行时切换
     inference_lock = lock
     current_dir = base_dir
+    transcript_repo = repo
 
 
 def split_audio_into_chunks(
@@ -209,13 +211,35 @@ async def upload_audio(
                     spk_id = "SPEAKER"
             
             logger.info(f"[UPLOAD] 完成, {time.time() - start_time_total:.2f}s")
-            
+
+            # 自动存档
+            if transcript_repo and config.storage.history_enabled:
+                sid = transcript_repo.create_session(
+                    source="upload",
+                    title=file.filename,
+                    original_filename=file.filename,
+                    duration_sec=duration,
+                )
+                # 短音频：单 segment
+                transcript_repo.insert_segment(
+                    sid,
+                    segment_index=0,
+                    text=text or "",
+                    start_time=0.0,
+                    end_time=duration,
+                    speaker_id=spk_id if enable_diarization else None,
+                )
+                session_id = sid
+            else:
+                session_id = None
+
             return UploadResponse(
                 status="success",
                 filename=file.filename,
                 speaker=spk_id,
                 text=text or "",
-                duration=duration
+                duration=duration,
+                session_id=session_id,
             )
         
         # 长音频分段处理
@@ -277,14 +301,38 @@ async def upload_audio(
         elapsed = time.time() - start_time_total
         speaker_info = f", {len(all_speakers)} 说话人" if enable_diarization else ""
         logger.info(f"[UPLOAD] 完成{speaker_info}, {elapsed:.2f}s")
-        
+
+        # 自动存档（长音频批量）
+        if transcript_repo and config.storage.history_enabled:
+            sid = transcript_repo.create_session(
+                source="upload",
+                title=file.filename,
+                original_filename=file.filename,
+                duration_sec=duration,
+            )
+            for i, seg in enumerate(segments):
+                if not seg.text:
+                    continue
+                transcript_repo.insert_segment(
+                    sid,
+                    segment_index=i,
+                    text=seg.text,
+                    start_time=seg.start_time,
+                    end_time=seg.end_time,
+                    speaker_id=seg.speaker if enable_diarization else None,
+                )
+            session_id = sid
+        else:
+            session_id = None
+
         return UploadResponse(
             status="success",
             filename=file.filename,
             text=merged_text.strip(),
             duration=duration,
             segments=segments,
-            speakers=sorted(list(all_speakers)) if enable_diarization else None
+            speakers=sorted(list(all_speakers)) if enable_diarization else None,
+            session_id=session_id,
         )
         
     except HTTPException:
