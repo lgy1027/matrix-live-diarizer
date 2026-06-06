@@ -83,11 +83,11 @@ class CamPlusEngine(BaseSpeakerEngine):
             return None, 0
 
     def get_smoothed_embedding(self, emb: np.ndarray, client_id: str) -> np.ndarray:
-        """滑动窗口平均声纹"""
+        """滑动窗口平均声纹（仅实时流使用，文件上传应直接用原 embedding）"""
         self.emb_buffer[client_id].append(emb)
         if len(self.emb_buffer[client_id]) > self.EMB_BUFFER_SIZE:
             self.emb_buffer[client_id].pop(0)
-        
+
         smoothed = np.mean(self.emb_buffer[client_id], axis=0)
         smoothed = smoothed / (np.linalg.norm(smoothed) + 1e-6)
         return smoothed
@@ -109,23 +109,23 @@ class CamPlusEngine(BaseSpeakerEngine):
         """检查临时说话人缓存，看是否匹配已有的临时说话人"""
         if client_id not in self.pending_speakers:
             return None
-        
+
         pending_list = self.pending_speakers[client_id]
-        
+
         for i, (pending_emb, _, spk_id, count) in enumerate(pending_list):
             # 计算相似度
             similarity = np.dot(emb, pending_emb)
             distance = 1 - similarity
-            
+
             if distance < 0.40:  # 相似度 > 60%
                 # 更新临时说话人
                 new_count = count + 1
                 # 更新平均 embedding
                 new_emb = (pending_emb * count + emb) / new_count
                 new_emb = new_emb / (np.linalg.norm(new_emb) + 1e-6)
-                
+
                 pending_list[i] = (new_emb, 0, spk_id, new_count)
-                
+
                 # 如果累积足够样本，正式注册
                 if new_count >= self.PENDING_THRESHOLD:
                     self.collection.add(
@@ -136,33 +136,41 @@ class CamPlusEngine(BaseSpeakerEngine):
                     logger.info(f"[CONFIRMED] {spk_id} (samples={new_count})")
                     pending_list.pop(i)
                     return spk_id
-                
+
                 logger.debug(f"[PENDING MATCH] {spk_id} (samples={new_count}/{self.PENDING_THRESHOLD})")
                 return spk_id
-        
+
         return None
 
-    def compare_and_identify(self, current_emb, client_id: str, audio_duration: float = 0) -> str:
+    def compare_and_identify(self, current_emb, client_id: str, audio_duration: float = 0, use_buffer: bool = True) -> str:
         """说话人匹配与识别 - 优化版
-        
+
         Args:
             current_emb: 当前声纹特征
             client_id: 客户端ID
             audio_duration: 音频时长（秒），用于判断可靠性
+            use_buffer: 是否使用滑动窗口平滑。
+                - True (默认): 实时流场景，同一 client 持续说话，buffer 平滑抖动
+                - False: 文件上传场景，每次上传是独立 speaker 查询，buffer 残留会污染
         """
-        if current_emb is None: 
+        if current_emb is None:
             return "Unknown"
-        
+
         # 确定是否为可靠样本
         is_reliable = audio_duration >= self.MIN_AUDIO_DURATION
-        
+
         # 阈值: 距离越小越相似
         # 放宽高置信度阈值，收紧边缘阈值
         LOW_THRESHOLD = 0.40      # 高置信度 (相似度 > 60%)
         HIGH_THRESHOLD = 0.50     # 边缘区域 (相似度 > 50%)
         MIN_SAMPLES_FOR_EDGE = 2  # 降低边缘匹配样本要求
-        
-        smoothed_emb = self.get_smoothed_embedding(current_emb, client_id)
+
+        # 实时流：用滑动窗口平滑（抖动场景）
+        # 文件上传：直接用当前 embedding（避免 buffer 跨文件污染）
+        if use_buffer:
+            smoothed_emb = self.get_smoothed_embedding(current_emb, client_id)
+        else:
+            smoothed_emb = current_emb
         emb_list = smoothed_emb.tolist()
 
         # 先检查临时说话人缓存

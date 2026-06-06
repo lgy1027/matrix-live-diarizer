@@ -112,7 +112,7 @@ async def process_audio_chunk_with_diarization(
     else:
         embedding = emb_result
     
-    spk_id = get_speaker_engine().compare_and_identify(embedding, FILE_UPLOAD_SESSION, audio_duration)
+    spk_id = get_speaker_engine().compare_and_identify(embedding, FILE_UPLOAD_SESSION, audio_duration, use_buffer=False)
     
     return SegmentResult(
         speaker=spk_id,
@@ -206,7 +206,7 @@ async def upload_audio(
                         embedding, _ = emb_result
                     else:
                         embedding = emb_result
-                    spk_id = get_speaker_engine().compare_and_identify(embedding, FILE_UPLOAD_SESSION, duration)
+                    spk_id = get_speaker_engine().compare_and_identify(embedding, FILE_UPLOAD_SESSION, duration, use_buffer=False)
                 else:
                     spk_id = "SPEAKER"
             
