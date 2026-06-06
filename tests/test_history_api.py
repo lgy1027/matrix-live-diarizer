@@ -130,3 +130,32 @@ def test_delete_history(client):
 def test_delete_nonexistent(client):
     resp = client.delete("/v1/history/nonexistent")
     assert resp.status_code == 404
+
+
+def test_list_history_empty_string_source_treated_as_none(client):
+    """空字符串 source 应被视作未传 (不过滤)，不报 422"""
+    app = client.app
+    app.state.transcript_repo.create_session(source="websocket")
+    app.state.transcript_repo.create_session(source="upload")
+
+    # 之前会 422，现在应返回所有
+    resp = client.get("/v1/history?source=&q=")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] == 2
+
+
+def test_list_history_page_size_up_to_200_allowed(client):
+    """page_size=200 应被允许（之前 le=100）"""
+    app = client.app
+    for _ in range(3):
+        app.state.transcript_repo.create_session(source="websocket")
+
+    resp = client.get("/v1/history?page_size=200")
+    assert resp.status_code == 200
+
+
+def test_list_history_invalid_source_returns_400(client):
+    """非 websocket/upload 的 source 应返回 400 而不是 422"""
+    resp = client.get("/v1/history?source=invalid")
+    assert resp.status_code == 400

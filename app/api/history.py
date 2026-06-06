@@ -12,21 +12,38 @@ class HistoryListResponse(BaseModel):
     items: list[dict]
 
 
+def _normalize_source(v: Optional[str]) -> Optional[str]:
+    """空字符串视作未传"""
+    if v is None or v == "":
+        return None
+    if v not in ("websocket", "upload"):
+        raise HTTPException(status_code=400, detail=f"source 必须是 websocket 或 upload，收到: {v!r}")
+    return v
+
+
+def _normalize_q(v: Optional[str]) -> Optional[str]:
+    """空字符串视作未传"""
+    if v is None or v == "":
+        return None
+    return v[:100]
+
+
 @router.get("/v1/history", response_model=HistoryListResponse)
 def list_history(
     request: Request,
-    source: Optional[str] = Query(None, pattern="^(websocket|upload)$"),
-    q: Optional[str] = Query(None, max_length=100),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    source: Optional[str] = Query(None, description="websocket | upload，空字符串=不过滤"),
+    q: Optional[str] = Query(None, max_length=100, description="关键词，空字符串=不搜索"),
+    page: int = Query(1, ge=1, description="页码，从 1 开始"),
+    page_size: int = Query(20, ge=1, le=200, description="每页条数，最大 200"),
 ):
     repo = request.app.state.transcript_repo
+    norm_source = _normalize_source(source)
+    norm_q = _normalize_q(q)
     offset = (page - 1) * page_size
     items = repo.list_sessions(
-        source=source, q=q, limit=page_size, offset=offset
+        source=norm_source, q=norm_q, limit=page_size, offset=offset
     )
-    # 简单 total 计数（v0.2 MVP：不分页时全表 count；数据量大时再优化）
-    all_items = repo.list_sessions(source=source, q=q, limit=10_000, offset=0)
+    all_items = repo.list_sessions(source=norm_source, q=norm_q, limit=10_000, offset=0)
     return HistoryListResponse(total=len(all_items), items=items)
 
 
