@@ -1692,18 +1692,36 @@ $("#renameBtn").addEventListener("click", async () => {
   state.ws.send(JSON.stringify({action: "rename", title: newName.trim()}));
 });
 
-/* upload / dropzone */
-const dz = $("#dropzone");
-const fi = $("#fileInput");
-dz.addEventListener("click", () => fi.click());
-dz.addEventListener("dragover", (e) => { e.preventDefault(); dz.classList.add("drag"); });
-dz.addEventListener("dragleave", () => dz.classList.remove("drag"));
-dz.addEventListener("drop", (e) => {
-  e.preventDefault();
-  dz.classList.remove("drag");
-  if (e.dataTransfer.files[0]) uploadFile(e.dataTransfer.files[0]);
+/* upload / dropzone — 用 event delegation 挂在 document 上，
+   避免 dropzone innerHTML 替换后老 listener 失效 */
+document.addEventListener("click", (e) => {
+  const dz = e.target.closest("#dropzone");
+  if (dz) {
+    const fi = dz.querySelector("input[type=file]");
+    if (fi) fi.click();
+  }
 });
-fi.addEventListener("change", (e) => { if (e.target.files[0]) uploadFile(e.target.files[0]); });
+document.addEventListener("dragover", (e) => {
+  const dz = e.target.closest("#dropzone");
+  if (dz) { e.preventDefault(); dz.classList.add("drag"); }
+});
+document.addEventListener("dragleave", (e) => {
+  const dz = e.target.closest("#dropzone");
+  if (dz) { dz.classList.remove("drag"); }
+});
+document.addEventListener("drop", (e) => {
+  const dz = e.target.closest("#dropzone");
+  if (dz) {
+    e.preventDefault();
+    dz.classList.remove("drag");
+    if (e.dataTransfer.files[0]) uploadFile(e.dataTransfer.files[0]);
+  }
+});
+document.addEventListener("change", (e) => {
+  if (e.target.matches("input[type=file]") && e.target.id === "fileInput" && e.target.files[0]) {
+    uploadFile(e.target.files[0]);
+  }
+});
 
 async function uploadFile(file) {
   if (!/^audio\//.test(file.type) && !/\.(wav|mp3|m4a|flac|ogg)$/i.test(file.name)) {
