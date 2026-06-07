@@ -13,33 +13,37 @@ set -e
 COMMIT_MSG_FILE="$1"
 COMMIT_MSG=$(cat "$COMMIT_MSG_FILE")
 
-# 拦截的关键词(不区分大小写)
+# 用 git interpret-trailers 解析**真正的** trailer 区域
+# (只匹配行首 `Token-Name: value` 格式,description 里写 "Co-Authored-By: ..."
+# 不会被误判)
+COMMIT_TRAILERS=$(git interpret-trailers --parse "$COMMIT_MSG_FILE" 2>/dev/null || true)
+
+# 拦截的 trailer 模式(不区分大小写)
 FORBIDDEN_PATTERNS=(
-    "claude"
-    "anthropic"
     "co-authored-by:.*claude"
     "co-authored-by:.*anthropic"
-    "🤖"            # 常见 AI emoji
+    "🤖"
     "generated with claude"
     "ai generated"
-    "minimax"        # 兜底
 )
 
-for pattern in "${FORBIDDEN_PATTERNS[@]}"; do
-    if echo "$COMMIT_MSG" | grep -i -E "$pattern" >/dev/null 2>&1; then
-        echo ""
-        echo "❌ Commit message 包含 AI 工具痕迹: '$pattern'"
-        echo ""
-        echo "项目规则(详见 docs/CONTRIBUTING.md):"
-        echo "  - commit author/committer 必须是 lgy1027"
-        echo "  - commit message 不允许出现 claude / anthropic / AI 痕迹"
-        echo ""
-        echo "如果你的工具在 commit message 自动加了 'Co-Authored-By: ...',"
-        echo "请在工具配置里禁用 co-author 注入,或手动删掉相关行。"
-        echo ""
-        exit 1
-    fi
-done
+if [ -n "$COMMIT_TRAILERS" ]; then
+    for pattern in "${FORBIDDEN_PATTERNS[@]}"; do
+        if echo "$COMMIT_TRAILERS" | grep -i -E "$pattern" >/dev/null 2>&1; then
+            echo ""
+            echo "❌ Commit trailer 包含 AI 工具痕迹: '$pattern'"
+            echo ""
+            echo "项目规则(详见 docs/CONTRIBUTING.md):"
+            echo "  - commit author/committer 必须是 lgy1027"
+            echo "  - commit trailer 不允许出现 claude / anthropic / AI 痕迹"
+            echo ""
+            echo "如果你的工具在 commit message 自动加了 'Co-Authored-By: ...',"
+            echo "请在工具配置里禁用 co-author 注入,或手动删掉相关行。"
+            echo ""
+            exit 1
+        fi
+    done
+fi
 
 # 验证 author/committer 是 lgy1027
 AUTHOR=$(git var GIT_AUTHOR_IDENTIFIER 2>/dev/null || git log -1 --format='%an' HEAD 2>/dev/null || echo "")
