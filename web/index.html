@@ -1735,7 +1735,7 @@ async function uploadFile(file) {
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
       <b>${esc(t("view.live.dropzone.title"))}</b><small>${esc(t("view.live.dropzone.hint"))}</small>
       <input type="file" id="fileInput" accept="audio/*" hidden />`;
-    $("#fileInput").addEventListener("change", ev => ev.target.files[0] && uploadFile(ev.target.files[0]));
+    // 不需要重新绑定事件 — 改用 document-level event delegation
   }
 }
 
