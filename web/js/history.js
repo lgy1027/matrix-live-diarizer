@@ -4,11 +4,7 @@ const searchQ = document.getElementById("search-q");
 const filterSource = document.getElementById("filter-source");
 const btnSearch = document.getElementById("btn-search");
 
-function escapeHtml(s) {
-  return String(s || "").replace(/[&<>"']/g, (c) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
-  })[c]);
-}
+const escapeHtml = Matrix.escape;
 
 async function load() {
   const params = {};

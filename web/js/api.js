@@ -56,4 +56,9 @@ window.Matrix = {
   qs(obj) {
     return new URLSearchParams(obj).toString();
   },
+  escape(s) {
+    return String(s ?? "").replace(/[&<>"']/g, (c) => (
+      { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+    ));
+  },
 };

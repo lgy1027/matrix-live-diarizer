@@ -1205,8 +1205,8 @@ let currentLang = (() => {
     const saved = localStorage.getItem('matrix.lang');
     if (saved && STRINGS[saved]) return saved;
   } catch (e) { /* localStorage may be blocked */ }
-  // 默认英文；用户手动切换后会写入 localStorage
-  return 'en';
+  // 默认中文(项目面向国内用户);用户手动切换后会写入 localStorage
+  return 'zh';
 })();
 
 function t(key, ...args) {
@@ -1289,7 +1289,7 @@ const state = {
 /* helpers */
 const $ = (s, r=document) => r.querySelector(s);
 const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
-const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const esc = Matrix.escape;  // 全局别名,大量模板内联调用
 
 /* ========== Modal 组件 (Boutique Audio Atelier 风格) ==========
  * 3 种类型：

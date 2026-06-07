@@ -80,3 +80,9 @@ data/
 *.db-wal
 *.db-shm
 PR_DESCRIPTION.md
+
+# 个人规则文档(和开源项目无关)
+.githooks/
+.gitmessage
+docs/CONTRIBUTING.md
+docs/SELF_PROMO_*.md
