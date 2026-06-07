@@ -201,21 +201,30 @@ class CamPlusEngine(BaseSpeakerEngine):
             
             # 高置信度匹配
             if best_dist < low_thresh:
-                old_mean = np.array(
-                    self.collection.get(ids=[best_id], include=['embeddings'])['embeddings'][0]
-                )
-                
-                # 自适应权重：样本越多更新越保守
-                weight = min(0.15, 1.5 / (best_count + 1))
-                new_mean = (old_mean * (1 - weight)) + (smoothed_emb * weight)
-                new_mean = new_mean / (np.linalg.norm(new_mean) + 1e-6)
-                
-                self.collection.update(
-                    ids=[best_id],
-                    embeddings=[new_mean.tolist()],
-                    metadatas=[{"session_id": client_id, "count": best_count + 1, "last_update": time.time(), "confirmed": True}]
-                )
-                logger.info(f"[MATCHED] {best_id} (sim: {1-best_dist:.0%}, samples={best_count+1})")
+                # 防漂移:已积累足够样本(>= 10)后,锁定均值不再更新,
+                # 避免长会议中被边缘样本推离早期聚类中心
+                if best_count < 10:
+                    old_mean = np.array(
+                        self.collection.get(ids=[best_id], include=['embeddings'])['embeddings'][0]
+                    )
+                    # 自适应权重:样本越多更新越保守
+                    weight = min(0.15, 1.5 / (best_count + 1))
+                    new_mean = (old_mean * (1 - weight)) + (smoothed_emb * weight)
+                    new_mean = new_mean / (np.linalg.norm(new_mean) + 1e-6)
+                    embedding_to_save = new_mean.tolist()
+                else:
+                    # 锁定,只更新 count/timestamp
+                    embedding_to_save = None
+
+                update_kwargs = {
+                    "ids": [best_id],
+                    "metadatas": [{"session_id": client_id, "count": best_count + 1, "last_update": time.time(), "confirmed": True}],
+                }
+                if embedding_to_save is not None:
+                    update_kwargs["embeddings"] = [embedding_to_save]
+                self.collection.update(**update_kwargs)
+                logger.info(f"[MATCHED] {best_id} (sim: {1-best_dist:.0%}, samples={best_count+1}, "
+                            f"{'updated' if embedding_to_save is not None else 'locked'})")
                 return best_id
             
             # 边缘匹配：需要已有足够样本
