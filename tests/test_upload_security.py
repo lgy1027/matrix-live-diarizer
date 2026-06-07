@@ -39,7 +39,7 @@ class TestFileUploadSecurity:
         asr, spk, lock = mock_engines
         
         with patch('app.api.upload.asr_engine', asr), \
-             patch('app.api.upload.spk_engine', spk), \
+             patch('app.api.upload.inference_lock', lock), \
              patch('app.api.upload.inference_lock', lock), \
              patch('app.api.upload.current_dir', '/tmp'):
             
@@ -58,7 +58,7 @@ class TestFileUploadSecurity:
         asr, spk, lock = mock_engines
         
         with patch('app.api.upload.asr_engine', asr), \
-             patch('app.api.upload.spk_engine', spk), \
+             patch('app.api.upload.inference_lock', lock), \
              patch('app.api.upload.inference_lock', lock), \
              patch('app.api.upload.current_dir', '/tmp'):
             
@@ -77,7 +77,7 @@ class TestFileUploadSecurity:
         asr, spk, lock = mock_engines
         
         with patch('app.api.upload.asr_engine', asr), \
-             patch('app.api.upload.spk_engine', spk), \
+             patch('app.api.upload.inference_lock', lock), \
              patch('app.api.upload.inference_lock', lock), \
              patch('app.api.upload.current_dir', '/tmp'), \
              patch('app.api.upload.MAX_FILE_SIZE', 100):  # 限制 100 bytes

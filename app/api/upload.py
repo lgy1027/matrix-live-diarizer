@@ -172,7 +172,12 @@ async def upload_audio(
     
     temp_dir = os.path.join(current_dir, "uploads")
     os.makedirs(temp_dir, exist_ok=True)
-    file_path = os.path.join(temp_dir, f"{uuid.uuid4()}_{file.filename}")
+    # 用 os.path.basename 强隔离,防止 ../ 路径遍历;再过滤路径分隔符
+    safe_name = os.path.basename(file.filename or "upload.wav")
+    safe_name = safe_name.replace(os.sep, "_").replace("\x00", "")
+    if not safe_name:
+        safe_name = "upload.wav"
+    file_path = os.path.join(temp_dir, f"{uuid.uuid4()}_{safe_name}")
     
     try:
         import shutil
@@ -338,8 +343,8 @@ async def upload_audio(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"[UPLOAD ERROR] {e}")
-        return UploadResponse(status="error", message=str(e))
+        logger.exception(f"[UPLOAD ERROR] {e}")
+        raise HTTPException(status_code=500, detail=f"处理失败: {type(e).__name__}")
     finally:
         if os.path.exists(file_path):
             os.remove(file_path)

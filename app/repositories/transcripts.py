@@ -59,11 +59,19 @@ class TranscriptRepository:
             rows = conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
 
+    # 允许通过 update_session 修改的列(防越权改 client_id/is_archived 等)
+    _SESSION_UPDATABLE_COLS = frozenset({"title", "is_archived"})
+
     def update_session(self, sid: str, **fields) -> None:
         if not fields:
             return
-        set_clause = ", ".join(f"{k} = ?" for k in fields if k != "updated_at")
-        params = [v for k, v in fields.items() if k != "updated_at"]
+        # 白名单过滤:只接受预定义列,其它(尤其是 client_id/created_at)丢弃
+        safe_fields = {k: v for k, v in fields.items()
+                       if k in self._SESSION_UPDATABLE_COLS}
+        if not safe_fields:
+            return
+        set_clause = ", ".join(f"{k} = ?" for k in safe_fields)
+        params = list(safe_fields.values())
         params.append(sid)
         with self.db.connect() as conn:
             conn.execute(

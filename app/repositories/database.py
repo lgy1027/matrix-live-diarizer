@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS segments (
     start_time    REAL NOT NULL,
     end_time      REAL NOT NULL,
     confidence    REAL,
-    is_final      INTEGER DEFAULT 1
+    is_final      INTEGER DEFAULT 1,
+    UNIQUE(session_id, segment_index)
 );
 CREATE INDEX IF NOT EXISTS idx_segments_session ON segments(session_id, segment_index);
 

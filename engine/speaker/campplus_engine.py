@@ -266,7 +266,7 @@ class CamPlusEngine(BaseSpeakerEngine):
                 logger.debug(f"[NEW?] Dist={best_dist:.4f}")
 
         # 注册新说话人（但可能还在待确认状态）
-        new_id = f"Spk_{int(time.time() * 1000) % 10000}"
+        new_id = f"Spk_{int(time.time_ns() % (1 << 31))}"
         
         if is_reliable:
             # 可靠样本：直接注册

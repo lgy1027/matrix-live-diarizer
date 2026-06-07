@@ -70,6 +70,8 @@ class LLMGateway:
     async def is_available(self) -> bool:
         if not self.config.enabled:
             return False
+        if self.config.mock:
+            return True
         now = asyncio.get_event_loop().time()
         if self._available_cache is not None and (now - self._cache_time) < self._cache_ttl:
             return self._available_cache
