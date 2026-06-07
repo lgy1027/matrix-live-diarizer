@@ -17,7 +17,6 @@ class TestExceptionHandling:
         app.include_router(router)
         
         with patch('app.api.upload.asr_engine', Mock()), \
-             patch('app.api.upload.spk_engine', Mock()), \
              patch('app.api.upload.inference_lock', MagicMock()), \
              patch('app.api.upload.current_dir', '/tmp'):
             
@@ -84,7 +83,6 @@ class TestSpecificExceptionHandling:
         
         with patch.dict('sys.modules', {'librosa': librosa_mock}), \
              patch('app.api.upload.asr_engine', Mock()), \
-             patch('app.api.upload.spk_engine', Mock()), \
              patch('app.api.upload.inference_lock', MagicMock()), \
              patch('app.api.upload.current_dir', '/tmp'):
             
@@ -100,12 +98,11 @@ class TestSpecificExceptionHandling:
                 "/v1/upload",
                 files={"file": ("invalid.wav", wav_header, "audio/wav")}
             )
-            
-            # 应该返回错误状态，而非 500
-            assert response.status_code in [200, 400]
-            if response.status_code == 200:
-                data = response.json()
-                assert data.get("status") == "error"
+
+            # 业务失败应返回 5xx (Round 2 改为 raise HTTPException(500)),
+            # 不再返回 200 + status="error"
+            assert response.status_code >= 400
+            assert "detail" in response.json()
 
 
 if __name__ == "__main__":

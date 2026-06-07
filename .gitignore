@@ -60,6 +60,7 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
+CLAUDE.md
 
 # Local config
 .env
@@ -68,5 +69,14 @@ Thumbs.db
 # iFlow
 .agents/
 .iflow/
+docs/superpowers/
 skills-lock.json
 AGENTS.md
+# 本地数据
+data/
+.storage/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+PR_DESCRIPTION.md

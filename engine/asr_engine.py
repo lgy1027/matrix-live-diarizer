@@ -3,9 +3,11 @@ import torch
 import numpy as np
 import asyncio
 import logging
+import threading
+import time
 import scipy.signal as signal
 from modelscope import snapshot_download
-from qwen_asr import Qwen3ASRModel 
+from qwen_asr import Qwen3ASRModel
 
 logger = logging.getLogger("ASR_Engine")
 
@@ -38,42 +40,108 @@ class ASREngine:
         return cls._instance
 
     def __init__(self):
-        if self.initialized: 
+        if self.initialized:
             return
-        
-        # 设备检测：CUDA > MPS > CPU
-        if torch.cuda.is_available():
-            self.device = "cuda"
-        elif torch.backends.mps.is_available():
-            self.device = "mps"
+
+        from app.config import config
+        self.config = config.audio
+
+        # 设备选择（auto 优先 mps，失败回退 cpu）
+        requested = self.config.asr_device
+        if requested == "auto":
+            if torch.cuda.is_available():
+                preferred = "cuda"
+            elif torch.backends.mps.is_available():
+                preferred = "mps"
+            else:
+                preferred = "cpu"
         else:
-            self.device = "cpu"
-        logger.info(f"[ASR] 初始化中，设备: {self.device}")
+            preferred = requested
+        self.device = preferred
+        logger.info(f"[ASR] 初始化中，设备: {self.device} (requested={requested})")
 
         try:
-            model_dir = snapshot_download("Qwen/Qwen3-ASR-0.6B")
-            # CUDA 和 MPS 使用 bfloat16，CPU 使用 float32
-            dtype = torch.bfloat16 if self.device in ("cuda", "mps") else torch.float32
-            self.asr_model = Qwen3ASRModel.from_pretrained(
-                model_dir, 
-                dtype=dtype, 
-                device_map=self.device
-            )
-            
-            # 加载 Silero VAD
-            self.vad_model, utils = torch.hub.load(
-                repo_or_dir='snakers4/silero-vad', 
-                model='silero_vad',
-                trust_repo=True
-            )
-            self.get_speech_timestamps = utils[0]
-            self.vad_model.eval()
-            
-            self.sample_rate = 16000
-            self.initialized = True
-            logger.info("[ASR] 模型加载成功（VAD 已启用）")
+            success = self._load_with_fallback(preferred)
         except Exception as e:
-            logger.error(f"[ASR] 初始化失败: {e}")
+            logger.error(f"[ASR] 初始化异常: {e}")
+            success = False
+
+        if not success:
+            logger.error("[ASR] 所有设备尝试失败，引擎不可用")
+        else:
+            logger.info(f"[ASR] 模型加载成功（VAD 已启用）设备={self.device}")
+
+    def _load_with_fallback(self, preferred: str) -> bool:
+        """按首选设备 → CPU 顺序尝试加载，每设备有超时（防 MPS 死锁）。"""
+        if preferred == "cpu":
+            order = ["cpu"]
+        else:
+            order = [preferred, "cpu"]
+
+        timeout = self.config.asr_load_timeout_sec
+
+        for device in order:
+            logger.info(f"[ASR] 尝试加载到 {device}（超时 {timeout}s）")
+            t0 = time.time()
+            result: dict = {"ok": False, "err": None, "asr_model": None}
+
+            def _worker():
+                try:
+                    model_dir = snapshot_download("Qwen/Qwen3-ASR-0.6B")
+                    dtype = torch.bfloat16 if device in ("cuda", "mps") else torch.float32
+                    result["asr_model"] = Qwen3ASRModel.from_pretrained(
+                        model_dir, dtype=dtype, device_map=device
+                    )
+                    result["ok"] = True
+                except Exception as e:
+                    result["err"] = e
+
+            th = threading.Thread(target=_worker, daemon=True)
+            th.start()
+            th.join(timeout=timeout)
+            elapsed = time.time() - t0
+
+            if th.is_alive():
+                logger.warning(
+                    f"[ASR] {device} 加载超时 ({elapsed:.0f}s > {timeout}s)，放弃此设备"
+                )
+                # daemon=True 会随主进程退出；这里尽力释放 worker 内部引用
+                if result.get("asr_model") is not None:
+                    result["asr_model"] = None
+                continue
+
+            if not result["ok"]:
+                # 失败时立即释放已加载的 model 引用,避免后续 fallback 累积
+                if result.get("asr_model") is not None:
+                    del result["asr_model"]
+                    try:
+                        import gc; gc.collect()
+                    except Exception:
+                        pass
+
+            if result["ok"]:
+                self.device = device
+                self.asr_model = result["asr_model"]
+                # 加载 Silero VAD
+                try:
+                    self.vad_model, utils = torch.hub.load(
+                        repo_or_dir='snakers4/silero-vad',
+                        model='silero_vad',
+                        trust_repo=True,
+                    )
+                    self.get_speech_timestamps = utils[0]
+                    self.vad_model.eval()
+                    self.sample_rate = 16000
+                except Exception as e:
+                    logger.error(f"[ASR] VAD 加载失败: {e}")
+                    return False
+                logger.info(f"[ASR] {device} 加载成功 ({elapsed:.1f}s)")
+                self.initialized = True
+                return True
+
+            logger.warning(f"[ASR] {device} 加载失败: {result['err']}")
+
+        return False
 
     def is_silent(self, audio_data, threshold=0.012, use_vad=True):
         """智能静音检测：结合 RMS 和 VAD"""
@@ -133,40 +201,39 @@ class ASREngine:
                 # 软限幅
                 audio_data = np.tanh(audio_data * 1.5) / 1.5
         
-        # 3. 简单谱减降噪（针对稳态噪声）
+        # 3. 软门限降噪（针对稳态噪声）
+        # 注意:这是简化的能量门限,不是完整 STFT 谱减。VAD + Silero
+        # 负责主要的语音检测,这一步只做粗粒度软门限。
         audio_data = self._spectral_subtraction(audio_data, noise_est_ratio=0.1)
-        
+
         return audio_data
 
     def _spectral_subtraction(self, audio: np.ndarray, noise_est_ratio: float = 0.1) -> np.ndarray:
-        """简单谱减降噪"""
+        """软门限降噪（不是完整谱减法）
+
+        仅按能量阈值做软衰减,不依赖 STFT。设计取舍:轻量、无频域失真。
+        真正的稳态噪声抑制请用完整 STFT + 谱减或 Wiener 滤波。
+        """
         if len(audio) < 1024:
             return audio
-        
+
         try:
             # 估计噪声（取开头一小段）
             noise_len = min(int(len(audio) * noise_est_ratio), 1600)
             noise = audio[:noise_len]
-            
-            # STFT 参数
-            n_fft = 512
-            hop_length = 256
-            
-            # 简化的谱减
-            # 这里用卷积平滑代替完整 STFT，减少计算量
+
             noise_power = np.mean(noise**2)
-            
-            # 门限降噪
             threshold = noise_power * 3
-            mask = np.abs(audio) > np.sqrt(threshold)
-            
-            # 软门限
+            sqrt_th = np.sqrt(threshold) + 1e-6
+
+            # 能量低于阈值的部分做软衰减(不是直接置 0,避免引入突变)
+            mask = np.abs(audio) > sqrt_th
             reduced = np.where(
                 mask,
                 audio,
-                audio * (np.abs(audio) / (np.sqrt(threshold) + 1e-6))
+                audio * (np.abs(audio) / sqrt_th)
             )
-            
+
             return reduced
         except Exception:
             return audio

@@ -4,7 +4,7 @@
 
 **实时语音转写与说话人识别系统**
 
-基于 Qwen3-ASR 构建，支持 WebSocket 流式传输与多声纹引擎切换
+基于 Qwen3-ASR 构建,默认数据不外传,支持本地 LLM 增强
 
 [![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
@@ -16,155 +16,55 @@
 
 ---
 
-## ✨ 特性
+## ✨ 核心特性
 
-- 🎤 **实时转写** - WebSocket 流式传输，说话即转写，低延迟响应
-- 👥 **说话人识别** - 自动区分不同说话人，支持增量学习
-- 🔧 **多引擎支持** - CamPlus / ERes2NetV2 / Wespeaker 三种声纹引擎可切换
-- 📁 **离线处理** - 支持上传音频文件批量处理
-- 🎯 **智能 VAD** - Silero VAD 语音活动检测，精准识别语音段
-- 🧹 **幻觉过滤** - 自动过滤 ASR 常见幻觉输出，提升准确性
+- 🎤 **实时转写** — WebSocket 流式,说话即转写
+- 👥 **说话人识别** — CamPlus / ERes2NetV2 / Wespeaker 3 种引擎,API 运行时切换
+- 🗂️ **批量管理** — Voice Library 多选 + 批量删除,自动清空 segments 引用
+- 📁 **离线处理** — 长音频自动分段 + 重叠合并,SRT/VTT/MD/JSON 导出
+- 🤖 **可选 LLM** — 摘要 / 行动项 / 纪要,默认仅本机 Ollama,可显式开公网
+- 🔐 **安全默认** — DNS rebinding 防御 + Bearer token 本机 + prompt 注入隔离
 
-## 🚀 快速开始
-
-### 环境要求
-
-- Python 3.12+
-- PyTorch 2.0+ (支持 CUDA / MPS / CPU)
-
-### 安装
+## 🚀 30 秒快速开始
 
 ```bash
-# 克隆项目
+# 1. 克隆 + 装依赖
 git clone https://github.com/lgy1027/matrix-live-diarizer.git
 cd matrix-live-diarizer
-
-# 安装依赖
 pip install -r requirements.txt
-```
 
-### 启动服务
-
-```bash
-# 默认使用 CamPlus 引擎
+# 2. 启动(首次需联网下载模型 ~1.8GB)
 python main.py
 
-# 使用 ERes2NetV2 高精度引擎
-SPEAKER_ENGINE=eres2net python main.py
-
-# 使用 Wespeaker 引擎
-SPEAKER_ENGINE=wespeaker python main.py
+# 3. 浏览器打开 web/index.html(用 file:// 协议)
+open web/index.html   # macOS
+# 或手动双击 web/index.html
 ```
 
-服务启动后：
-1. 用浏览器打开 `web/index.html` 文件
-2. 页面会自动连接到后端服务
-
-<details>
-<summary>📊 查看启动日志示例</summary>
-
+启动日志示例:
 ```
-[FACTORY] 使用 CamPlus 引擎
-[ASR] 初始化中，设备: mps
-[ASR] 模型加载成功（VAD 已启用）
+[ASR] 初始化中,设备: mps
+[ASR] 模型加载成功(VAD 已启用)
 [CamPlus] 引擎初始化完成
-声纹引擎: CamPlus, 模型: damo/speech_campplus_sv_zh-cn_16k-common
 INFO:     Uvicorn running on http://0.0.0.0:8000
 ```
 
-</details>
-
-## 📖 使用指南
-
-### Web 界面
-
-1. 启动后端服务：`python main.py`
-2. 用浏览器打开 `web/index.html` 文件
-3. 点击 **Start Stream** 开始实时转写
-4. 点击 **Upload File** 上传音频文件处理
-
-> 💡 **提示**：Web 界面会自动连接到 `127.0.0.1:8000` 的后端服务
-
-### API 接口
-
-#### WebSocket 实时流
-
-```
-ws://127.0.0.1:8000/ws/v1/stream/{client_id}
-```
-
-**输入**: PCM Int16 字节流 (16kHz)
-
-**输出**:
-```json
-{
-  "speaker": "Spk_1234",
-  "text": "增量文本",
-  "time": "14:30:25"
-}
-```
-
-#### 文件上传
-
+换引擎启动:
 ```bash
-curl -X POST "http://127.0.0.1:8000/v1/upload" \
-  -H "Content-Type: multipart/form-data" \
-  -F "file=@audio.wav"
+SPEAKER_ENGINE=eres2net python main.py
 ```
 
-**响应**:
-```json
-{
-  "status": "success",
-  "filename": "audio.wav",
-  "speaker": "Spk_1234",
-  "text": "完整的转写文本"
-}
-```
+> ⚠️ macOS MPS 偶发加载死锁 → 用 `ASR_DEVICE=cpu python main.py` 启动
+> (详见 [常见问题](#-常见问题) Q1)
 
-#### 获取模型信息
+## 📚 详细文档
 
-```bash
-curl http://127.0.0.1:8000/v1/models
-```
-
-<details>
-<summary>🔧 更多配置选项</summary>
-
-| 参数 | 默认值 | 环境变量 | 说明 |
-|------|--------|----------|------|
-| host | 0.0.0.0 | HOST | 监听地址 |
-| port | 8000 | PORT | 监听端口 |
-| speaker_engine | campplus | SPEAKER_ENGINE | 声纹引擎类型 |
-| buffer_threshold | 32000 | - | 音频缓冲阈值（采样点） |
-| silence_threshold | 0.008 | - | 静音检测阈值 |
-| timeout | 30s | - | 无音频超时断开 |
-
-</details>
-
-## 🏗️ 项目结构
-
-```
-matrix-live-diarizer/
-├── main.py                     # 应用入口
-├── app/                        # FastAPI 应用层
-│   ├── api/
-│   │   ├── websocket.py        # WebSocket 实时流接口
-│   │   └── upload.py           # 文件上传接口
-│   ├── services/
-│   │   └── session.py          # 会话上下文管理
-│   ├── config.py               # 配置管理
-│   └── constants.py            # 常量定义
-├── engine/                     # 推理引擎层
-│   ├── asr_engine.py           # ASR 引擎 (Qwen3-ASR)
-│   └── speaker/                # 声纹引擎模块
-│       ├── speaker_factory.py  # 引擎工厂
-│       ├── campplus_engine.py  # CamPlus 引擎
-│       ├── eres2net_engine.py  # ERes2NetV2 引擎
-│       └── wespeaker_engine.py # Wespeaker 引擎
-└── web/
-    └── index.html              # Web 前端界面
-```
+| 文档 | 内容 |
+|------|------|
+| **[docs/USAGE.md](docs/USAGE.md)** | Web 界面详细使用 + 高级场景 + 故障排查 |
+| **[docs/API.md](docs/API.md)** | 所有 API 端点(WebSocket/上传/说话人/引擎)+ 环境变量 |
+| **[docs/LLM_SETUP.md](docs/LLM_SETUP.md)** | LLM 配置:本地 Ollama / 公网 OpenAI / LiteLLM 反代 |
+| **[docs/PRIVACY.md](docs/PRIVACY.md)** | 隐私保证:默认本地 + 可选公网 + 4 道护栏 |
 
 ## 🎯 声纹引擎对比
 
@@ -174,37 +74,27 @@ matrix-live-diarizer/
 | **ERes2NetV2** | 0.61% | 6.14% | 17.8M | 🚗 中 | 高精度需求 |
 | **Wespeaker** | 1.05% | 6.92% | 6.34M | ⚡ 快 | 经典稳定 |
 
-## 🧠 技术架构
+## 🏗️ 项目结构
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        Client Layer                          │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
-│  │  WebSocket  │  │  REST API   │  │    Web Interface    │  │
-│  └──────┬──────┘  └──────┬──────┘  └──────────┬──────────┘  │
-└─────────┼────────────────┼───────────────────┼──────────────┘
-          │                │                   │
-          ▼                ▼                   ▼
-┌─────────────────────────────────────────────────────────────┐
-│                      FastAPI Application                     │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │                  Session Manager                       │   │
-│  │         (Audio Buffer / Incremental Text)             │   │
-│  └──────────────────────────────────────────────────────┘   │
-└─────────────────────────────┬───────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                       Engine Layer                           │
-│  ┌─────────────────────┐    ┌─────────────────────────────┐ │
-│  │     ASR Engine      │    │      Speaker Engine         │ │
-│  │   (Qwen3-ASR)       │    │  ┌─────┬─────┬─────────┐   │ │
-│  │  - VAD Detection    │    │  │Camp+│ERes2│Wespeaker│   │ │
-│  │  - Preprocessing    │    │  └─────┴─────┴─────────┘   │ │
-│  │  - Hallucination    │    │  - ChromaDB Storage        │ │
-│  └─────────────────────┘    │  - Incremental Learning    │ │
-│                              └─────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
+matrix-live-diarizer/
+├── main.py                # 入口
+├── app/                   # FastAPI 应用层
+│   ├── api/               # websocket / upload / speakers / health
+│   ├── repositories/      # SQLite 持久化
+│   ├── services/          # LLM / exporter / statistics
+│   ├── middleware/        # 速率限制
+│   └── config.py          # 配置 dataclass
+├── engine/                # 推理引擎层
+│   ├── asr_engine.py      # Qwen3-ASR + Silero VAD
+│   └── speaker/           # 3 种声纹引擎 + factory
+├── tests/                 # 239 个测试(包含 smoke test)
+├── docs/                  # 详细文档
+│   ├── USAGE.md           # 使用指南
+│   ├── API.md             # API 参考
+│   ├── LLM_SETUP.md       # LLM 配置
+│   └── PRIVACY.md         # 隐私保证
+└── web/index.html         # Web SPA(实时/历史/声纹/设置)
 ```
 
 ## 📦 模型来源
@@ -212,35 +102,58 @@ matrix-live-diarizer/
 | 模块 | 模型 | 来源 |
 |------|------|------|
 | ASR | [Qwen3-ASR-0.6B](https://modelscope.cn/models/Qwen/Qwen3-ASR-0.6B) | ModelScope |
-| Speaker | [CamPlus](https://modelscope.cn/models/damo/speech_campplus_sv_zh-cn_16k-common) | ModelScope |
-| Speaker | [ERes2NetV2](https://modelscope.cn/models/iic/speech_eres2netv2_sv_zh-cn_16k-common) | ModelScope |
-| Speaker | [Wespeaker](https://modelscope.cn/models/iic/speech_resnet34_sv_zh-cn_3dspeaker_16k) | ModelScope |
+| Speaker | CamPlus / ERes2NetV2 / Wespeaker | ModelScope |
 | VAD | [Silero VAD](https://github.com/snakers4/silero-vad) | torch.hub |
+
+首次启动自动下载,完成后**永久断网可用**(LLM 关闭时)。
 
 ## ⚠️ 注意事项
 
-- **单进程运行**: Mac MPS 需单进程，避免内存溢出
-- **采样率**: 音频输入必须是 16kHz
-- **首次启动**: 模型会自动下载到本地缓存，请确保网络畅通
+- **单进程运行** — Mac MPS 必须 `WORKERS=1`,避免内存溢出
+- **采样率 16kHz** — 浏览器自动重采样,API 客户端需注意
+- **文件上传** — 500MB 上限,1 小时时长上限
+- **首次启动** — 需联网下载模型约 1.8GB
+
+## ❓ 常见问题
+
+**Q1: `python main.py` 卡住不动 4+ 分钟?**
+A: macOS MPS 加载 Qwen3-ASR 偶发死锁。已加 90s 超时回退 CPU。
+   手动:`ASR_DEVICE=cpu python main.py`
+
+**Q2: 想清理大量重复 / 低质量声纹?**
+A: Voice Library 点 **Select** → 多选 → **Delete N**。
+   或 API:`POST /v1/speakers/cleanup`(`docs/API.md` 第 3 节)。
+
+**Q3: 想用 GPT-4 / Claude 质量但保持隐私?**
+A: 本地起 [LiteLLM](https://github.com/BerriAI/litellm) 反代,
+   Matrix 通过 `http://127.0.0.1:4000` 访问(无需 `LLM_ALLOW_PUBLIC`)。
+   详见 [`docs/LLM_SETUP.md`](docs/LLM_SETUP.md)。
+
+**Q4: 数据会发到云端吗?**
+A: 默认**不会**。LLM 公网 endpoint 需**显式**设 `LLM_ALLOW_PUBLIC=true` 才放行,
+   且只发转写文本到指定 endpoint,不包含音频和声纹向量。
+   详见 [`docs/PRIVACY.md`](docs/PRIVACY.md)。
+
+更多问题见 [docs/USAGE.md 故障排查](docs/USAGE.md#故障排查速查)。
 
 ## 🤝 贡献
 
-欢迎提交 Issue 和 Pull Request！
+欢迎 Issue 和 PR！
 
-1. Fork 本仓库
-2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 提交 Pull Request
+1. Fork 仓库
+2. 创建分支 (`git checkout -b feature/AmazingFeature`)
+3. 提交 (`git commit -m 'feat: add some amazing feature'`)
+4. 推送 (`git push origin feature/AmazingFeature`)
+5. 提 Pull Request
 
 ## 📄 License
 
-本项目基于 [MIT License](LICENSE) 开源。
+[MIT](LICENSE)
 
 ---
 
 <div align="center">
 
-**如果这个项目对你有帮助，请给一个 ⭐ Star 支持一下！**
+**如果这个项目对你有帮助,请给一个 ⭐ Star 支持!**
 
 </div>

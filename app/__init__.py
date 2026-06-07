@@ -1,8 +1,10 @@
 """FastAPI 应用工厂"""
 import asyncio
 import logging
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from transformers import logging as tf_logging
 
 from app.config import config
@@ -46,7 +48,13 @@ def create_app() -> FastAPI:
     
     _init_engines(app)
     app.include_router(api_router)
-    
+
+    # 挂载 web/ 静态目录（多页前端：index/history/detail/settings）
+    web_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web")
+    if os.path.isdir(web_dir):
+        app.mount("/web", StaticFiles(directory=web_dir, html=True), name="web")
+        logger.info(f"🌐 静态文件已挂载: /web → {web_dir}")
+
     return app
 
 
@@ -54,23 +62,40 @@ def _init_engines(app: FastAPI):
     """初始化推理引擎"""
     from engine.asr_engine import ASREngine
     from engine.speaker import get_speaker_engine, get_engine_info
-    
+
     asr_engine = ASREngine()
     spk_engine = get_speaker_engine()
-    
+
     engine_info = get_engine_info()
     logger.info(f"声纹引擎: {engine_info['name']}, 模型: {engine_info['model']}")
-    
+
     inference_lock = asyncio.Lock()
-    
+
     import os
     from app.api.health import init_health_check
-    
+
+    # 持久化层（先于 init_upload_engines，确保 transcript_repo 可被注入）
+    from app.repositories.database import Database
+    from app.repositories.transcripts import TranscriptRepository
+    from app.repositories.settings import SettingsRepository
+
+    db = Database(config.storage.db_path)
+    db.init_schema()
+    transcript_repo = TranscriptRepository(db)
+    settings_repo = SettingsRepository(db)
+
+    app.state.db = db
+    app.state.transcript_repo = transcript_repo
+    app.state.settings_repo = settings_repo
+
     current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     init_ws_engines(asr_engine, spk_engine, inference_lock)
-    init_upload_engines(asr_engine, spk_engine, inference_lock, current_dir)
+    init_upload_engines(asr_engine, spk_engine, inference_lock, current_dir, transcript_repo)
     init_health_check(asr_engine, spk_engine)
-    
+
     app.state.asr_engine = asr_engine
     app.state.spk_engine = spk_engine
     app.state.inference_lock = inference_lock
+
+    logger.info(f"💾 数据库已初始化: {config.storage.db_path}")
+    logger.info("🔒 完全离线模式:所有数据仅在本机处理")
