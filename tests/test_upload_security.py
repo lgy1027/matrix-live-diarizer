@@ -75,7 +75,7 @@ class TestFileUploadSecurity:
     def test_reject_oversized_file(self, mock_app, mock_engines):
         """测试拒绝超大文件"""
         asr, spk, lock = mock_engines
-        
+
         with patch('app.api.upload.asr_engine', asr), \
              patch('app.api.upload.inference_lock', lock), \
              patch('app.api.upload.inference_lock', lock), \
@@ -93,6 +93,20 @@ class TestFileUploadSecurity:
 
             assert response.status_code == 400
             assert "文件" in response.json()["detail"]
+
+    def test_reject_empty_file(self, mock_app, mock_engines):
+        """测试拒绝 0 字节文件,返回 400 而不是 500"""
+        asr, spk, lock = mock_engines
+        with patch('app.api.upload.asr_engine', asr), \
+             patch('app.api.upload.inference_lock', lock), \
+             patch('app.api.upload.current_dir', '/tmp'):
+            client = TestClient(mock_app)
+            response = client.post(
+                "/v1/upload",
+                files={"file": ("empty.wav", b"", "audio/wav")},
+            )
+            assert response.status_code == 400
+            assert "空" in response.json()["detail"]
 
     def test_valid_extensions_list(self):
         """测试允许的文件扩展名列表"""

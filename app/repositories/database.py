@@ -65,6 +65,13 @@ class Database:
             conn.execute("PRAGMA synchronous=NORMAL")
             conn.commit()
 
+    def _init_schema_on_conn(self, conn: sqlite3.Connection) -> None:
+        """在已开启的连接上建表(兜底用)"""
+        conn.executescript(SCHEMA_SQL)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.commit()
+
     @contextmanager
     def connect(self):
         """获取连接,启用 Row 工厂 + busy_timeout
@@ -87,7 +94,6 @@ class Database:
         )
         if cur.fetchone() is None:
             self._init_schema_on_conn(conn)
-        try:
         try:
             yield conn
         finally:
