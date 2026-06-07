@@ -317,6 +317,120 @@ footer.bar-b{height:32px;padding:0 28px;display:flex;align-items:center;justify-
   background:var(--amber);
   font-weight:600;
 }
+
+/* ========== modal ========== */
+.modal-backdrop{
+  position:fixed;
+  inset:0;
+  background:rgba(10,9,8,0.78);
+  backdrop-filter:blur(6px);
+  -webkit-backdrop-filter:blur(6px);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  z-index:9000;
+  opacity:0;
+  transition:opacity .18s ease;
+  padding:24px;
+}
+.modal-backdrop.show{opacity:1}
+.modal{
+  background:var(--ink-2);
+  border:1px solid var(--border-soft);
+  border-radius:12px;
+  padding:32px 28px 24px;
+  max-width:440px;
+  width:100%;
+  box-shadow:
+    0 24px 80px rgba(0,0,0,0.6),
+    0 0 0 1px rgba(255,107,53,0.06),
+    inset 0 1px 0 rgba(255,255,255,0.02);
+  transform:translateY(8px) scale(0.98);
+  transition:transform .18s ease;
+}
+.modal-backdrop.show .modal{transform:translateY(0) scale(1)}
+.modal h3{
+  font-family:'Fraunces',serif;
+  font-size:22px;
+  font-weight:500;
+  color:var(--text);
+  margin:0 0 12px;
+  letter-spacing:-0.01em;
+  line-height:1.3;
+}
+.modal .body{
+  font-family:'Outfit',sans-serif;
+  font-size:14px;
+  color:var(--text-2);
+  line-height:1.6;
+  margin-bottom:20px;
+  white-space:pre-line;
+}
+.modal .body strong{color:var(--text);font-weight:500}
+.modal .body code{
+  font-family:'JetBrains Mono',monospace;
+  font-size:12.5px;
+  color:var(--amber);
+  background:var(--ink-3);
+  padding:1px 6px;
+  border-radius:3px;
+}
+.modal-input{
+  width:100%;
+  background:var(--ink-3);
+  border:1px solid var(--border);
+  color:var(--text);
+  padding:12px 14px;
+  font-family:'Outfit',sans-serif;
+  font-size:15px;
+  border-radius:6px;
+  margin-bottom:20px;
+  transition:border-color .15s,box-shadow .15s;
+  display:block;
+}
+.modal-input::placeholder{color:var(--text-3)}
+.modal-input:focus{
+  outline:none;
+  border-color:var(--amber);
+  box-shadow:0 0 0 3px rgba(255,107,53,0.12);
+}
+.modal-list{
+  background:var(--ink-3);
+  border:1px solid var(--border-soft);
+  border-radius:6px;
+  padding:8px 12px;
+  margin-bottom:20px;
+  max-height:180px;
+  overflow-y:auto;
+  font-family:'JetBrains Mono',monospace;
+  font-size:12px;
+  color:var(--text-2);
+}
+.modal-list .item{
+  padding:4px 0;
+  border-bottom:1px solid var(--border-soft);
+  color:var(--text);
+}
+.modal-list .item:last-child{border:none}
+.modal-list .item-count{
+  color:var(--text-3);
+  font-size:11px;
+  margin-bottom:6px;
+  text-transform:uppercase;
+  letter-spacing:0.05em;
+}
+.modal-actions{
+  display:flex;
+  gap:8px;
+  justify-content:flex-end;
+}
+.modal-actions .btn{min-width:88px;justify-content:center}
+.modal-actions .btn.danger{
+  background:var(--red);
+  color:#fff;
+  border-color:var(--red);
+}
+.modal-actions .btn.danger:hover{background:#e63e4a;border-color:#e63e4a}
 </style>
 </head>
 <body>
@@ -617,7 +731,10 @@ const STRINGS = {
     'view.voice.cleanupRunning': '清理中...',
     'view.voice.cleanupEmpty': '没有低质量声纹需要清理',
     'view.voice.cleanupConfirm': '将删除 {0} 个低质量声纹（样本 ≤ 5），\n并清空它们在 segments 表中的引用。\n\n将删除：\n{1}{2}\n\n是否继续？',
+    'view.voice.cleanupConfirmTitle': '删除 {0} 个低质量声纹？',
+    'view.voice.cleanupConfirmBody': '样本 ≤ 5，将清空它们在 segments 表中的引用。',
     'view.voice.cleanupConfirmMore': '\n...',
+    'view.voice.cleanupItems': '待删除',
     'view.voice.cleanupDone': '已删除 {0} 个声纹，清空 {1} 个段引用',
     'view.settings.title': '设置<em>.</em>',
     'view.settings.engine': 'Engine',
@@ -854,7 +971,10 @@ const STRINGS = {
     'view.voice.cleanupRunning': 'Cleaning...',
     'view.voice.cleanupEmpty': 'No noisy speakers to clean up',
     'view.voice.cleanupConfirm': 'Will delete {0} noisy speakers (≤ 5 samples)\nand clear their segment references.\n\nDeleting:\n{1}{2}\n\nContinue?',
+    'view.voice.cleanupConfirmTitle': 'Delete {0} noisy speakers?',
+    'view.voice.cleanupConfirmBody': 'Samples ≤ 5, will clear their segment references.',
     'view.voice.cleanupConfirmMore': '\n...',
+    'view.voice.cleanupItems': 'To delete',
     'view.voice.cleanupDone': 'Deleted {0} speakers, cleared {1} segment references',
     'view.settings.title': 'Settings',
     'view.settings.engine': 'Engine',
@@ -1083,6 +1203,177 @@ const state = {
 const $ = (s, r=document) => r.querySelector(s);
 const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+/* ========== Modal 组件 (Boutique Audio Atelier 风格) ==========
+ * 3 种类型：
+ *   Modal.confirm(opts) -> Promise<bool>
+ *   Modal.prompt(opts)  -> Promise<string|null>  (取消时返回 null)
+ *   Modal.list(opts)    -> Promise<bool>
+ * 通用 opts: { title, body, confirmText, cancelText, danger, persistent }
+ * prompt 额外: { placeholder, initialValue, validate }
+ * list  额外: { items, itemCount }
+ */
+const Modal = (() => {
+  function createBackdrop() {
+    let bd = document.getElementById('modalBackdrop');
+    if (!bd) {
+      bd = document.createElement('div');
+      bd.id = 'modalBackdrop';
+      bd.className = 'modal-backdrop';
+      document.body.appendChild(bd);
+    }
+    return bd;
+  }
+
+  function show(opts) {
+    return new Promise(resolve => {
+      const bd = createBackdrop();
+      bd._modal = { opts, resolve };
+      bd.innerHTML = '';
+
+      const m = document.createElement('div');
+      m.className = 'modal';
+
+      // title
+      const h3 = document.createElement('h3');
+      h3.textContent = opts.title || '';
+      m.appendChild(h3);
+
+      // body
+      if (opts.body) {
+        const body = document.createElement('div');
+        body.className = 'body';
+        if (opts.bodyIsHtml) body.innerHTML = opts.body;
+        else body.textContent = opts.body;
+        m.appendChild(body);
+      }
+
+      // input
+      let inputEl = null;
+      if (opts.input) {
+        inputEl = document.createElement('input');
+        inputEl.className = 'modal-input';
+        inputEl.type = 'text';
+        inputEl.placeholder = opts.placeholder || '';
+        inputEl.value = opts.initialValue || '';
+        m.appendChild(inputEl);
+      }
+
+      // list
+      if (opts.items && opts.items.length) {
+        const list = document.createElement('div');
+        list.className = 'modal-list';
+        if (opts.itemCount != null) {
+          const c = document.createElement('div');
+          c.className = 'item-count';
+          c.textContent = opts.itemCountLabel
+            ? opts.itemCountLabel
+            : `${opts.itemCount} items`;
+          list.appendChild(c);
+        }
+        opts.items.forEach(it => {
+          const i = document.createElement('div');
+          i.className = 'item';
+          i.textContent = it;
+          list.appendChild(i);
+        });
+        m.appendChild(list);
+      }
+
+      // actions
+      const actions = document.createElement('div');
+      actions.className = 'modal-actions';
+
+      const cancelBtn = document.createElement('button');
+      cancelBtn.className = 'btn ghost';
+      cancelBtn.textContent = opts.cancelText || t('btn.cancel');
+      cancelBtn.onclick = () => close(null);
+
+      const confirmBtn = document.createElement('button');
+      confirmBtn.className = opts.danger ? 'btn danger' : 'btn';
+      confirmBtn.textContent = opts.confirmText || t('btn.confirm');
+      confirmBtn.onclick = () => {
+        if (inputEl) {
+          const v = inputEl.value;
+          if (opts.validate && !opts.validate(v)) return; // 验证失败保持打开
+          close(v);
+        } else {
+          close(true);
+        }
+      };
+
+      actions.appendChild(cancelBtn);
+      actions.appendChild(confirmBtn);
+      m.appendChild(actions);
+
+      bd.appendChild(m);
+
+      // 动画入场
+      requestAnimationFrame(() => bd.classList.add('show'));
+
+      // 焦点
+      setTimeout(() => {
+        if (inputEl) { inputEl.focus(); inputEl.select(); }
+        else { confirmBtn.focus(); }
+      }, 50);
+
+      // 键盘
+      const onKey = (e) => {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          close(null);
+        } else if (e.key === 'Enter' && !e.shiftKey) {
+          // input 内允许 Enter 提交，textarea-like 行为不在此组件内
+          e.preventDefault();
+          confirmBtn.click();
+        }
+      };
+      document.addEventListener('keydown', onKey);
+      bd._onKey = onKey;
+
+      // backdrop 点击关闭（persistent 时不关）
+      bd._onBackdropClick = (e) => {
+        if (e.target === bd && !opts.persistent) close(null);
+      };
+      bd.addEventListener('click', bd._onBackdropClick);
+
+      function close(value) {
+        bd.classList.remove('show');
+        document.removeEventListener('keydown', onKey);
+        bd.removeEventListener('click', bd._onBackdropClick);
+        setTimeout(() => {
+          bd.innerHTML = '';
+          resolve(value);
+        }, 200);
+      }
+    });
+  }
+
+  return {
+    confirm(opts = {}) {
+      return show({
+        ...opts,
+        confirmText: opts.confirmText || t('btn.confirm'),
+        cancelText: opts.cancelText || t('btn.cancel'),
+      });
+    },
+    prompt(opts = {}) {
+      return show({
+        ...opts,
+        input: true,
+        confirmText: opts.confirmText || t('btn.confirm'),
+        cancelText: opts.cancelText || t('btn.cancel'),
+      });
+    },
+    list(opts = {}) {
+      return show({
+        ...opts,
+        confirmText: opts.confirmText || t('btn.confirm'),
+        cancelText: opts.cancelText || t('btn.cancel'),
+      });
+    },
+  };
+})();
 const fmtSec = (s) => {
   if (!s || isNaN(s)) return "00:00";
   const m = Math.floor(s/60);
@@ -1372,20 +1663,26 @@ function renderTranscript() {
   trEl.scrollTop = trEl.scrollHeight;
 }
 
-$("#clearBtn").addEventListener("click", () => {
-  if (!confirm(t("live.clear.confirm", ""))) return;
+$("#clearBtn").addEventListener("click", async () => {
+  const ok = await Modal.confirm({
+    title: t("live.clear.confirm"),
+  });
+  if (!ok) return;
   state.segments = [];
   state.speakers.clear();
   renderTranscript();
   $("#segCount").textContent = t("view.live.segCount", 0, 0);
 });
 
-$("#renameBtn").addEventListener("click", () => {
+$("#renameBtn").addEventListener("click", async () => {
   if (!state.rec || !state.ws) { toast(t("live.startFirst"), "error"); return; }
-  const newName = prompt(t("view.live.renamePrompt"), state.sessionTitle || "");
-  if (newName && newName.trim()) {
-    state.ws.send(JSON.stringify({action: "rename", title: newName.trim()}));
-  }
+  const newName = await Modal.prompt({
+    title: t("view.live.renamePrompt"),
+    initialValue: state.sessionTitle || "",
+    validate: v => v.trim().length > 0,
+  });
+  if (newName === null) return;
+  state.ws.send(JSON.stringify({action: "rename", title: newName.trim()}));
 });
 
 /* upload / dropzone */
@@ -1503,7 +1800,11 @@ function renderLibrary() {
     }));
     row.querySelector(".del").addEventListener("click", async (e) => {
       e.stopPropagation();
-      if (!confirm(t("library.delete.confirm"))) return;
+      const ok = await Modal.confirm({
+        title: t("library.delete.confirm"),
+        danger: true,
+      });
+      if (!ok) return;
       try { await Matrix.api.del("history/" + id); toast(t("library.delete.ok"), "ok"); loadLibrary(); loadRecent(); }
       catch (err) { toast(t("library.delete.fail", err.message), "error"); }
     });
@@ -1676,18 +1977,25 @@ function renderVoice() {
     card.appendChild(pop);
     const close = (ev) => { if (!pop.contains(ev.target)) { pop.remove(); document.removeEventListener("click", close); } };
     setTimeout(() => document.addEventListener("click", close), 0);
-    pop.querySelector('[data-act="rename"]').addEventListener("click", () => {
+    pop.querySelector('[data-act="rename"]').addEventListener("click", async () => {
       const id = card.dataset.id;
       const cur = speakersCache.find(s => s.id === id);
-      const newName = prompt(t("voice.rename.prompt"), cur?.name || "");
-      if (newName && newName.trim()) {
-        Matrix.api.patch("speakers/" + id, { name: newName.trim() }).then(() => { toast(t("voice.rename.ok"), "ok"); loadVoice(); }).catch(e => toast(t("voice.rename.fail", e.message), "error"));
-      }
+      const newName = await Modal.prompt({
+        title: t("voice.rename.prompt"),
+        initialValue: cur?.name || "",
+        validate: v => v.trim().length > 0,
+      });
+      if (newName === null) { pop.remove(); return; }
+      Matrix.api.patch("speakers/" + id, { name: newName.trim() }).then(() => { toast(t("voice.rename.ok"), "ok"); loadVoice(); }).catch(e => toast(t("voice.rename.fail", e.message), "error"));
       pop.remove();
     });
-    pop.querySelector('[data-act="delete"]').addEventListener("click", () => {
+    pop.querySelector('[data-act="delete"]').addEventListener("click", async () => {
       const id = card.dataset.id;
-      if (!confirm(t("voice.delete.confirm", id))) return;
+      const ok = await Modal.confirm({
+        title: t("voice.delete.confirm", id),
+        danger: true,
+      });
+      if (!ok) { pop.remove(); return; }
       Matrix.api.del("speakers/" + id).then(() => { toast(t("voice.delete.ok"), "ok"); loadVoice(); }).catch(e => toast(t("voice.delete.fail", e.message), "error"));
       pop.remove();
     });
@@ -1864,11 +2172,17 @@ async function cleanupNoisySpeakers() {
       toast(t("view.voice.cleanupEmpty"), "ok");
       return;
     }
-    // 2. 确认对话框
-    const list = dry.candidates.slice(0, 10).join("\n");
-    const more = dry.candidates.length > 10 ? t("view.voice.cleanupConfirmMore") : "";
-    const msg = t("view.voice.cleanupConfirm", dry.candidates.length, list, more);
-    if (!confirm(msg)) return;
+    // 2. 确认对话框（统一 Modal.list）
+    const items = dry.candidates.slice(0, 10);
+    const ok = await Modal.list({
+      title: t("view.voice.cleanupConfirmTitle", dry.candidates.length),
+      body: t("view.voice.cleanupConfirmBody"),
+      items,
+      itemCount: dry.candidates.length,
+      itemCountLabel: t("view.voice.cleanupItems"),
+      danger: true,
+    });
+    if (!ok) return;
     // 3. 真删 (cascade=true)
     const result = await Matrix.api.post("speakers/cleanup", {
       max_count: 5,
