@@ -65,6 +65,7 @@ SPEAKER_ENGINE=eres2net python main.py
 | **[docs/API.md](docs/API.md)** | 所有 API 端点(WebSocket/上传/说话人/引擎)+ 环境变量 |
 | **[docs/LLM_SETUP.md](docs/LLM_SETUP.md)** | LLM 配置:本地 Ollama / 公网 OpenAI / LiteLLM 反代 |
 | **[docs/PRIVACY.md](docs/PRIVACY.md)** | 隐私保证:默认本地 + 可选公网 + 4 道护栏 |
+| **[docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)** | 贡献规则:author 必须 lgy1027,commit 禁止 AI 痕迹 |
 
 ## 🎯 声纹引擎对比
 

@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Pre-commit hook — 验证 commit author/committer 是 lgy1027
+#
+# 项目规则(详见 docs/CONTRIBUTING.md):
+# - 所有 commit author/committer 必须是 lgy1027
+# - 防止 AI 工具用别的身份 commit
+#
+# 安装: 克隆后运行 `git config core.hooksPath .githooks`
+
+set -e
+
+# 跳过 commit --amend/--no-verify/--no-hooks 等场景
+# 实际上我们就是要在 commit 阶段验证
+
+ALLOWED_EMAILS=(
+    "lgy10271416@gmail.com"
+    # 团队新增成员时加在这里
+)
+
+AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-}"
+COMMITTER_EMAIL="${GIT_COMMITTER_EMAIL:-}"
+
+PASS=true
+for email in "$AUTHOR_EMAIL" "$COMMITTER_EMAIL"; do
+    if [ -z "$email" ]; then
+        continue
+    fi
+    found=false
+    for allowed in "${ALLOWED_EMAILS[@]}"; do
+        if [ "$email" = "$allowed" ]; then
+            found=true
+            break
+        fi
+    done
+    if [ "$found" = false ]; then
+        echo ""
+        echo "❌ Commit 邮箱 '$email' 不在允许列表"
+        echo ""
+        echo "项目规则(详见 docs/CONTRIBUTING.md):"
+        echo "  - 所有 commit author/committer 必须是 lgy1027"
+        echo "  - 允许邮箱: ${ALLOWED_EMAILS[*]}"
+        echo ""
+        echo "如果你用 AI 工具,通常需要在工具配置里设:"
+        echo "  git user.email 'lgy10271416@gmail.com'"
+        echo ""
+        echo "如需紧急跳过(不推荐): git commit --no-verify"
+        echo ""
+        PASS=false
+    fi
+done
+
+if [ "$PASS" = false ]; then
+    exit 1
+fi
+
+exit 0
