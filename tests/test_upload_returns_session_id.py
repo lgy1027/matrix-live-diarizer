@@ -19,6 +19,12 @@ def _install_fake_engines():
     fake_speaker_pkg.get_speaker_engine = MagicMock(return_value=MagicMock())
     fake_speaker_pkg.get_engine_info = MagicMock(return_value={"name": "Mock", "model": "mock"})
 
+    # 补全子模块防止污染后续 test_base_engine 的 import
+    fake_base = types.ModuleType("engine.speaker.base_engine")
+    fake_base.BaseSpeakerEngine = MagicMock
+    fake_base.logger = MagicMock()  # 防止 test_logging 失败
+    sys.modules["engine.speaker.base_engine"] = fake_base
+
     fake_factory = types.ModuleType("engine.speaker.speaker_factory")
     fake_factory.get_speaker_engine = MagicMock(return_value=MagicMock())
     fake_factory.get_engine_info = MagicMock(return_value={"name": "Mock", "model": "mock"})
