@@ -76,6 +76,7 @@ class SpeakerEngineManager:
             self._current_type: str = get_engine_type()
             self._current_engine: Optional[Any] = None
             self._switch_lock = threading.Lock()
+            self._max_cache = 2  # 最多缓存 2 个引擎实例,避免多引擎切换 OOM
             
             SpeakerEngineManager._initialized = True
             logger.info(f"[EngineManager] 初始化完成，默认引擎: {self._current_type}")
@@ -93,9 +94,9 @@ class SpeakerEngineManager:
         if engine_type in self._engine_cache:
             logger.info(f"[EngineManager] 使用缓存的引擎: {engine_type}")
             return self._engine_cache[engine_type]
-        
+
         logger.info(f"[EngineManager] 加载引擎: {engine_type}")
-        
+
         if engine_type == "eres2net":
             from .eres2net_engine import ERes2NetEngine
             engine = ERes2NetEngine()
@@ -105,10 +106,16 @@ class SpeakerEngineManager:
         else:
             from .campplus_engine import CamPlusEngine
             engine = CamPlusEngine()
-        
+
         self._engine_cache[engine_type] = engine
+        # LRU 淘汰:超过 max_cache 时,evict 非当前引擎(优先释放老模型占的内存)
+        if len(self._engine_cache) > self._max_cache:
+            to_evict = [k for k in self._engine_cache if k != self._current_type]
+            for k in to_evict[:len(self._engine_cache) - self._max_cache]:
+                logger.info(f"[EngineManager] evict 引擎缓存: {k} (超过 _max_cache={self._max_cache})")
+                self._engine_cache.pop(k, None)
         logger.info(f"[EngineManager] 引擎已缓存: {engine_type}")
-        
+
         return engine
     
     def switch_engine(self, engine_type: str) -> Dict[str, Any]:

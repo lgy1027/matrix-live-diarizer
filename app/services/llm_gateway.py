@@ -96,7 +96,13 @@ class LLMGateway:
         text = await self._generate("action_items", segments)
         if not text:
             return None
-        return [line.strip("-* ").strip() for line in text.split("\n") if line.strip()]
+        text = text.strip()
+        # 检测模型返回"无行动项"等否定词
+        if text and text[:5] in ("无", "无。", "无行动项", "没有", "暂无", "无任务", "N/A", "n/a"):
+            return []
+        items = [line.strip("-* ").strip() for line in text.split("\n") if line.strip()]
+        # 兜底:如果整段都不像行动项(>3 个短句可能模型失控),截断到 50
+        return items[:50]
 
     async def generate_minutes(self, segments: list[dict]) -> Optional[str]:
         return await self._generate("minutes", segments)
