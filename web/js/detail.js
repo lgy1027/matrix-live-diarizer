@@ -6,11 +6,13 @@ const textEl = document.getElementById("text");
 const statsEl = document.getElementById("stats");
 const llmResult = document.getElementById("llm-result");
 
-function escapeHtml(s) {
-  return String(s || "").replace(/[&<>"']/g, (c) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
-  })[c]);
-}
+const escapeHtml = Matrix.escape;
+
+if (!sessionId) {
+  // 没带 ?id= 直接打开 detail 页 — 引导回 history
+  titleEl.textContent = "缺少会话 ID";
+  metaEl.innerHTML = `<div>请从 <a href="/web/history.html" style="color:#4ade80">历史会话</a> 列表选择一个会话查看详情。</div>`;
+} else {
 
 async function load() {
   try {
@@ -103,3 +105,5 @@ document.querySelectorAll(".tab").forEach((tab) => {
 });
 
 load();
+
+} // 关闭 if (!sessionId) 块

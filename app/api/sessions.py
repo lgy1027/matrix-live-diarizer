@@ -17,6 +17,7 @@ class SessionDetailResponse(BaseModel):
 
 class UpdateSessionRequest(BaseModel):
     title: Optional[str] = None
+    is_archived: Optional[int] = None  # 0/1,True/False 自动转 int
 
 
 @router.get("/v1/sessions/{session_id}", response_model=SessionDetailResponse)

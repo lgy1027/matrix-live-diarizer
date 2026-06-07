@@ -65,18 +65,35 @@ class Database:
             conn.execute("PRAGMA synchronous=NORMAL")
             conn.commit()
 
+    def _init_schema_on_conn(self, conn: sqlite3.Connection) -> None:
+        """在已开启的连接上建表(兜底用)"""
+        conn.executescript(SCHEMA_SQL)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.commit()
+
     @contextmanager
     def connect(self):
-        """获取连接，启用 Row 工厂 + busy_timeout
+        """获取连接,启用 Row 工厂 + busy_timeout
 
         busy_timeout 5s: SQLite 在"database is locked"时会自动等
         5 秒重试,而不是立即抛错。配合 WAL 模式对并发 WebSocket
         + upload 同时写库友好。
+
+        自动初始化: 如果 db 文件存在但 schema 没建(被外部删除后再访问),
+        第一次 connect 时 ensure_schema() 兜底建表,避免
+        "no such table: sessions" 错误。
         """
         conn = sqlite3.connect(self.db_path, timeout=5.0)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys=ON")
         conn.execute("PRAGMA busy_timeout=5000")
+        # 兜底: 检查 sessions 表是否存在,没有就建
+        cur = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='sessions'"
+        )
+        if cur.fetchone() is None:
+            self._init_schema_on_conn(conn)
         try:
             yield conn
         finally:

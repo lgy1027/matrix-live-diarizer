@@ -186,8 +186,13 @@ async def upload_audio(
                     )
                 buffer.write(chunk)
 
+        if total_written == 0:
+            raise HTTPException(status_code=400, detail="文件为空")
+
         import librosa
         audio, _ = librosa.load(file_path, sr=config.audio.sample_rate)
+        if len(audio) == 0:
+            raise HTTPException(status_code=400, detail="音频解码后无有效采样,请检查文件是否损坏")
         duration = len(audio) / config.audio.sample_rate
         
         mode = "说话人识别" if enable_diarization else "快速转写"

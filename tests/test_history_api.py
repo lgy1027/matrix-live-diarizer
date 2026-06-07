@@ -132,6 +132,23 @@ def test_delete_nonexistent(client):
     assert resp.status_code == 404
 
 
+def test_patch_session_archive_roundtrip(client):
+    """PATCH is_archived 应该把会话从 history 列表里过滤掉,再 PATCH 0 又回来"""
+    app = client.app
+    sid = app.state.transcript_repo.create_session(source="upload")
+    # 初始可见
+    assert client.get("/v1/history").json()["total"] == 1
+    # 归档
+    resp = client.patch(f"/v1/sessions/{sid}", json={"is_archived": 1})
+    assert resp.status_code == 200
+    assert resp.json()["session"]["is_archived"] == 1
+    assert client.get("/v1/history").json()["total"] == 0
+    # 取消归档
+    resp = client.patch(f"/v1/sessions/{sid}", json={"is_archived": 0})
+    assert resp.status_code == 200
+    assert client.get("/v1/history").json()["total"] == 1
+
+
 def test_list_history_empty_string_source_treated_as_none(client):
     """空字符串 source 应被视作未传 (不过滤)，不报 422"""
     app = client.app

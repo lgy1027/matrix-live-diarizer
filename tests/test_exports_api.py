@@ -96,6 +96,12 @@ def test_export_invalid_format(client):
     assert resp.status_code == 422
 
 
+def test_export_md_alias_accepted(client, tmp_path):
+    """format=md 是 format=markdown 的别名,应当走通到 404(会话不存在)而非 422"""
+    resp = client.get("/v1/exports/nonexist?format=md")
+    assert resp.status_code == 404
+
+
 def test_export_nonexistent_session(client):
     resp = client.get("/v1/exports/nonexistent?format=srt")
     assert resp.status_code == 404
