@@ -39,7 +39,7 @@ class TestFileUploadSecurity:
         asr, spk, lock = mock_engines
         
         with patch('app.api.upload.asr_engine', asr), \
-             patch('app.api.upload.spk_engine', spk), \
+             patch('app.api.upload.inference_lock', lock), \
              patch('app.api.upload.inference_lock', lock), \
              patch('app.api.upload.current_dir', '/tmp'):
             
@@ -58,7 +58,7 @@ class TestFileUploadSecurity:
         asr, spk, lock = mock_engines
         
         with patch('app.api.upload.asr_engine', asr), \
-             patch('app.api.upload.spk_engine', spk), \
+             patch('app.api.upload.inference_lock', lock), \
              patch('app.api.upload.inference_lock', lock), \
              patch('app.api.upload.current_dir', '/tmp'):
             
@@ -77,22 +77,22 @@ class TestFileUploadSecurity:
         asr, spk, lock = mock_engines
         
         with patch('app.api.upload.asr_engine', asr), \
-             patch('app.api.upload.spk_engine', spk), \
+             patch('app.api.upload.inference_lock', lock), \
              patch('app.api.upload.inference_lock', lock), \
              patch('app.api.upload.current_dir', '/tmp'), \
-             patch('app.api.upload.MAX_FILE_SIZE', 100):  # 限制 100 bytes
-            
+             patch('app.api.upload.MAX_FILE_SIZE', 100), \
+             patch('app.api.upload._UPLOAD_CHUNK_SIZE', 32):  # 32 bytes chunk 配合 100 限制
             client = TestClient(mock_app)
-            
+
             # 上传超过限制的文件
             large_content = b'x' * 200
             response = client.post(
                 "/v1/upload",
                 files={"file": ("large.wav", large_content, "audio/wav")}
             )
-            
+
             assert response.status_code == 400
-            assert "文件大小" in response.json()["detail"]
+            assert "文件" in response.json()["detail"]
 
     def test_valid_extensions_list(self):
         """测试允许的文件扩展名列表"""

@@ -191,7 +191,7 @@ class WespeakerEngine(BaseSpeakerEngine):
                 logger.debug(f"[EDGE?] Dist={min_dist:.4f} 待确认 (连续匹配 {same_speaker_count} 次)")
         
         # 注册新说话人
-        new_id = f"Spk_{int(time.time() * 1000) % 10000}"
+        new_id = f"Spk_{int(time.time_ns() % (1 << 31))}"
         self.collection.add(
             ids=[new_id],
             embeddings=[emb_list],

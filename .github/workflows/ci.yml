@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main, feature/**]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # 不装 torch / modelscope — 用 conftest.py 的 fake 注入绕过
+          # (CI 体积小、跑得快,test_smoke_boot.py 需要模型的被 ignore)
+          pip install fastapi 'uvicorn>=0.23.0' 'python-multipart>=0.0.6' \
+                      'transformers>=4.30.0' chromadb 'pydantic>=2.0.0' \
+                      'python-dotenv>=1.0.0' pytest pytest-asyncio pytest-timeout httpx \
+                      soundfile
+
+      - name: Run tests
+        env:
+          SPEAKER_ENGINE: campplus
+          STORAGE_DB_PATH: ./data/test.db
+          LLM_MOCK: "true"
+        run: |
+          mkdir -p data
+          # 忽略 test_smoke_boot.py:它需要下载 1.8GB ASR 模型,CI 不下
+          # 其它测试(包括之前 5 个被 ignore 的)都用 mock,现在都通过
+          pytest tests/ -v --tb=short --ignore=tests/test_smoke_boot.py
+
+      - name: Privacy audit
+        run: |
+          pytest tests/test_privacy_audit.py -v

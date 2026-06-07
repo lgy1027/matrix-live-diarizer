@@ -176,17 +176,26 @@ class TestEngineSwitchAPI:
             "engine_type": "eres2net",
             "engine_info": {
                 "name": "ERes2NetV2",
+                "model": "iic/speech_eres2netv2_sv_zh-cn_16k-common",
+                "description": "SOTA 级别精度",
+                "eer_voxceleb": "0.61%",
+                "eer_cnceleb": "6.14%",
+                "params": "17.8M",
+                "speed": "中等",
                 "embedding_dim": 192,
-                "model": "iic/speech_eres2netv2_sv_zh-cn_16k-common"
+                "type": "eres2net"
             },
             "embedding_dim_changed": False
         }
         manager.get_all_engines_info.return_value = {
             "current": "eres2net",
             "engines": {
-                "campplus": {"name": "CamPlus", "embedding_dim": 192},
-                "eres2net": {"name": "ERes2NetV2", "embedding_dim": 192},
-                "wespeaker": {"name": "ResNet34", "embedding_dim": 256}
+                "campplus": {"name": "CamPlus", "embedding_dim": 192, "model": "damo", "description": "x",
+                             "eer_voxceleb": "0.65%", "eer_cnceleb": "6.78%", "params": "7.2M", "speed": "快"},
+                "eres2net": {"name": "ERes2NetV2", "embedding_dim": 192, "model": "iic", "description": "x",
+                             "eer_voxceleb": "0.61%", "eer_cnceleb": "6.14%", "params": "17.8M", "speed": "中等"},
+                "wespeaker": {"name": "ResNet34", "embedding_dim": 256, "model": "iic", "description": "x",
+                              "eer_voxceleb": "1.05%", "eer_cnceleb": "6.92%", "params": "6.34M", "speed": "快"}
             }
         }
         manager.get_engine.return_value = Mock()
@@ -271,7 +280,14 @@ class TestEngineSwitchAPI:
             "engine_type": "wespeaker",
             "engine_info": {
                 "name": "ResNet34",
-                "embedding_dim": 256
+                "model": "iic/speech_resnet34_sv_zh-cn_3dspeaker_16k",
+                "description": "经典稳定",
+                "eer_voxceleb": "1.05%",
+                "eer_cnceleb": "6.92%",
+                "params": "6.34M",
+                "speed": "快",
+                "embedding_dim": 256,
+                "type": "wespeaker"
             },
             "previous_dim": 192,
             "embedding_dim_changed": True,
@@ -322,11 +338,21 @@ class TestEngineSwitchResponseModel:
         """测试 EngineSwitchResponse 模型"""
         try:
             from app.schemas.response import EngineSwitchResponse
-            
+
             response = EngineSwitchResponse(
                 success=True,
                 engine_type="eres2net",
-                engine_info={"name": "ERes2NetV2", "embedding_dim": 192},
+                engine_info={
+                    "name": "ERes2NetV2",
+                    "model": "iic/speech_eres2netv2_sv_zh-cn_16k-common",
+                    "description": "SOTA 级别精度",
+                    "eer_voxceleb": "0.61%",
+                    "eer_cnceleb": "6.14%",
+                    "params": "17.8M",
+                    "speed": "中等",
+                    "embedding_dim": 192,
+                    "type": "eres2net"
+                },
                 embedding_dim_changed=False
             )
             
@@ -354,15 +380,12 @@ class TestIntegrationWithExistingCode:
 
     def test_app_state_uses_manager(self):
         """测试 app.state 使用管理器"""
-        # 检查 app/__init__.py 中是否使用管理器
-        import inspect
-        from app import create_app
-        
-        source = inspect.getsource(create_app)
-        
-        # 应该包含 EngineManager 或相关引用
-        # 这是一个软性检查，确保架构正确
-        assert "spk_engine" in source
+        # 行为检查:create_app 启动后,app.state.spk_engine 应等于 manager.get_engine()
+        from engine.speaker.speaker_factory import get_speaker_engine, SpeakerEngineManager
+        manager = SpeakerEngineManager()
+        engine_via_manager = manager.get_engine()
+        # 两次调用应返回同一实例
+        assert get_speaker_engine() is engine_via_manager
 
 
 class TestThreadSafety:

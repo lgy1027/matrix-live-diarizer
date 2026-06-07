@@ -2,6 +2,7 @@
 import os
 import logging
 from pathlib import Path
+from typing import Optional
 from dataclasses import dataclass, field
 
 logger = logging.getLogger("Matrix_Core")
@@ -37,6 +38,14 @@ def get_env_float(key: str, default: float) -> float:
 def get_env_bool(key: str, default: bool) -> bool:
     val = os.getenv(key, str(default)).lower()
     return val in ("true", "1", "yes", "on")
+
+
+def get_env_str_list(key: str, default: tuple = ()) -> tuple:
+    """从逗号分隔的环境变量读取字符串列表"""
+    val = os.getenv(key)
+    if not val:
+        return default
+    return tuple(h.strip() for h in val.split(",") if h.strip())
 
 
 @dataclass
@@ -85,7 +94,11 @@ class AudioConfig:
     upload_max_duration: int = 3600     # 1小时
     upload_chunk_duration: int = 30     # 30秒分段
     upload_overlap_duration: float = 1.0
-    
+    # ASR 设备：auto | cpu | mps | cuda
+    # auto 优先 mps，加载超时后回退 cpu
+    asr_device: str = "auto"
+    asr_load_timeout_sec: int = 90      # 单设备加载超时（秒）
+
     @classmethod
     def from_env(cls) -> "AudioConfig":
         return cls(
@@ -107,6 +120,8 @@ class AudioConfig:
             upload_max_duration=get_env_int("UPLOAD_MAX_DURATION", 3600),
             upload_chunk_duration=get_env_int("UPLOAD_CHUNK_DURATION", 30),
             upload_overlap_duration=get_env_float("UPLOAD_OVERLAP_DURATION", 1.0),
+            asr_device=get_env_str("ASR_DEVICE", "auto").lower(),
+            asr_load_timeout_sec=get_env_int("ASR_LOAD_TIMEOUT_SEC", 90),
         )
 
 
@@ -128,7 +143,7 @@ class RateLimitConfig:
     enabled: bool = True
     requests_per_minute: int = 60      # 每分钟请求数
     requests_per_hour: int = 1000      # 每小时请求数
-    
+
     @classmethod
     def from_env(cls) -> "RateLimitConfig":
         return cls(
@@ -139,20 +154,84 @@ class RateLimitConfig:
 
 
 @dataclass
+class StorageConfig:
+    """SQLite 存储配置"""
+    db_path: str = "./data/matrix.db"
+    history_enabled: bool = True
+
+    @classmethod
+    def from_env(cls) -> "StorageConfig":
+        return cls(
+            db_path=get_env_str("STORAGE_DB_PATH", "./data/matrix.db"),
+            history_enabled=get_env_bool("STORAGE_HISTORY_ENABLED", True),
+        )
+
+
+@dataclass
+class LLMConfig:
+    """LLM 插件配置（默认仅本机，allow_public=True 时可走公网 OpenAI 兼容接口）"""
+    enabled: bool = False
+    endpoint: str = "http://127.0.0.1:11434/v1"
+    model: str = "qwen2.5:1.5b"
+    api_key: Optional[str] = None           # Bearer token，公网 OpenAI 兼容接口需要
+    timeout_sec: int = 60
+    max_input_tokens: int = 8000
+    mock: bool = False
+    allowed_hosts: tuple[str, ...] = ("127.0.0.1", "::1", "localhost")
+    allow_public: bool = False              # 显式开公网（默认安全 = 仅本机）
+
+    @classmethod
+    def from_env(cls) -> "LLMConfig":
+        api_key = get_env_str("LLM_API_KEY", "") or None
+        return cls(
+            enabled=get_env_bool("LLM_ENABLED", False),
+            endpoint=get_env_str("LLM_ENDPOINT", "http://127.0.0.1:11434/v1"),
+            model=get_env_str("LLM_MODEL", "qwen2.5:1.5b"),
+            api_key=api_key,
+            timeout_sec=get_env_int("LLM_TIMEOUT_SEC", 60),
+            max_input_tokens=get_env_int("LLM_MAX_INPUT_TOKENS", 8000),
+            mock=get_env_bool("LLM_MOCK", False),
+            allowed_hosts=get_env_str_list("LLM_ALLOWED_HOSTS",
+                                          ("127.0.0.1", "::1", "localhost")),
+            allow_public=get_env_bool("LLM_ALLOW_PUBLIC", False),
+        )
+
+
+@dataclass
+class HistoryConfig:
+    """历史存档策略"""
+    retention_days: int = 0
+    auto_archive: bool = False
+
+    @classmethod
+    def from_env(cls) -> "HistoryConfig":
+        return cls(
+            retention_days=get_env_int("HISTORY_RETENTION_DAYS", 0),
+            auto_archive=get_env_bool("HISTORY_AUTO_ARCHIVE", False),
+        )
+
+
+@dataclass
 class AppConfig:
     """应用配置"""
     server: ServerConfig = field(default_factory=ServerConfig)
     audio: AudioConfig = field(default_factory=AudioConfig)
     speaker: SpeakerConfig = field(default_factory=SpeakerConfig)
     rate_limit: RateLimitConfig = field(default_factory=RateLimitConfig)
-    
+    storage: StorageConfig = field(default_factory=StorageConfig)
+    llm: LLMConfig = field(default_factory=LLMConfig)
+    history: HistoryConfig = field(default_factory=HistoryConfig)
+
     @classmethod
     def load(cls) -> "AppConfig":
         return cls(
             server=ServerConfig.from_env(),
             audio=AudioConfig.from_env(),
             speaker=SpeakerConfig.from_env(),
-            rate_limit=RateLimitConfig.from_env()
+            rate_limit=RateLimitConfig.from_env(),
+            storage=StorageConfig.from_env(),
+            llm=LLMConfig.from_env(),
+            history=HistoryConfig.from_env(),
         )
 
 
