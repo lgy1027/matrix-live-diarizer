@@ -35,12 +35,7 @@ async function load() {
 document.getElementById("btn-switch").addEventListener("click", async () => {
   const engineType = document.getElementById("engine-select").value;
   try {
-    const r = await fetch("/v1/engine", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ engine_type: engineType }),
-    });
-    if (!r.ok) throw new Error((await r.json()).detail);
+    await Matrix.api.put("engine", { engine_type: engineType });
     alert("切换成功");
     load();
   } catch (e) {
