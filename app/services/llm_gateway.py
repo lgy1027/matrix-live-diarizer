@@ -145,6 +145,8 @@ class LLMGateway:
         return "[MOCK]"
 
     async def _call_llm(self, prompt: str) -> str:
+        # DNS rebinding 防御:把 endpoint 解析成 (host, port, ip),用 IP 发请求
+        # 这样即使 DNS 之后再指向其它地址,实际连接仍是我们校验过的 IP
         url = f"{self.config.endpoint.rstrip('/')}/chat/completions"
         payload = {
             "model": self.config.model,
@@ -156,8 +158,10 @@ class LLMGateway:
         if self.config.api_key:
             headers["Authorization"] = f"Bearer {self.config.api_key}"
         try:
+            # 把 host 替换成已解析的 IP,防止后续 DNS rebinding
+            resolved_url = self._pin_dns(url)
             async with httpx.AsyncClient(timeout=self.config.timeout_sec) as client:
-                resp = await client.post(url, json=payload, headers=headers)
+                resp = await client.post(resolved_url, json=payload, headers=headers)
                 if resp.status_code == 404:
                     raise LLMModelMissingError(
                         f"模型 {self.config.model} 未加载。"
@@ -170,3 +174,34 @@ class LLMGateway:
             raise LLMTimeoutError(f"LLM 调用超时: {e}") from e
         except httpx.HTTPError as e:
             raise LLMUnavailableError(f"LLM HTTP 错误: {e}") from e
+
+    def _pin_dns(self, url: str) -> str:
+        """把 URL 中的 host 替换成已解析的 IP(防 DNS rebinding 攻击)。
+
+        endpoint 已在 __init__ 时通过 _validate_endpoint 校验过 IP 是私有的,
+        这次解析保证 httpx 实际连接的目标就是校验过的地址。
+        """
+        try:
+            parsed = urlparse(url)
+            host = parsed.hostname
+            if not host:
+                return url
+            # IP literal 不需要解析
+            try:
+                ipaddress.ip_address(host)
+                return url
+            except ValueError:
+                pass
+            # 解析 DNS → 替换成 IP(锁住连接目标)
+            ip = socket.gethostbyname(host)
+            # ipv6 加 []
+            if ":" in ip:
+                host_header = f"[{ip}]"
+            else:
+                host_header = ip
+            port = parsed.port
+            netloc = f"{host_header}:{port}" if port else host_header
+            return urlparse(url)._replace(netloc=netloc).geturl()
+        except (socket.gaierror, ValueError):
+            # 解析失败时让 httpx 自己处理
+            return url
