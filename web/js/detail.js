@@ -6,11 +6,7 @@ const textEl = document.getElementById("text");
 const statsEl = document.getElementById("stats");
 const llmResult = document.getElementById("llm-result");
 
-function escapeHtml(s) {
-  return String(s || "").replace(/[&<>"']/g, (c) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
-  })[c]);
-}
+const escapeHtml = Matrix.escape;
 
 if (!sessionId) {
   // 没带 ?id= 直接打开 detail 页 — 引导回 history
