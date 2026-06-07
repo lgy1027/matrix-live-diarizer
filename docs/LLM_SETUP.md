@@ -109,6 +109,11 @@ LLM_MODEL=gpt-4o-mini
 
 详细字段配置在 `.env` 文件（不通过 UI 配置）。
 
+> ⚠️ **生产环境部署**:如果你把 Matrix 放在 nginx/Cloudflare 后面,
+> **不要**依赖 X-Forwarded-For 做限流/审计 — 详见
+> [`app/middleware/rate_limit.py`](../app/middleware/rate_limit.py) 里的
+> `trusted_proxies` 配置(默认只信任 127.0.0.0/8)。
+
 ---
 
 ## 环境变量参考
