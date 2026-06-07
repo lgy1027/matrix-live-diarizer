@@ -214,6 +214,43 @@ footer.bar-b{height:32px;padding:0 28px;display:flex;align-items:center;justify-
 .sp-card .menu{position:absolute;top:14px;right:14px;width:24px;height:24px;border-radius:4px;display:grid;place-items:center;color:var(--text-3);cursor:pointer}
 .sp-card .menu:hover{color:var(--text);background:var(--ink-4)}
 .sp-card .menu svg{width:14px;height:14px}
+
+/* 批量选择 — 卡片左上角 checkmark */
+.sp-check{
+  position:absolute;top:14px;left:14px;width:22px;height:22px;
+  border-radius:50%;border:1.5px solid var(--text-3);
+  display:grid;place-items:center;color:transparent;
+  background:rgba(10,9,8,.5);backdrop-filter:blur(2px);
+  transition:border-color .15s,background .15s,color .15s,transform .15s;
+  z-index:2;cursor:pointer;
+}
+.sp-check svg{width:12px;height:12px}
+/* 选中模式:菜单按钮让位,卡片可点 */
+.select-mode .sp-card{cursor:pointer}
+.select-mode .sp-card .menu{opacity:0;pointer-events:none}
+/* 选中态 */
+.sp-card.selected{background:var(--ink-3)}
+.sp-card.selected .sp-check{background:var(--amber);border-color:var(--amber);color:var(--ink)}
+.sp-card.selected .sp-check svg{animation:checkPop .18s ease}
+@keyframes checkPop{from{transform:scale(.6)}to{transform:scale(1)}}
+.select-mode .sp-check{animation:checkIn .2s ease}
+@keyframes checkIn{from{opacity:0;transform:scale(.6)}to{opacity:1;transform:scale(1)}}
+
+/* 批量选择 — 浮层工具条 */
+.bulk-bar{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:10px 14px;margin-bottom:16px;
+  background:var(--ink-2);border:1px solid var(--amber);border-radius:6px;
+  animation:bulkIn .22s ease;
+}
+.bulk-bar[hidden]{display:none}
+@keyframes bulkIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+.bulk-bar .bulk-left,.bulk-bar .bulk-right{display:flex;align-items:center;gap:14px}
+.bulk-count{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-2)}
+.bulk-count b{color:var(--amber);font-weight:600;margin-left:4px}
+.bulk-link{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-2);padding:4px 8px;border-radius:3px;transition:color .15s,background .15s;background:transparent;border:0;cursor:pointer}
+.bulk-link:hover{color:var(--text);background:var(--ink-3)}
+
 .sp-ava{width:60px;height:60px;border-radius:50%;display:grid;place-items:center;font-family:var(--serif);font-variation-settings:'SOFT' 30,'WONK' 1;font-size:24px;font-weight:500;color:var(--ink);margin-bottom:18px;position:relative;overflow:hidden}
 .sp-ava::after{content:'';position:absolute;inset:0;border:1px solid rgba(255,255,255,.08);border-radius:50%}
 .sp-name{font-family:var(--serif);font-variation-settings:'SOFT' 30,'WONK' 1;font-size:20px;font-weight:500;letter-spacing:-.01em;margin-bottom:4px;line-height:1.2}
@@ -580,7 +617,21 @@ footer.bar-b{height:32px;padding:0 28px;display:flex;align-items:center;justify-
         </div>
         <div class="row" style="display:flex;gap:8px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
           <button class="btn ghost" id="btnCleanupNoisy" data-i18n="view.voice.cleanup">清理低质量声纹</button>
+          <button class="btn ghost" id="btnSelect" data-i18n="view.voice.select">Select</button>
           <span style="color:var(--text-2);font-size:11px" data-i18n="view.voice.cleanupHint">删除样本 ≤ 5 的声纹（可清空 segments 引用）</span>
+        </div>
+        <div class="bulk-bar" id="bulkBar" hidden>
+          <div class="bulk-left">
+            <span class="bulk-count">
+              <em data-i18n="view.voice.bulkSelected">已选</em>
+              <b id="bulkCount">0</b>
+            </span>
+            <button class="bulk-link" id="bulkSelectAll" data-i18n="view.voice.bulkAll">全选</button>
+          </div>
+          <div class="bulk-right">
+            <button class="btn danger" id="bulkDelete" disabled data-i18n="view.voice.bulkDelete">删除</button>
+            <button class="btn ghost" id="bulkCancel" data-i18n="view.voice.bulkCancel">取消</button>
+          </div>
         </div>
         <div class="voice-grid" id="voiceGrid">
           <div class="new-card" id="newSpkCard">
@@ -743,6 +794,19 @@ const STRINGS = {
     'view.voice.cleanupConfirmMore': '\n...',
     'view.voice.cleanupItems': '待删除',
     'view.voice.cleanupDone': '已删除 {0} 个声纹，清空 {1} 个段引用',
+    'view.voice.select': '选择',
+    'view.voice.bulkDone': '完成',
+    'view.voice.bulkSelected': '已选',
+    'view.voice.bulkAll': '全选',
+    'view.voice.bulkNone': '全不选',
+    'view.voice.bulkCancel': '取消',
+    'view.voice.bulkDelete': '删除',
+    'view.voice.bulkDeleteN': '删除 {0} 个',
+    'view.voice.bulkDeleteNone': '没有可删除的项',
+    'view.voice.bulkDeleteConfirmTitle': '删除 {0} 个声纹？',
+    'view.voice.bulkDeleteConfirmBody': '将删除 {0} 个声纹，并清空 {1} 个段落引用。\n\n{2}',
+    'view.voice.bulkDeleteDone': '已删除 {0} 个声纹，清空 {1} 个段落引用',
+    'view.voice.bulkDeleteFail': '批量删除失败：{0}',
     'view.settings.title': '设置<em>.</em>',
     'view.settings.engine': 'Engine',
     'view.settings.engineDesc': 'Speaker identification model. Affects accuracy and speed.',
@@ -983,6 +1047,19 @@ const STRINGS = {
     'view.voice.cleanupConfirmMore': '\n...',
     'view.voice.cleanupItems': 'To delete',
     'view.voice.cleanupDone': 'Deleted {0} speakers, cleared {1} segment references',
+    'view.voice.select': 'Select',
+    'view.voice.bulkDone': 'Done',
+    'view.voice.bulkSelected': 'Selected',
+    'view.voice.bulkAll': 'Select all',
+    'view.voice.bulkNone': 'Deselect all',
+    'view.voice.bulkCancel': 'Cancel',
+    'view.voice.bulkDelete': 'Delete',
+    'view.voice.bulkDeleteN': 'Delete {0}',
+    'view.voice.bulkDeleteNone': 'Nothing to delete',
+    'view.voice.bulkDeleteConfirmTitle': 'Delete {0} speakers?',
+    'view.voice.bulkDeleteConfirmBody': 'Will delete {0} speakers and clear {1} segment references.\n\n{2}',
+    'view.voice.bulkDeleteDone': 'Deleted {0} speakers · cleared {1} segment references',
+    'view.voice.bulkDeleteFail': 'Bulk delete failed: {0}',
     'view.settings.title': 'Settings',
     'view.settings.engine': 'Engine',
     'view.settings.engineDesc': 'Speaker identification model. Affects accuracy and speed.',
@@ -1204,6 +1281,9 @@ const state = {
   currentEngine: null,
   spkColorIdx: new Map(),
   llmBlock: document.getElementById("llmRow"),
+  // 批量选择模式
+  selectMode: false,
+  selectedIds: new Set(),
 };
 
 /* helpers */
@@ -1432,6 +1512,8 @@ const spkPalette = ["#FF6B35","#4ECDC4","#D4A574","#C589E8","#7BC96F","#FFB347",
 const VIEW_KEY = { live: "nav.live", library: "nav.library", voice: "nav.voice", settings: "nav.settings" };
 function setView(v) {
   if (!VIEW_KEY[v]) return;
+  // 离开 voice 视图时强制退出批量选择模式
+  if (v !== "voice" && state.selectMode) exitSelectMode();
   state.view = v;
   $$(".nav-item").forEach(b => b.classList.toggle("active", b.dataset.view === v));
   $$(".view").forEach(s => s.classList.toggle("active", s.id === "view-" + v));
@@ -1956,6 +2038,9 @@ async function openDetail(id) {
 
 /* voice view */
 let speakersCache = [];
+// 批量删除守卫
+let bulkDeleteInFlight = false;
+let bulkEscHandler = null;
 async function loadVoice() {
   const grid = $("#voiceGrid");
   try {
@@ -1973,11 +2058,30 @@ async function loadVoice() {
 function renderVoice() {
   const grid = $("#voiceGrid");
   $("#spTotal").textContent = speakersCache.length;
+  // 工具条显隐 + Select/Done 文案切换 + cleanup 互斥
+  $("#bulkBar").hidden = !state.selectMode;
+  grid.classList.toggle("select-mode", state.selectMode);
+  const selBtn = $("#btnSelect");
+  if (selBtn) selBtn.textContent = t(state.selectMode ? "view.voice.bulkDone" : "view.voice.select");
+  const cln = $("#btnCleanupNoisy");
+  if (cln) {
+    cln.disabled = state.selectMode;
+    cln.style.opacity = state.selectMode ? .4 : 1;
+    cln.style.pointerEvents = state.selectMode ? "none" : "";
+  }
+  // 同步选中态:移除已不存在的 id
+  for (const id of Array.from(state.selectedIds)) {
+    if (!speakersCache.some(s => s.id === id)) state.selectedIds.delete(id);
+  }
   const cards = speakersCache.map(sp => {
     const c = spkPalette[spkColor(sp.id)];
     const init = spkInitial(sp.name || sp.id);
     const dur = ((sp.total_duration != null ? sp.total_duration : (sp.sample_count || 0) * 3) / 60).toFixed(1);
-    return `<div class="sp-card" data-id="${esc(sp.id)}">
+    const isSel = state.selectedIds.has(sp.id);
+    return `<div class="sp-card${isSel ? ' selected' : ''}" data-id="${esc(sp.id)}">
+      <div class="sp-check" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg>
+      </div>
       <div class="menu" data-act="menu">
         <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
       </div>
@@ -1997,39 +2101,121 @@ function renderVoice() {
   </div>`;
   const nsc = $("#newSpkCard");
   if (nsc) nsc.addEventListener("click", () => toast(t("voice.enroll.hint"), "ok"));
-  grid.querySelectorAll(".sp-card .menu").forEach(m => m.addEventListener("click", (e) => {
-    e.stopPropagation();
-    grid.querySelectorAll(".menu-pop").forEach(p => p.remove());
-    const card = m.closest(".sp-card");
-    const pop = document.createElement("div");
-    pop.className = "menu-pop";
-    pop.innerHTML = `<button data-act="rename">${esc(t("voice.menu.rename"))}</button><button data-act="delete" class="danger">${esc(t("voice.menu.delete"))}</button>`;
-    card.appendChild(pop);
-    const close = (ev) => { if (!pop.contains(ev.target)) { pop.remove(); document.removeEventListener("click", close); } };
-    setTimeout(() => document.addEventListener("click", close), 0);
-    pop.querySelector('[data-act="rename"]').addEventListener("click", async () => {
-      const id = card.dataset.id;
-      const cur = speakersCache.find(s => s.id === id);
-      const newName = await Modal.prompt({
-        title: t("voice.rename.prompt"),
-        initialValue: cur?.name || "",
-        validate: v => v.trim().length > 0,
-      });
-      if (newName === null) { pop.remove(); return; }
-      Matrix.api.patch("speakers/" + id, { name: newName.trim() }).then(() => { toast(t("voice.rename.ok"), "ok"); loadVoice(); }).catch(e => toast(t("voice.rename.fail", e.message), "error"));
-      pop.remove();
+  bindCardInteractions();
+  updateBulkBar();
+}
+
+function bindCardInteractions() {
+  const grid = $("#voiceGrid");
+  grid.querySelectorAll(".sp-card").forEach(card => {
+    const id = card.dataset.id;
+    const menuBtn = card.querySelector(".menu");
+    if (menuBtn) menuBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (state.selectMode) return;
+      openSpeakerMenu(card);
     });
-    pop.querySelector('[data-act="delete"]').addEventListener("click", async () => {
-      const id = card.dataset.id;
-      const ok = await Modal.confirm({
-        title: t("voice.delete.confirm", id),
-        danger: true,
-      });
-      if (!ok) { pop.remove(); return; }
-      Matrix.api.del("speakers/" + id).then(() => { toast(t("voice.delete.ok"), "ok"); loadVoice(); }).catch(e => toast(t("voice.delete.fail", e.message), "error"));
-      pop.remove();
+    const checkBtn = card.querySelector(".sp-check");
+    if (checkBtn) checkBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (!state.selectMode) enterSelectMode();
+      toggleSelect(id, card);
     });
-  }));
+    card.addEventListener("click", (e) => {
+      if (e.target.closest(".menu, .sp-check")) return;
+      if (state.selectMode) toggleSelect(id, card);
+    });
+  });
+}
+
+function openSpeakerMenu(card) {
+  const grid = $("#voiceGrid");
+  grid.querySelectorAll(".menu-pop").forEach(p => p.remove());
+  const pop = document.createElement("div");
+  pop.className = "menu-pop";
+  pop.innerHTML = `<button data-act="rename">${esc(t("voice.menu.rename"))}</button><button data-act="delete" class="danger">${esc(t("voice.menu.delete"))}</button>`;
+  card.appendChild(pop);
+  const close = (ev) => { if (!pop.contains(ev.target)) { pop.remove(); document.removeEventListener("click", close); } };
+  setTimeout(() => document.addEventListener("click", close), 0);
+  pop.querySelector('[data-act="rename"]').addEventListener("click", async () => {
+    const id = card.dataset.id;
+    const cur = speakersCache.find(s => s.id === id);
+    const newName = await Modal.prompt({
+      title: t("voice.rename.prompt"),
+      initialValue: cur?.name || "",
+      validate: v => v.trim().length > 0,
+    });
+    if (newName === null) { pop.remove(); return; }
+    Matrix.api.patch("speakers/" + id, { name: newName.trim() }).then(() => { toast(t("voice.rename.ok"), "ok"); loadVoice(); }).catch(e => toast(t("voice.rename.fail", e.message), "error"));
+    pop.remove();
+  });
+  pop.querySelector('[data-act="delete"]').addEventListener("click", async () => {
+    const id = card.dataset.id;
+    const ok = await Modal.confirm({
+      title: t("voice.delete.confirm", id),
+      danger: true,
+    });
+    if (!ok) { pop.remove(); return; }
+    Matrix.api.del("speakers/" + id).then(() => { toast(t("voice.delete.ok"), "ok"); loadVoice(); }).catch(e => toast(t("voice.delete.fail", e.message), "error"));
+    pop.remove();
+  });
+}
+
+function toggleSelect(id, card) {
+  if (state.selectedIds.has(id)) {
+    state.selectedIds.delete(id);
+    card.classList.remove("selected");
+  } else {
+    state.selectedIds.add(id);
+    card.classList.add("selected");
+  }
+  updateBulkBar();
+}
+
+function updateBulkBar() {
+  const n = state.selectedIds.size;
+  const total = speakersCache.length;
+  $("#bulkCount").textContent = n;
+  const delBtn = $("#bulkDelete");
+  delBtn.disabled = n === 0;
+  delBtn.textContent = t("view.voice.bulkDeleteN", n);
+  const allBtn = $("#bulkSelectAll");
+  allBtn.textContent = t(n === total && total > 0 ? "view.voice.bulkNone" : "view.voice.bulkAll");
+}
+
+function enterSelectMode() {
+  if (state.selectMode) return;
+  state.selectMode = true;
+  state.selectedIds = new Set();
+  renderVoice();
+  attachEscListener();
+}
+
+function exitSelectMode() {
+  if (!state.selectMode) return;
+  state.selectMode = false;
+  state.selectedIds = new Set();
+  renderVoice();
+  detachEscListener();
+}
+
+function attachEscListener() {
+  if (bulkEscHandler) return;
+  bulkEscHandler = (e) => {
+    if (e.key === "Escape" && state.selectMode && !bulkDeleteInFlight) {
+      // Modal 自己已经处理 ESC；这里只兜底未打开 Modal 的情况
+      e.preventDefault();
+      exitSelectMode();
+    }
+  };
+  document.addEventListener("keydown", bulkEscHandler);
+}
+
+function detachEscListener() {
+  if (bulkEscHandler) {
+    document.removeEventListener("keydown", bulkEscHandler);
+    bulkEscHandler = null;
+  }
 }
 
 /* settings */
@@ -2232,6 +2418,77 @@ async function cleanupNoisySpeakers() {
 }
 
 document.getElementById("btnCleanupNoisy")?.addEventListener("click", cleanupNoisySpeakers);
+
+/* 批量选择按钮 */
+$("#btnSelect")?.addEventListener("click", () => {
+  state.selectMode ? exitSelectMode() : enterSelectMode();
+});
+$("#bulkCancel")?.addEventListener("click", exitSelectMode);
+$("#bulkSelectAll")?.addEventListener("click", () => {
+  const allSelected = state.selectedIds.size === speakersCache.length && speakersCache.length > 0;
+  state.selectedIds = allSelected ? new Set() : new Set(speakersCache.map(s => s.id));
+  renderVoice();
+});
+$("#bulkDelete")?.addEventListener("click", bulkDeleteSelected);
+
+async function bulkDeleteSelected() {
+  if (bulkDeleteInFlight) return;
+  const ids = Array.from(state.selectedIds);
+  if (!ids.length) return;
+
+  // 1. dry_run: 拿 candidates + cascade_segments_cleared 给 Modal 预览
+  let dry;
+  try {
+    dry = await Matrix.api.post("speakers/cleanup", { speaker_ids: ids, dry_run: true, cascade: true });
+  } catch (e) {
+    toast(t("view.voice.bulkDeleteFail", e.message || e), "error");
+    return;
+  }
+  if (!dry.candidates || dry.candidates.length === 0) {
+    toast(t("view.voice.bulkDeleteNone"), "ok");
+    return;
+  }
+
+  // 2. Modal 危险确认
+  const preview = dry.candidates.slice(0, 6)
+    .map(id => speakersCache.find(s => s.id === id)?.name || id);
+  const more = dry.candidates.length > preview.length
+    ? "\n" + t("view.voice.cleanupConfirmMore", dry.candidates.length - preview.length)
+    : "";
+  const ok = await Modal.confirm({
+    title: t("view.voice.bulkDeleteConfirmTitle", dry.candidates.length),
+    body: t("view.voice.bulkDeleteConfirmBody", dry.candidates.length, dry.cascade_segments_cleared || 0, preview.join("\n") + more),
+    confirmText: t("view.voice.bulkDelete"),
+    cancelText: t("btn.cancel"),
+    danger: true,
+  });
+  if (!ok) return;
+
+  // 3. 真删
+  bulkDeleteInFlight = true;
+  const delBtn = $("#bulkDelete");
+  const origText = delBtn.textContent;
+  delBtn.disabled = true;
+  delBtn.textContent = t("view.voice.cleanupRunning");
+  try {
+    const result = await Matrix.api.post("speakers/cleanup", {
+      speaker_ids: dry.candidates,
+      dry_run: false,
+      cascade: true,
+    });
+    await loadVoice();
+    exitSelectMode();
+    toast(t("view.voice.bulkDeleteDone", result.deleted.length, result.cascade_segments_cleared || 0), "ok");
+  } catch (e) {
+    toast(t("view.voice.bulkDeleteFail", e.message || e), "error");
+  } finally {
+    bulkDeleteInFlight = false;
+    if (delBtn) {
+      delBtn.disabled = state.selectedIds.size === 0;
+      delBtn.textContent = origText;
+    }
+  }
+}
 </script>
 </body>
 </html>
