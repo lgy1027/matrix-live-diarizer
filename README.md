@@ -423,10 +423,41 @@ A: 用 Voice Library 的 **批量选择**:点 **Select** → 多选 → **Delete
 
 ## 隐私
 
-本项目承诺：你的音频、文本、声纹向量、设置**永远不离开你的电脑**。
-详见 [`docs/PRIVACY.md`](docs/PRIVACY.md)。
+本项目**默认**：你的音频、文本、声纹向量、设置**永远不离开你的电脑**。
+
+**可选**：如果你显式设置 `LLM_ALLOW_PUBLIC=true` 并配置 `LLM_API_KEY`,
+转写文本会发到你指定的 OpenAI 兼容 LLM endpoint(默认本地 Ollama)。
+详见 [`docs/LLM_SETUP.md`](docs/LLM_SETUP.md) 和 [`docs/PRIVACY.md`](docs/PRIVACY.md)。
 
 ## 本地 LLM 集成
 
-可选的 LLM 功能（摘要、行动项、会议纪要）需要本地 LLM 服务。
+可选的 LLM 功能（摘要、行动项、会议纪要）支持 **OpenAI 兼容接口**（`/chat/completions`）。
+
+### 默认：本地 Ollama（隐私优先）
+
+```bash
+ollama serve                                    # 默认 http://127.0.0.1:11434/v1
+ollama pull qwen2.5:1.5b
+```
+
+```bash
+# .env
+LLM_ENABLED=true
+LLM_ENDPOINT=http://127.0.0.1:11434/v1
+LLM_MODEL=qwen2.5:1.5b
+```
+
+### 可选：公网 OpenAI 兼容接口（需显式开）
+
+```bash
+# .env
+LLM_ENABLED=true
+LLM_ALLOW_PUBLIC=true                           # ← 必须显式开,默认拒公网
+LLM_ENDPOINT=https://api.openai.com/v1
+LLM_MODEL=gpt-4o-mini
+LLM_API_KEY=sk-xxx                              # Bearer token
+```
+
+也支持 DeepSeek / 智谱 / 月之暗面 / OpenRouter / LiteLLM 反代等任何 OpenAI 兼容端点。
+
 详见 [`docs/LLM_SETUP.md`](docs/LLM_SETUP.md)。

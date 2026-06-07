@@ -2,6 +2,7 @@
 import os
 import logging
 from pathlib import Path
+from typing import Optional
 from dataclasses import dataclass, field
 
 logger = logging.getLogger("Matrix_Core")
@@ -168,26 +169,31 @@ class StorageConfig:
 
 @dataclass
 class LLMConfig:
-    """本地 LLM 插件配置"""
+    """LLM 插件配置（默认仅本机，allow_public=True 时可走公网 OpenAI 兼容接口）"""
     enabled: bool = False
     endpoint: str = "http://127.0.0.1:11434/v1"
     model: str = "qwen2.5:1.5b"
+    api_key: Optional[str] = None           # Bearer token，公网 OpenAI 兼容接口需要
     timeout_sec: int = 60
     max_input_tokens: int = 8000
     mock: bool = False
     allowed_hosts: tuple[str, ...] = ("127.0.0.1", "::1", "localhost")
+    allow_public: bool = False              # 显式开公网（默认安全 = 仅本机）
 
     @classmethod
     def from_env(cls) -> "LLMConfig":
+        api_key = get_env_str("LLM_API_KEY", "") or None
         return cls(
             enabled=get_env_bool("LLM_ENABLED", False),
             endpoint=get_env_str("LLM_ENDPOINT", "http://127.0.0.1:11434/v1"),
             model=get_env_str("LLM_MODEL", "qwen2.5:1.5b"),
+            api_key=api_key,
             timeout_sec=get_env_int("LLM_TIMEOUT_SEC", 60),
             max_input_tokens=get_env_int("LLM_MAX_INPUT_TOKENS", 8000),
             mock=get_env_bool("LLM_MOCK", False),
             allowed_hosts=get_env_str_list("LLM_ALLOWED_HOSTS",
                                           ("127.0.0.1", "::1", "localhost")),
+            allow_public=get_env_bool("LLM_ALLOW_PUBLIC", False),
         )
 
 
