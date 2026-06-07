@@ -4,9 +4,20 @@ uvicorn>=0.23.0
 python-multipart>=0.0.6
 
 # 深度学习
+# 锁住 torch/torchvision/torchaudio 配套版本 — 不同步会 RuntimeError
+# (torchvision::nms does not exist 等) — 必须三方一致
 torch>=2.0.0
-torchaudio>=2.0.0
+torchvision
+torchaudio
 transformers>=4.30.0
+
+# transformers 间接依赖(隐式,不写会报 import error)
+huggingface-hub
+tokenizers
+safetensors
+accelerate
+packaging
+pyyaml
 
 # ASR 模型
 modelscope>=1.10.0
