@@ -56,7 +56,11 @@ def get_prompts():
 
 
 @router.put("/v1/llm/prompts")
-def update_prompts(payload: dict):
+def update_prompts(payload: dict, request: Request):
+    # 限本机访问(防横向提权)
+    client = request.client
+    if not client or client.host not in ("127.0.0.1", "::1", "localhost"):
+        raise HTTPException(status_code=403, detail="仅本机可修改 prompts")
     for k, v in payload.items():
         if k in PROMPTS:
             PROMPTS[k] = v

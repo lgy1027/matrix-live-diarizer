@@ -26,6 +26,7 @@ transcript_repo = None
 # 文件上传安全配置
 ALLOWED_EXTENSIONS: Set[str] = {'.wav', '.mp3', '.m4a', '.flac', '.ogg', '.aac', '.wma'}
 MAX_FILE_SIZE: int = 500 * 1024 * 1024  # 500MB
+_UPLOAD_CHUNK_SIZE: int = 1024 * 1024   # 1MB chunks,可被测试 mock
 
 
 def init_engines(asr, spk, lock, base_dir: str, repo=None):
@@ -159,17 +160,7 @@ async def upload_audio(
                 detail=f"不支持的文件类型: {ext}。支持的格式: {', '.join(sorted(ALLOWED_EXTENSIONS))}"
             )
     
-    # 2. 验证文件大小（先读取内容）
-    content = await file.read()
-    if len(content) > MAX_FILE_SIZE:
-        raise HTTPException(
-            status_code=400,
-            detail=f"文件大小 {len(content) / 1024 / 1024:.1f}MB 超过限制 {MAX_FILE_SIZE / 1024 / 1024:.0f}MB"
-        )
-    
-    # 重置文件指针供后续使用
-    await file.seek(0)
-    
+    # 2. 边写边校验大小(分块读,防 500MB 一次性 read 触发 DoS)
     temp_dir = os.path.join(current_dir, "uploads")
     os.makedirs(temp_dir, exist_ok=True)
     # 用 os.path.basename 强隔离,防止 ../ 路径遍历;再过滤路径分隔符
@@ -178,12 +169,23 @@ async def upload_audio(
     if not safe_name:
         safe_name = "upload.wav"
     file_path = os.path.join(temp_dir, f"{uuid.uuid4()}_{safe_name}")
-    
+
     try:
-        import shutil
+        total_written = 0
+        chunk_size = _UPLOAD_CHUNK_SIZE  # 1MB chunks (可被测试 patch)
         with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-        
+            while True:
+                chunk = await file.read(chunk_size)
+                if not chunk:
+                    break
+                total_written += len(chunk)
+                if total_written > MAX_FILE_SIZE:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"文件超过限制 {MAX_FILE_SIZE // (1024*1024)}MB"
+                    )
+                buffer.write(chunk)
+
         import librosa
         audio, _ = librosa.load(file_path, sr=config.audio.sample_rate)
         duration = len(audio) / config.audio.sample_rate
