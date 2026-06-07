@@ -27,9 +27,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           # 不安装 torch / modelscope — 用 mock 跑测试
+          # 必须装 soundfile (test_upload_returns_session_id.py 需要)
+          # 必须装 pytest-timeout (test_smoke_boot.py 用 @pytest.mark.timeout)
           pip install fastapi 'uvicorn>=0.23.0' 'python-multipart>=0.0.6' \
                       'transformers>=4.30.0' chromadb 'pydantic>=2.0.0' \
-                      'python-dotenv>=1.0.0' pytest pytest-asyncio httpx
+                      'python-dotenv>=1.0.0' pytest pytest-asyncio pytest-timeout httpx \
+                      soundfile
 
       - name: Run tests
         env:
@@ -38,7 +41,9 @@ jobs:
           LLM_MOCK: "true"
         run: |
           mkdir -p data
-          pytest tests/ -v --tb=short --ignore=tests/test_engine_switch.py --ignore=tests/test_exceptions.py --ignore=tests/test_logging.py --ignore=tests/test_upload_security.py --ignore=tests/test_base_engine.py
+          # 忽略 test_smoke_boot.py:它需要下载 1.8GB ASR 模型,CI 不下
+          # 其它测试(包括之前 5 个被 ignore 的)都用 mock,现在都通过
+          pytest tests/ -v --tb=short --ignore=tests/test_smoke_boot.py
 
       - name: Privacy audit
         run: |
