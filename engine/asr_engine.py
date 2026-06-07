@@ -105,8 +105,19 @@ class ASREngine:
                 logger.warning(
                     f"[ASR] {device} 加载超时 ({elapsed:.0f}s > {timeout}s)，放弃此设备"
                 )
-                # daemon=True 会随主进程退出；不强杀
+                # daemon=True 会随主进程退出；这里尽力释放 worker 内部引用
+                if result.get("asr_model") is not None:
+                    result["asr_model"] = None
                 continue
+
+            if not result["ok"]:
+                # 失败时立即释放已加载的 model 引用,避免后续 fallback 累积
+                if result.get("asr_model") is not None:
+                    del result["asr_model"]
+                    try:
+                        import gc; gc.collect()
+                    except Exception:
+                        pass
 
             if result["ok"]:
                 self.device = device
@@ -190,40 +201,39 @@ class ASREngine:
                 # 软限幅
                 audio_data = np.tanh(audio_data * 1.5) / 1.5
         
-        # 3. 简单谱减降噪（针对稳态噪声）
+        # 3. 软门限降噪（针对稳态噪声）
+        # 注意:这是简化的能量门限,不是完整 STFT 谱减。VAD + Silero
+        # 负责主要的语音检测,这一步只做粗粒度软门限。
         audio_data = self._spectral_subtraction(audio_data, noise_est_ratio=0.1)
-        
+
         return audio_data
 
     def _spectral_subtraction(self, audio: np.ndarray, noise_est_ratio: float = 0.1) -> np.ndarray:
-        """简单谱减降噪"""
+        """软门限降噪（不是完整谱减法）
+
+        仅按能量阈值做软衰减,不依赖 STFT。设计取舍:轻量、无频域失真。
+        真正的稳态噪声抑制请用完整 STFT + 谱减或 Wiener 滤波。
+        """
         if len(audio) < 1024:
             return audio
-        
+
         try:
             # 估计噪声（取开头一小段）
             noise_len = min(int(len(audio) * noise_est_ratio), 1600)
             noise = audio[:noise_len]
-            
-            # STFT 参数
-            n_fft = 512
-            hop_length = 256
-            
-            # 简化的谱减
-            # 这里用卷积平滑代替完整 STFT，减少计算量
+
             noise_power = np.mean(noise**2)
-            
-            # 门限降噪
             threshold = noise_power * 3
-            mask = np.abs(audio) > np.sqrt(threshold)
-            
-            # 软门限
+            sqrt_th = np.sqrt(threshold) + 1e-6
+
+            # 能量低于阈值的部分做软衰减(不是直接置 0,避免引入突变)
+            mask = np.abs(audio) > sqrt_th
             reduced = np.where(
                 mask,
                 audio,
-                audio * (np.abs(audio) / (np.sqrt(threshold) + 1e-6))
+                audio * (np.abs(audio) / sqrt_th)
             )
-            
+
             return reduced
         except Exception:
             return audio
