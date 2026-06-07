@@ -2,69 +2,80 @@
 
 # Matrix Live Diarizer
 
-**实时语音转写与说话人识别系统**
+**本地优先的会议语音 AI · 默认 0 字节外传**
 
-基于 Qwen3-ASR 构建,默认数据不外传,支持本地 LLM 增强
+3-10 人小会议 / 个人实时字幕。转写 + 说话人识别 + 摘要纪要，跑在你自己的机器上。
+**音频和转写永远不上云**，LLM 可选本机 Ollama 或局域网 vLLM。
 
 [![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![ModelScope](https://img.shields.io/badge/ModelScope-Qwen3--ASR-orange.svg)](https://modelscope.cn/models/Qwen/Qwen3-ASR-0.6B)
 
-[English](#english) | 简体中文
-
 </div>
 
 ---
 
-## ✨ 核心特性
+## 30 秒价值主张
 
-- 🎤 **实时转写** — WebSocket 流式,说话即转写
-- 👥 **说话人识别** — CamPlus / ERes2NetV2 / Wespeaker 3 种引擎,API 运行时切换
-- 🗂️ **批量管理** — Voice Library 多选 + 批量删除,自动清空 segments 引用
-- 📁 **离线处理** — 长音频自动分段 + 重叠合并,SRT/VTT/MD/JSON 导出
-- 🤖 **可选 LLM** — 摘要 / 行动项 / 纪要,默认仅本机 Ollama,可显式开公网
-- 🔐 **安全默认** — DNS rebinding 防御 + Bearer token 本机 + prompt 注入隔离
+> 你的会议录音 → 自动转写 + 说话人识别 + 摘要纪要。
+> **默认 0 字节外传**。需要时，你可以接 Ollama / 局域网 vLLM。
 
-## 🚀 30 秒快速开始
+## 为什么用 Matrix，不用飞书妙记 / 通义听悟？
+
+|              | 飞书/通义           | Matrix                |
+|--------------|--------------------|----------------------|
+| 音频上传到云  | ✅ 必须             | ❌ 永远不             |
+| 转写速度      | 看网速              | 看显卡                |
+| 局域网 LLM   | ❌                  | ✅ 内网 vLLM 即可     |
+| 离线运行      | ❌                  | ✅ 完全离线           |
+| 费用          | ¥X/人/月            | 一次部署永久免费       |
+| 说话人识别    | 通用（易混）         | 手动注册（准）         |
+| 数据所有权    | 厂商                | 永远是你              |
+
+## 目标用户
+
+- 🏢 **3-10 人小团队** — 周会 / 产品评审 / 客户沟通，自动出纪要
+- 👤 **个人开发者** — 直播 / 课程 / 播客的实时字幕
+- 🔒 **律师 / 医生 / 记者** — 录音受法规或行业约束，不能上云
+- 🏠 **局域网 AI 用户** — 已有 vLLM / Ollama，想把转写接上
+
+## 🚀 5 分钟跑通
 
 ```bash
-# 1. 克隆 + 装依赖
+# 1. 装依赖
 git clone https://github.com/lgy1027/matrix-live-diarizer.git
 cd matrix-live-diarizer
 pip install -r requirements.txt
 
-# 2. 启动(首次需联网下载模型 ~1.8GB)
-python main.py
+# 2. 启动（首次需联网下载模型 ~1.8GB，完了可断网）
+ASR_DEVICE=cpu python main.py     # MPS 死锁时用 CPU
+# 或：python main.py                # M 系列 Mac 默认 MPS
 
-# 3. 浏览器打开 web/index.html(用 file:// 协议)
-open web/index.html   # macOS
-# 或手动双击 web/index.html
+# 3. 浏览器打开前端
+open web/index.html               # macOS
+# Linux/Windows:双击 web/index.html
 ```
 
-启动日志示例:
-```
-[ASR] 初始化中,设备: mps
-[ASR] 模型加载成功(VAD 已启用)
-[CamPlus] 引擎初始化完成
-INFO:     Uvicorn running on http://0.0.0.0:8000
-```
+启动后看到 `Uvicorn running on http://0.0.0.0:8000` 即成功。
+前端是纯静态文件，用 `file://` 打开会自动连 `ws://127.0.0.1:8000`。
 
-换引擎启动:
-```bash
-SPEAKER_ENGINE=eres2net python main.py
-```
+## ✨ 它能做什么
 
-> ⚠️ macOS MPS 偶发加载死锁 → 用 `ASR_DEVICE=cpu python main.py` 启动
-> (详见 [常见问题](#-常见问题) Q1)
+- 🎤 **实时转写** — 浏览器录音，WebSocket 流式，说话即出文字
+- 📁 **离线处理** — 上传录音文件，自动分段 + 说话人识别，导出 SRT / VTT / MD / JSON
+- 👥 **说话人识别** — 手动注册声纹，会议里自动标"张三说的"
+- 🤖 **可选 LLM** — 摘要 / 行动项 / 会议纪要；默认关，启用时支持 Ollama / 局域网 vLLM / OpenAI 兼容 endpoint
+- 📚 **历史会话** — 所有转写本地存库（SQLite），随时回看
+- 🔐 **安全默认** — DNS rebinding 防御 + 仅本机改 LLM 配置 + prompt 注入隔离
 
 ## 📚 详细文档
 
 | 文档 | 内容 |
 |------|------|
 | **[docs/USAGE.md](docs/USAGE.md)** | Web 界面详细使用 + 高级场景 + 故障排查 |
-| **[docs/API.md](docs/API.md)** | 所有 API 端点(WebSocket/上传/说话人/引擎)+ 环境变量 |
-| **[docs/LLM_SETUP.md](docs/LLM_SETUP.md)** | LLM 配置:本地 Ollama / 公网 OpenAI / LiteLLM 反代 |
-| **[docs/PRIVACY.md](docs/PRIVACY.md)** | 隐私保证:默认本地 + 可选公网 + 4 道护栏 |
+| **[docs/API.md](docs/API.md)** | 所有 API 端点（WebSocket/上传/说话人/引擎）+ 环境变量 |
+| **[docs/LLM_SETUP.md](docs/LLM_SETUP.md)** | LLM 配置：本地 Ollama / 公网 OpenAI / 局域网 vLLM |
+| **[docs/PRIVACY.md](docs/PRIVACY.md)** | 隐私保证：默认本地 + 可选远程 + 4 道护栏 |
 
 ## 🎯 声纹引擎对比
 
