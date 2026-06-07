@@ -11,8 +11,10 @@ router = APIRouter()
 def export_session(
     session_id: str,
     request: Request,
-    format: str = Query(..., pattern="^(srt|vtt|markdown|json)$"),
+    format: str = Query(..., pattern="^(srt|vtt|markdown|md|json)$"),
 ):
+    # 兼容前端常见写法 md → markdown
+    fmt = "markdown" if format == "md" else format
     repo = request.app.state.transcript_repo
     session = repo.get_session(session_id)
     if session is None:
@@ -22,14 +24,14 @@ def export_session(
     speaker_aliases = {}  # v0.2 MVP：从 ChromaDB 读（后续接 alias 表）
 
     try:
-        if format == "json":
+        if fmt == "json":
             content = export(
                 "json",
                 session=session,
                 segments=segments,
                 speakers=[],  # v0.2 MVP
             )
-        elif format == "markdown":
+        elif fmt == "markdown":
             content = export(
                 "markdown",
                 segments=segments,
@@ -39,15 +41,15 @@ def export_session(
                 speaker_count=len({s.get("speaker_id") for s in segments if s.get("speaker_id")}),
             )
         else:
-            content = export(format, segments=segments, speaker_aliases=speaker_aliases)
+            content = export(fmt, segments=segments, speaker_aliases=speaker_aliases)
     except FormatError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
     title = session.get("title") or session_id[:8]
-    ext = {"srt": "srt", "vtt": "vtt", "markdown": "md", "json": "json"}[format]
+    ext = {"srt": "srt", "vtt": "vtt", "markdown": "md", "json": "json"}[fmt]
     filename = f"{title}.{ext}"
     return PlainTextResponse(
         content=content,
-        media_type=mime_type(format),
+        media_type=mime_type(fmt),
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
