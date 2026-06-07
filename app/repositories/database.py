@@ -67,10 +67,16 @@ class Database:
 
     @contextmanager
     def connect(self):
-        """获取连接，启用 Row 工厂"""
-        conn = sqlite3.connect(self.db_path)
+        """获取连接，启用 Row 工厂 + busy_timeout
+
+        busy_timeout 5s: SQLite 在"database is locked"时会自动等
+        5 秒重试,而不是立即抛错。配合 WAL 模式对并发 WebSocket
+        + upload 同时写库友好。
+        """
+        conn = sqlite3.connect(self.db_path, timeout=5.0)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("PRAGMA busy_timeout=5000")
         try:
             yield conn
         finally:
