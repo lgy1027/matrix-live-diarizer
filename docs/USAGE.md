@@ -30,9 +30,9 @@
 - 静音超过 3 秒自动结束识别
 - 单段最大 5 秒强制识别（避免长段延迟）
 
-![首页](images/首页.png)
+![首页](images/home.png)
 
-![录音识别](images/录音文件识别.png)
+![录音识别](images/upload.png)
 
 ## 3. 文件上传
 
@@ -78,7 +78,7 @@ curl -X POST "http://127.0.0.1:8000/v1/upload?enable_diarization=false" \
 - 删除 / 重命名会话
 - LLM 一键生成摘要 / 行动项 / 纪要（需先在 Settings 启用 LLM）
 
-![说话人](images/说话人管理.png)
+![说话人](images/voice.png)
 
 ## 5. 声纹库（Voice Library）
 
@@ -108,7 +108,7 @@ curl -X POST "http://127.0.0.1:8000/v1/upload?enable_diarization=false" \
 - ⚠️ 切换后 `embedding_dim` 变化时（CamPlus 192 ↔ Wespeaker 256）会提示
   声纹数据不兼容，需要重新注册说话人
 
-![设置](images/系统设置.png)
+![设置](images/settings.png)
 
 ## 6. 高级场景
 
