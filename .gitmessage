@@ -1,0 +1,27 @@
+# <type>(<scope>): <subject>  (中文, ≤50 字)
+#
+# <body>  (详细描述, 可省略)
+#
+# <footer>  (如 Breaking Change / Closes #123)
+#
+# === 项目规则 (docs/CONTRIBUTING.md) ===
+# - author 必须是 lgy1027 <lgy10271416@gmail.com>
+# - 不允许出现: claude / anthropic / AI 工具痕迹
+# - Co-Authored-By: Claude ... 等自动注入会被 hook 拦截
+#
+# === 常用 type ===
+# feat:     新功能
+# fix:      bug 修复
+# docs:     文档
+# refactor: 重构
+# test:     测试
+# chore:    杂项
+# perf:     性能
+#
+# === 示例 ===
+# feat(api): 批量删除声纹接口
+#
+# 实现 Voice Library 多选 + 批量删除,支持 cascade
+# 清空 segments 引用。
+#
+# Closes #42

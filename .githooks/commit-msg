@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# Commit-msg hook — 拦截含 AI 工具痕迹的 commit message
+#
+# 项目规则(详见 docs/CONTRIBUTING.md):
+# - 所有 commit author/committer 必须是 lgy1027
+# - commit message 不允许出现 claude / anthropic / AI 等痕迹
+# - 防止 AI 工具自动注入 Co-Authored-By 之类的痕迹
+#
+# 安装: 克隆后运行 `git config core.hooksPath .githooks`
+
+set -e
+
+COMMIT_MSG_FILE="$1"
+COMMIT_MSG=$(cat "$COMMIT_MSG_FILE")
+
+# 拦截的关键词(不区分大小写)
+FORBIDDEN_PATTERNS=(
+    "claude"
+    "anthropic"
+    "co-authored-by:.*claude"
+    "co-authored-by:.*anthropic"
+    "🤖"            # 常见 AI emoji
+    "generated with claude"
+    "ai generated"
+    "minimax"        # 兜底
+)
+
+for pattern in "${FORBIDDEN_PATTERNS[@]}"; do
+    if echo "$COMMIT_MSG" | grep -i -E "$pattern" >/dev/null 2>&1; then
+        echo ""
+        echo "❌ Commit message 包含 AI 工具痕迹: '$pattern'"
+        echo ""
+        echo "项目规则(详见 docs/CONTRIBUTING.md):"
+        echo "  - commit author/committer 必须是 lgy1027"
+        echo "  - commit message 不允许出现 claude / anthropic / AI 痕迹"
+        echo ""
+        echo "如果你的工具在 commit message 自动加了 'Co-Authored-By: ...',"
+        echo "请在工具配置里禁用 co-author 注入,或手动删掉相关行。"
+        echo ""
+        exit 1
+    fi
+done
+
+# 验证 author/committer 是 lgy1027
+AUTHOR=$(git var GIT_AUTHOR_IDENTIFIER 2>/dev/null || git log -1 --format='%an' HEAD 2>/dev/null || echo "")
+COMMITTER=$(git var GIT_COMMITTER_IDENTIFIER 2>/dev/null || git log -1 --format='%cn' HEAD 2>/dev/null || echo "")
+
+# Hook 在 commit-msg 阶段,实际作者信息已在环境变量里
+# 这里只检查 message,author 校验交给 pre-commit
+
+exit 0
