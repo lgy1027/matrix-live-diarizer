@@ -29,13 +29,17 @@ class LLMModelMissingError(LLMUnavailableError):
     pass
 
 
-def _validate_endpoint(endpoint: str, allowed_hosts: tuple) -> None:
-    """解析 endpoint 并校验 host 是私有/本地地址"""
+def _validate_endpoint(endpoint: str, allowed_hosts: tuple, allow_public: bool = False) -> None:
+    """解析 endpoint 并校验 host 是私有/本地地址
+    allow_public=True 时跳过 IP 校验（用户已显式开公网）。
+    """
     parsed = urlparse(endpoint)
     host = parsed.hostname
     if not host:
         raise EndpointSecurityError(f"无法解析 endpoint: {endpoint}")
     if host in allowed_hosts:
+        return
+    if allow_public:
         return
     try:
         ip = ipaddress.ip_address(socket.gethostbyname(host))
@@ -44,14 +48,16 @@ def _validate_endpoint(endpoint: str, allowed_hosts: tuple) -> None:
     if not ip.is_private and not ip.is_loopback:
         raise EndpointSecurityError(
             f"endpoint {host} ({ip}) 不是私有/本机地址。"
-            f"本项目不允许调用公网 LLM。"
+            f"本项目默认不允许调用公网 LLM。"
+            f"如确实需要,设置环境变量 LLM_ALLOW_PUBLIC=true 显式开公网,"
+            f"并通过 LLM_API_KEY 配置 Bearer token。"
         )
 
 
 class LLMGateway:
     def __init__(self, config: LLMConfig):
         if config.enabled:
-            _validate_endpoint(config.endpoint, config.allowed_hosts)
+            _validate_endpoint(config.endpoint, config.allowed_hosts, config.allow_public)
         self.config = config
         self._available_cache: Optional[bool] = None
         self._cache_time: float = 0.0
@@ -137,9 +143,13 @@ class LLMGateway:
             "messages": [{"role": "user", "content": prompt}],
             "stream": False,
         }
+        # 公网 OpenAI 兼容接口需要 Bearer token;本机 Ollama/vLLM 不需要
+        headers = {}
+        if self.config.api_key:
+            headers["Authorization"] = f"Bearer {self.config.api_key}"
         try:
             async with httpx.AsyncClient(timeout=self.config.timeout_sec) as client:
-                resp = await client.post(url, json=payload)
+                resp = await client.post(url, json=payload, headers=headers)
                 if resp.status_code == 404:
                     raise LLMModelMissingError(
                         f"模型 {self.config.model} 未加载。"
