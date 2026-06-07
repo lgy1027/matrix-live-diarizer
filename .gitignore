@@ -79,3 +79,4 @@ data/
 *.db-journal
 *.db-wal
 *.db-shm
+PR_DESCRIPTION.md
