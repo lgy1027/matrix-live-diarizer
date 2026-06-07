@@ -93,7 +93,11 @@ class AudioConfig:
     upload_max_duration: int = 3600     # 1小时
     upload_chunk_duration: int = 30     # 30秒分段
     upload_overlap_duration: float = 1.0
-    
+    # ASR 设备：auto | cpu | mps | cuda
+    # auto 优先 mps，加载超时后回退 cpu
+    asr_device: str = "auto"
+    asr_load_timeout_sec: int = 90      # 单设备加载超时（秒）
+
     @classmethod
     def from_env(cls) -> "AudioConfig":
         return cls(
@@ -115,6 +119,8 @@ class AudioConfig:
             upload_max_duration=get_env_int("UPLOAD_MAX_DURATION", 3600),
             upload_chunk_duration=get_env_int("UPLOAD_CHUNK_DURATION", 30),
             upload_overlap_duration=get_env_float("UPLOAD_OVERLAP_DURATION", 1.0),
+            asr_device=get_env_str("ASR_DEVICE", "auto").lower(),
+            asr_load_timeout_sec=get_env_int("ASR_LOAD_TIMEOUT_SEC", 90),
         )
 
 

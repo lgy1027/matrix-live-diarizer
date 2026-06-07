@@ -320,6 +320,15 @@ matrix-live-diarizer/
 - **采样率**: 音频输入必须是 16kHz
 - **首次启动**: 模型会自动下载到本地缓存，请确保网络畅通
 
+## ❓ 常见问题
+
+### Q: `python main.py` 卡住不动？
+A: macOS MPS 加载 Qwen3-ASR 偶发死锁（4+ 分钟 0% CPU）。已加 90s 超时自动回退 CPU。
+   手动解决：设 `ASR_DEVICE=cpu` 启动：
+   ```bash
+   ASR_DEVICE=cpu python main.py
+   ```
+
 ## 🤝 贡献
 
 欢迎提交 Issue 和 Pull Request！
