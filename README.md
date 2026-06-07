@@ -20,6 +20,7 @@
 
 - 🎤 **实时转写** - WebSocket 流式传输，说话即转写，低延迟响应
 - 👥 **说话人识别** - 自动区分不同说话人，支持增量学习
+- 🗂️ **批量管理** - Voice Library 支持多选声纹并批量删除,自动清空 segments 引用
 - 🔧 **多引擎支持** - CamPlus / ERes2NetV2 / Wespeaker 三种声纹引擎可切换
 - ⚡ **运行时切换** - 支持 API 动态切换声纹引擎，无需重启服务
 - 📁 **离线处理** - 支持上传音频文件批量处理，自动分段识别
@@ -88,6 +89,7 @@ INFO:     Uvicorn running on http://0.0.0.0:8000
 2. 用浏览器打开 `web/index.html` 文件
 3. 点击 **Start Stream** 开始实时转写
 4. 点击 **Upload File** 上传音频文件处理
+5. 切换到 **Voice Library** 标签,点 **Select** 进入批量选择模式,可多选并批量删除声纹
 
 > 💡 **提示**：Web 界面会自动连接到 `127.0.0.1:8000` 的后端服务
 
@@ -171,7 +173,44 @@ curl -X PATCH http://127.0.0.1:8000/v1/speakers/Spk_001 \
 
 # 删除说话人
 curl -X DELETE http://127.0.0.1:8000/v1/speakers/Spk_001
+
+# 批量清理声纹
+curl -X POST http://127.0.0.1:8000/v1/speakers/cleanup \
+  -H "Content-Type: application/json" \
+  -d '{
+    "speaker_ids": ["Spk_001", "Spk_002"],
+    "max_count": 5,
+    "dry_run": false,
+    "cascade": true
+  }'
 ```
+
+**批量清理参数说明**（`POST /v1/speakers/cleanup`）：
+
+| 参数 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `speaker_ids` | string[] | `null` | 显式指定要删的 ID 列表,优先级最高 |
+| `session_id` | string | `null` | 只清理该 session 下的声纹 |
+| `max_count` | int | `5` | 删 `sample_count <= max_count` 的低质量声纹 |
+| `dry_run` | bool | `true` | `true` 时只返回候选,不会真删 |
+| `cascade` | bool | `false` | `true` 时先清空 `segments.speaker_id` 引用(避免孤立) |
+
+**响应**：
+```json
+{
+  "dry_run": false,
+  "candidates": ["Spk_001", "Spk_002"],
+  "deleted": ["Spk_001", "Spk_002"],
+  "total_before": 12,
+  "total_after": 10,
+  "cascade_segments_cleared": 23
+}
+```
+
+三种过滤模式（优先级从高到低）：
+1. **`speaker_ids` 显式指定** — 精确控制要删的（Voice Library 批量选择用这个）
+2. **`session_id` + `max_count`** — 删某 session 下低质量样本
+3. **仅 `max_count`** — 删所有 session 中的低质量样本
 
 #### 引擎管理
 
@@ -327,6 +366,27 @@ A: macOS MPS 加载 Qwen3-ASR 偶发死锁（4+ 分钟 0% CPU）。已加 90s �
    手动解决：设 `ASR_DEVICE=cpu` 启动：
    ```bash
    ASR_DEVICE=cpu python main.py
+   ```
+
+### Q: 实时页面上传录音文件没有反应？
+A: 早期版本 `uploadFile()` 中引用了未定义的 `dz` 变量,导致 `fetch` 之前就抛 `ReferenceError`。
+   已在 `web/index.html:1735` 修复:在函数顶部 `const dz = document.getElementById("dropzone")`。
+
+### Q: 多次上传同一个文件没反应？
+A: HTML `<input type="file">` 对同名文件不会再次触发 `change` 事件(浏览器历史行为)。
+   已在 `web/index.html:1724` 修复:change 回调里先 `e.target.value = ""` 再调 `uploadFile()`。
+
+### Q: 同一个文件多次上传,识别出多个不同的声纹？
+A: 这是声纹引擎的 `emb_buffer` 滑动窗口在文件上传场景下的污染。已加 `use_buffer=False` 参数,
+   文件上传路径 (`app/api/upload.py:115, 209`) 直接用当前 embedding,不复用 buffer。
+
+### Q: 想一次性清理大量重复 / 低质量声纹？
+A: 用 Voice Library 的 **批量选择**:点 **Select** → 多选 → **Delete N** 即可。
+   也可直接调 API:
+   ```bash
+   curl -X POST http://127.0.0.1:8000/v1/speakers/cleanup \
+     -H "Content-Type: application/json" \
+     -d '{"max_count": 5, "dry_run": false, "cascade": true}'
    ```
 
 ## 🤝 贡献
