@@ -1719,7 +1719,10 @@ document.addEventListener("drop", (e) => {
 });
 document.addEventListener("change", (e) => {
   if (e.target.matches("input[type=file]") && e.target.id === "fileInput" && e.target.files[0]) {
-    uploadFile(e.target.files[0]);
+    const f = e.target.files[0];
+    // 重置 input.value，否则浏览器对同一文件不会再次触发 change 事件
+    e.target.value = "";
+    uploadFile(f);
   }
 });
 
@@ -1729,7 +1732,8 @@ async function uploadFile(file) {
   }
   if (file.size > 100 * 1024 * 1024) { toast(t("upload.tooLarge"), "error"); return; }
   toast(t("upload.uploading", file.name));
-  dz.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><b>${esc(t("upload.processingTitle"))}</b><small>${esc(t("upload.processingHint"))}</small>`;
+  const dz = document.getElementById("dropzone");
+  if (dz) dz.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><b>${esc(t("upload.processingTitle"))}</b><small>${esc(t("upload.processingHint"))}</small>`;
   try {
     const fd = new FormData();
     fd.append("file", file);
@@ -1749,7 +1753,8 @@ async function uploadFile(file) {
   } catch (e) {
     toast(t("upload.fail", e.message), "error");
   } finally {
-    dz.innerHTML = `
+    const dz = document.getElementById("dropzone");
+    if (dz) dz.innerHTML = `
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
       <b>${esc(t("view.live.dropzone.title"))}</b><small>${esc(t("view.live.dropzone.hint"))}</small>
       <input type="file" id="fileInput" accept="audio/*" hidden />`;
