@@ -18,14 +18,11 @@ async function load() {
     document.getElementById("llm-model").value = llm.model || "";
     const statusEl = document.getElementById("llm-status");
     if (llm.enabled && llm.available) {
-      statusEl.textContent = "✅ 可用";
+      statusEl.textContent = "✅ 可用 · LLM";
       statusEl.style.color = "#4ade80";
-    } else if (llm.enabled) {
-      statusEl.textContent = "❌ 不可用 (检查 endpoint 和模型)";
-      statusEl.style.color = "#dc2626";
     } else {
-      statusEl.textContent = "未启用";
-      statusEl.style.color = "#888";
+      statusEl.textContent = "🟡 本地摘要 (TextRank) · 未配置 LLM";
+      statusEl.style.color = "#fbbf24";
     }
   } catch (e) {
     // LLM API 不可达

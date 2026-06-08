@@ -81,19 +81,34 @@ class LLMGateway:
         return result
 
     async def _probe(self) -> bool:
+        """用最小 chat completions 调用探活,而不是 /models。
+        很多 OpenAI 兼容 endpoint(尤其第三方中转)不开放 /models,只暴露 /chat/completions。
+        这里发一个 max_tokens=1 的请求,401/403/404 都判为不可用,200 判为可用。
+        """
+        url = f"{self.config.endpoint.rstrip('/')}/chat/completions"
+        headers = {"Content-Type": "application/json"}
+        if self.config.api_key:
+            headers["Authorization"] = f"Bearer {self.config.api_key}"
+        payload = {
+            "model": self.config.model,
+            "messages": [{"role": "user", "content": "ping"}],
+            "max_tokens": 1,
+            "stream": False,
+        }
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.get(f"{self.config.endpoint.rstrip('/')}/models")
+                resp = await client.post(url, json=payload, headers=headers)
                 return resp.status_code == 200
         except Exception as e:
             logger.info(f"[LLM] 探测失败: {e}")
             return False
 
     async def summarize(self, segments: list[dict], max_words: int = 200) -> Optional[str]:
-        return await self._generate("summarize", segments, max_words=max_words)
+        text, _source = await self._generate("summarize", segments, max_words=max_words)
+        return text
 
     async def extract_action_items(self, segments: list[dict]) -> Optional[list[str]]:
-        text = await self._generate("action_items", segments)
+        text, _source = await self._generate("action_items", segments)
         if not text:
             return None
         text = text.strip()
@@ -105,25 +120,68 @@ class LLMGateway:
         return items[:50]
 
     async def generate_minutes(self, segments: list[dict]) -> Optional[str]:
-        return await self._generate("minutes", segments)
+        text, _source = await self._generate("minutes", segments)
+        return text
 
-    async def _generate(self, op: str, segments: list[dict], **kwargs) -> Optional[str]:
-        if not self.config.enabled:
-            return None
-        if self.config.mock:
-            return self._mock_response(op, segments, **kwargs)
-        if not await self.is_available():
-            raise LLMUnavailableError(f"LLM 不可用: {self.config.endpoint}")
-        from .llm_prompts import PROMPTS
-        transcript = self._segments_to_text(segments)
-        template = PROMPTS.get(op)
-        if not template:
-            raise ValueError(f"未知操作: {op}")
-        try:
-            prompt = template.format(transcript=transcript, **kwargs)
-        except KeyError:
-            prompt = template.replace("{transcript}", transcript)
-        return await self._call_llm(prompt)
+    async def _generate(self, op: str, segments: list[dict], **kwargs) -> tuple[str, str]:
+        """LLM 失败时静默降级到 extractive,返回 (text, source) tuple。
+
+        source 取值:
+        - "llm" — LLM 真实生成(mock 模式也算)
+        - "extractive-fallback" — 降级到本地 TextRank
+
+        触发降级的情况:
+        - LLM 未启用 (config.enabled=False)
+        - LLM 不可用 (probe 失败)
+        - LLM 调用抛 LLMUnavailableError / LLMTimeoutError / LLMModelMissingError
+        - LLM mock 模式 (mock_response 走原路径,不在降级范围)
+        """
+        # 1. 尝试 LLM
+        if self.config.enabled:
+            try:
+                if self.config.mock:
+                    return self._mock_response(op, segments, **kwargs), "llm"
+                if not await self.is_available():
+                    raise LLMUnavailableError(f"LLM 不可用: {self.config.endpoint}")
+                from .llm_prompts import PROMPTS
+                transcript = self._segments_to_text(segments)
+                template = PROMPTS.get(op)
+                if not template:
+                    raise ValueError(f"未知操作: {op}")
+                try:
+                    prompt = template.format(transcript=transcript, **kwargs)
+                except KeyError:
+                    prompt = template.replace("{transcript}", transcript)
+                text = await self._call_llm(prompt)
+                return text, "llm"
+            except (LLMUnavailableError, LLMTimeoutError, LLMModelMissingError) as e:
+                logger.warning(f"[LLM] 失败,降级到 extractive: {e}")
+            except Exception as e:
+                logger.warning(f"[LLM] 未知错误,降级: {e}")
+
+        # 2. Fallback: extractive
+        if op == "action_items":
+            items = self._extractive_fallback_action_items(segments)
+            return "\n".join(f"- {item}" for item in items), "extractive-fallback"
+        return self._extractive_fallback(op, segments, **kwargs), "extractive-fallback"
+
+    def _extractive_fallback(self, op: str, segments: list[dict], **kwargs) -> str:
+        """extractive 兜底 — 返回 str"""
+        from .extractive_summary import ExtractiveSummarizer
+        summarizer = ExtractiveSummarizer()
+        if op == "summarize":
+            max_words = kwargs.get("max_words", 200)
+            max_sent = max(3, max_words // 30)
+            return summarizer.summarize(segments, max_sentences=max_sent)
+        if op == "minutes":
+            return summarizer.generate_minutes(segments)
+        return "[本地摘要不可用]"
+
+    def _extractive_fallback_action_items(self, segments: list[dict]) -> list[str]:
+        """行动项降级时返回 list(给 action_items 端点用)"""
+        from .extractive_summary import ExtractiveSummarizer
+        summarizer = ExtractiveSummarizer()
+        return summarizer.extract_action_items(segments)
 
     def _segments_to_text(self, segments: list[dict]) -> str:
         lines = []
@@ -145,8 +203,9 @@ class LLMGateway:
         return "[MOCK]"
 
     async def _call_llm(self, prompt: str) -> str:
-        # DNS rebinding 防御:把 endpoint 解析成 (host, port, ip),用 IP 发请求
-        # 这样即使 DNS 之后再指向其它地址,实际连接仍是我们校验过的 IP
+        # DNS rebinding 防御:URL 保留域名(SSL 证书走 SNI 校验),
+        # 但 socket-level 把目标域名强制解析到 __init__ 时校验过的 IP。
+        # 这样 URL 用域名不破坏 HTTPS 校验,同时连接目标被锁死。
         url = f"{self.config.endpoint.rstrip('/')}/chat/completions"
         payload = {
             "model": self.config.model,
@@ -157,11 +216,12 @@ class LLMGateway:
         headers = {}
         if self.config.api_key:
             headers["Authorization"] = f"Bearer {self.config.api_key}"
+        pinned_ip = self._resolve_pinned_ip(url)
+        if pinned_ip:
+            self._install_socket_patch(url, pinned_ip)
         try:
-            # 把 host 替换成已解析的 IP,防止后续 DNS rebinding
-            resolved_url = self._pin_dns(url)
             async with httpx.AsyncClient(timeout=self.config.timeout_sec) as client:
-                resp = await client.post(resolved_url, json=payload, headers=headers)
+                resp = await client.post(url, json=payload, headers=headers)
                 if resp.status_code == 404:
                     raise LLMModelMissingError(
                         f"模型 {self.config.model} 未加载。"
@@ -174,34 +234,77 @@ class LLMGateway:
             raise LLMTimeoutError(f"LLM 调用超时: {e}") from e
         except httpx.HTTPError as e:
             raise LLMUnavailableError(f"LLM HTTP 错误: {e}") from e
+        finally:
+            if pinned_ip:
+                self._uninstall_socket_patch()
 
-    def _pin_dns(self, url: str) -> str:
-        """把 URL 中的 host 替换成已解析的 IP(防 DNS rebinding 攻击)。
+    # ---- DNS pinning(防 DNS rebinding 攻击)----
+    # 思路:在 LLM 调用期间,临时把 socket.getaddrinfo 改成对目标域名返回校验过的 IP。
+    # URL 仍用域名(SSL SNI 校验用域名),但 socket connect 走固定 IP,
+    # 解决 "把 host 换成 IP 后 SSL cert IP mismatch" 的问题。
 
-        endpoint 已在 __init__ 时通过 _validate_endpoint 校验过 IP 是私有的,
-        这次解析保证 httpx 实际连接的目标就是校验过的地址。
-        """
+    _socket_patch_active: bool = False
+    _original_getaddrinfo = None
+    _pinned_target_host: Optional[str] = None
+    _pinned_target_ip: Optional[str] = None
+
+    @classmethod
+    def _resolve_pinned_ip(cls, url: str) -> Optional[str]:
+        """从 URL 解析域名,提前解析成 IP 备用。返回 None 表示跳过 pinning。"""
         try:
             parsed = urlparse(url)
             host = parsed.hostname
             if not host:
-                return url
-            # IP literal 不需要解析
+                return None
+            # IP literal 不需要 pinning
             try:
                 ipaddress.ip_address(host)
-                return url
+                return None
             except ValueError:
                 pass
-            # 解析 DNS → 替换成 IP(锁住连接目标)
-            ip = socket.gethostbyname(host)
-            # ipv6 加 []
-            if ":" in ip:
-                host_header = f"[{ip}]"
-            else:
-                host_header = ip
-            port = parsed.port
-            netloc = f"{host_header}:{port}" if port else host_header
-            return urlparse(url)._replace(netloc=netloc).geturl()
+            return socket.gethostbyname(host)
         except (socket.gaierror, ValueError):
-            # 解析失败时让 httpx 自己处理
-            return url
+            return None
+
+    @classmethod
+    def _install_socket_patch(cls, url: str, pinned_ip: str) -> None:
+        parsed = urlparse(url)
+        host = parsed.hostname
+        if not host or cls._socket_patch_active:
+            return
+        # 已是 IP literal 时,patch 没意义(URL 里的 host 就是 IP,getaddrinfo 不会被以 host 调用)
+        try:
+            ipaddress.ip_address(host)
+            return
+        except ValueError:
+            pass
+        cls._pinned_target_host = host
+        cls._pinned_target_ip = pinned_ip
+        if cls._original_getaddrinfo is None:
+            cls._original_getaddrinfo = socket.getaddrinfo
+
+        _pinned_host = host
+        _pinned_ip = pinned_ip
+        _default_port = parsed.port or 443
+        _orig = cls._original_getaddrinfo
+
+        def _patched_getaddrinfo(h, port, *a, **kw):
+            if h == _pinned_host:
+                try:
+                    port_int = int(port) if port is not None else _default_port
+                except (TypeError, ValueError):
+                    port_int = _default_port
+                return _orig(_pinned_ip, port_int, *a, **kw)
+            return _orig(h, port, *a, **kw)
+
+        socket.getaddrinfo = _patched_getaddrinfo
+        cls._socket_patch_active = True
+
+    @classmethod
+    def _uninstall_socket_patch(cls) -> None:
+        if cls._original_getaddrinfo is not None:
+            socket.getaddrinfo = cls._original_getaddrinfo
+        cls._original_getaddrinfo = None
+        cls._pinned_target_host = None
+        cls._pinned_target_ip = None
+        cls._socket_patch_active = False

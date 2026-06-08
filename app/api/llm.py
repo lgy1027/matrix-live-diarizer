@@ -1,24 +1,21 @@
-"""LLM API 端点（仅在 LLM 启用时可用）"""
+"""LLM API 端点 — LLM 关闭/失败时静默降级到 extractive,响应带 source 字段"""
 import asyncio
 import importlib
+import logging
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from app.services.llm_gateway import (
-    LLMGateway,
-    LLMUnavailableError,
-    LLMTimeoutError,
-    LLMModelMissingError,
-)
+from app.services.llm_gateway import LLMGateway
 from app.services.llm_prompts import PROMPTS
 
+logger = logging.getLogger("Matrix_LLM_API")
 
 router = APIRouter()
 
 
 def _llm_cfg():
-    """动态获取当前 config.llm（每次访问，便于测试 reload/monkeypatch）"""
+    """动态获取当前 config.llm(每次访问,便于测试 reload/monkeypatch)"""
     return importlib.import_module("app.config").config.llm
 
 
@@ -47,6 +44,7 @@ def llm_status():
         "endpoint": cfg.endpoint if gw.enabled else None,
         "model": cfg.model if gw.enabled else None,
         "mock": cfg.mock,
+        "fallback": "extractive-textrank",  # 🆕 永远可用的兜底
     }
 
 
@@ -57,7 +55,6 @@ def get_prompts():
 
 @router.put("/v1/llm/prompts")
 def update_prompts(payload: dict, request: Request):
-    # 限本机访问(防横向提权)
     client = request.client
     if not client or client.host not in ("127.0.0.1", "::1", "localhost"):
         raise HTTPException(status_code=403, detail="仅本机可修改 prompts")
@@ -67,65 +64,40 @@ def update_prompts(payload: dict, request: Request):
     return PROMPTS
 
 
-def _handle_llm_error(e: Exception):
-    if isinstance(e, LLMTimeoutError):
-        raise HTTPException(status_code=504, detail=f"LLM 响应超时: {e}")
-    if isinstance(e, LLMModelMissingError):
-        raise HTTPException(status_code=503, detail=str(e))
-    if isinstance(e, LLMUnavailableError):
-        raise HTTPException(status_code=503, detail=str(e))
-    raise HTTPException(status_code=500, detail=str(e))
-
-
 @router.post("/v1/llm/summarize")
 async def summarize(body: SummarizeRequest, request: Request):
-    if not _llm_cfg().enabled:
-        raise HTTPException(status_code=503, detail="LLM 未启用")
     repo = request.app.state.transcript_repo
     if repo.get_session(body.session_id) is None:
         raise HTTPException(status_code=404, detail="会话不存在")
     segments = repo.list_segments(body.session_id)
     gw = _get_gateway()
-    try:
-        text = await gw.summarize(segments, max_words=body.max_words)
-    except (LLMUnavailableError, LLMTimeoutError, LLMModelMissingError) as e:
-        _handle_llm_error(e)
-    if text is None:
-        raise HTTPException(status_code=503, detail="LLM 不可用")
-    return {"text": text}
+    text, source = await gw._generate("summarize", segments, max_words=body.max_words)
+    return {"text": text, "source": source}
 
 
 @router.post("/v1/llm/action-items")
 async def action_items(body: SummarizeRequest, request: Request):
-    if not _llm_cfg().enabled:
-        raise HTTPException(status_code=503, detail="LLM 未启用")
     repo = request.app.state.transcript_repo
     if repo.get_session(body.session_id) is None:
         raise HTTPException(status_code=404, detail="会话不存在")
     segments = repo.list_segments(body.session_id)
     gw = _get_gateway()
-    try:
-        items = await gw.extract_action_items(segments)
-    except (LLMUnavailableError, LLMTimeoutError, LLMModelMissingError) as e:
-        _handle_llm_error(e)
-    if items is None:
-        raise HTTPException(status_code=503, detail="LLM 不可用")
-    return {"items": items}
+    text, source = await gw._generate("action_items", segments)
+    if source == "llm":
+        # LLM 返回是 "line1\nline2" 字符串,拆成 list
+        items = [line.strip("-* ").strip() for line in text.split("\n") if line.strip()]
+    else:
+        # 降级路径直接返 list
+        items = gw._extractive_fallback_action_items(segments)
+    return {"items": items, "source": source}
 
 
 @router.post("/v1/llm/minutes")
 async def minutes(body: SummarizeRequest, request: Request):
-    if not _llm_cfg().enabled:
-        raise HTTPException(status_code=503, detail="LLM 未启用")
     repo = request.app.state.transcript_repo
     if repo.get_session(body.session_id) is None:
         raise HTTPException(status_code=404, detail="会话不存在")
     segments = repo.list_segments(body.session_id)
     gw = _get_gateway()
-    try:
-        text = await gw.generate_minutes(segments)
-    except (LLMUnavailableError, LLMTimeoutError, LLMModelMissingError) as e:
-        _handle_llm_error(e)
-    if text is None:
-        raise HTTPException(status_code=503, detail="LLM 不可用")
-    return {"text": text}
+    text, source = await gw._generate("minutes", segments)
+    return {"text": text, "source": source}
