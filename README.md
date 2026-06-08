@@ -39,7 +39,33 @@
 - 🔒 **律师 / 医生 / 记者** — 录音受法规或行业约束，不能上云
 - 🏠 **局域网 AI 用户** — 已有 vLLM / Ollama，想把转写接上
 
-## 🚀 5 分钟跑通
+## 🐳 Docker 快速开始(推荐)
+
+无需装 PyTorch,5 分钟跑通。
+
+```bash
+# 1. 克隆 + 启动
+git clone https://github.com/lgy1027/matrix-live-diarizer.git
+cd matrix-live-diarizer
+docker compose up -d
+
+# 2. 看日志(首次启动会下载 ASR 模型 ~1.8GB,5-20 分钟)
+docker compose logs -f
+
+# 3. 浏览器打开前端
+open web/index.html               # macOS
+# Linux/Windows:双击 web/index.html
+```
+
+**特性:**
+- 镜像 ~800MB,模型按需下载(不进镜像,避免 ImagePullBackOff)
+- 数据持久化在 docker volume,删容器不丢
+- 支持 linux/amd64 + linux/arm64(M1/M2 Mac 也能跑)
+- 健康检查 + 非 root 用户运行
+
+> 需要换架构加速构建?`docker buildx create --use` 配远程构建。
+
+## 🚀 5 分钟跑通(从源码)
 
 ```bash
 # 1. 装依赖
@@ -47,9 +73,9 @@ git clone https://github.com/lgy1027/matrix-live-diarizer.git
 cd matrix-live-diarizer
 pip install -r requirements.txt
 
-# 2. 启动（首次需联网下载模型 ~1.8GB，完了可断网）
+# 2. 启动(首次需联网下载模型 ~1.8GB,完了可断网)
 ASR_DEVICE=cpu python main.py     # MPS 死锁时用 CPU
-# 或：python main.py                # M 系列 Mac 默认 MPS
+# 或:python main.py                # M 系列 Mac 默认 MPS
 
 # 3. 浏览器打开前端
 open web/index.html               # macOS
@@ -57,7 +83,7 @@ open web/index.html               # macOS
 ```
 
 启动后看到 `Uvicorn running on http://0.0.0.0:8000` 即成功。
-前端是纯静态文件，用 `file://` 打开会自动连 `ws://127.0.0.1:8000`。
+前端是纯静态文件,用 `file://` 打开会自动连 `ws://127.0.0.1:8000`。
 
 ## ✨ 它能做什么
 
@@ -65,6 +91,7 @@ open web/index.html               # macOS
 - 📁 **离线处理** — 上传录音文件，自动分段 + 说话人识别，导出 SRT / VTT / MD / JSON
 - 👥 **说话人识别** — 手动注册声纹，会议里自动标"张三说的"
 - 🤖 **可选 LLM** — 摘要 / 行动项 / 会议纪要；默认关，启用时支持 Ollama / 局域网 vLLM / OpenAI 兼容 endpoint
+- 🛡️ **离线兜底** — LLM 未配时自动用 TextRank 提取本地摘要,不出错也不空白
 - 📚 **历史会话** — 所有转写本地存库（SQLite），随时回看
 - 🔐 **安全默认** — DNS rebinding 防御 + 仅本机改 LLM 配置 + prompt 注入隔离
 
@@ -124,6 +151,25 @@ matrix-live-diarizer/
 - **采样率 16kHz** — 浏览器自动重采样,API 客户端需注意
 - **文件上传** — 500MB 上限,1 小时时长上限
 - **首次启动** — 需联网下载模型约 1.8GB
+
+## 🎬 试用示例数据
+
+clone 完不知道这玩意能干嘛?一条命令注入 2 个示例转写:
+
+```bash
+# 首次会下载 ~5MB CC0 音频(Stanford 公开讲座 + LibriVox 朗读)
+# 然后自动跑转写,2-5 分钟
+python scripts/seed_demo_data.py
+
+# 删掉重置
+python scripts/seed_demo_data.py --force
+
+# 不想下载,只插空 session
+python scripts/seed_demo_data.py --no-audio
+```
+
+完成后打开 `web/history.html` 看到 2 条"示例: ..."会话。
+**注意**: 示例是公开讲座和朗读片段,不是会议录音 — 用来体验转写+说话人识别功能。
 
 ## ❓ 常见问题
 
