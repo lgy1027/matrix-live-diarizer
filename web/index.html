@@ -1537,11 +1537,15 @@ function renderEngines(r) {
     const e = r.engines[k] || {};
     const active = k === r.current;
     const swatch = spkPalette[spkColorIndex(k) % 8];
+    // i18n: en 模式用 description_en / speed_en
+    const isEn = currentLang === 'en';
+    const desc = isEn ? (e.description_en || e.description) : e.description;
+    const spd = isEn ? (e.speed_en || e.speed) : e.speed;
     return `<div class="eng-row ${active?'active':''}" data-key="${esc(k)}">
       <div class="radio"></div>
       <div class="info">
         <div class="n">${esc(e.name || k)}</div>
-        <div class="m"><b>${esc(e.params || "—")}</b><span class="sep">·</span>${esc(e.speed || "—")}<span class="sep">·</span>${esc(e.description || "")}</div>
+        <div class="m"><b>${esc(e.params || "—")}</b><span class="sep">·</span>${esc(spd || "—")}<span class="sep">·</span>${esc(desc || "")}</div>
       </div>
       <div class="swatch" style="background:${swatch}"></div>
     </div>`;

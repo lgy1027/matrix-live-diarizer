@@ -11,30 +11,36 @@ ENGINE_CONFIG = {
         "name": "CamPlus",
         "model": "damo/speech_campplus_sv_zh-cn_16k-common",
         "description": "速度快，适合实时场景",
+        "description_en": "Fast speed, real-time scenes",
         "eer_voxceleb": "0.65%",
         "eer_cnceleb": "6.78%",
         "params": "7.2M",
         "speed": "快",
+        "speed_en": "Fast",
         "embedding_dim": 192
     },
     "eres2net": {
         "name": "ERes2NetV2",
         "model": "iic/speech_eres2netv2_sv_zh-cn_16k-common",
         "description": "SOTA 级别精度",
+        "description_en": "SOTA-level precision",
         "eer_voxceleb": "0.61%",
         "eer_cnceleb": "6.14%",
         "params": "17.8M",
         "speed": "中等",
+        "speed_en": "Medium",
         "embedding_dim": 192
     },
     "wespeaker": {
         "name": "ResNet34",
         "model": "iic/speech_resnet34_sv_zh-cn_3dspeaker_16k",
         "description": "经典稳定",
+        "description_en": "Classic, stable",
         "eer_voxceleb": "1.05%",
         "eer_cnceleb": "6.92%",
         "params": "6.34M",
         "speed": "快",
+        "speed_en": "Fast",
         "embedding_dim": 256
     }
 }
@@ -43,7 +49,9 @@ ASR_CONFIG = {
     "name": "Qwen3-ASR",
     "model": "Qwen/Qwen3-ASR-0.6B",
     "description": "阿里通义语音识别模型",
-    "languages": "52种语言/方言"
+    "description_en": "Alibaba Qwen speech recognition model",
+    "languages": "52种语言/方言",
+    "languages_en": "52 languages / dialects"
 }
 
 # 有效引擎类型
