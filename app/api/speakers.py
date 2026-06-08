@@ -1,7 +1,7 @@
 """说话人管理 API"""
 import logging
-from fastapi import APIRouter, HTTPException, Query, Path, Request
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException, Query, Path, Request, UploadFile, File
+from pydantic import BaseModel, Field
 from typing import Optional, List
 
 from engine.speaker.speaker_factory import get_speaker_engine, get_engine_manager
@@ -192,3 +192,102 @@ async def switch_engine(body: EngineSwitchRequest):
         raise HTTPException(status_code=400, detail=result.get("error", "切换失败"))
     
     return EngineSwitchResponse(**result)
+
+# ========== 主动注册声纹(从示例音频 enroll) ==========
+
+class EnrollRequest(BaseModel):
+    """主动注册声纹请求体(配合 multipart 文件上传使用)"""
+    speaker_id: str = Field(
+        ...,
+        pattern=r"^Spk_[a-zA-Z0-9_]{1,50}$",
+        description="声纹 ID,格式 Spk_xxx",
+        examples=["Spk_zhang_001"],
+    )
+    name: Optional[str] = Field(
+        None,
+        max_length=100,
+        pattern=r"^[\x20-\x7E一-鿿　-〿＀-￯]+$",
+        description="显示名称(可选),1-100 字符,过滤控制字符",
+    )
+
+
+class EnrollResponse(BaseModel):
+    """主动注册声纹响应"""
+    speaker_id: str
+    name: Optional[str] = None
+    duration_sec: float
+    sample_count: int
+
+
+@router.post("/v1/speakers/enroll", response_model=EnrollResponse)
+async def enroll_speaker(
+    speaker_id: str = Query(..., pattern=r"^Spk_[a-zA-Z0-9_]{1,50}$", description="声纹 ID,格式 Spk_xxx"),
+    name: Optional[str] = Query(None, max_length=100, description="显示名(可选)"),
+    file: UploadFile = File(..., description="示例音频 wav/mp3/m4a/flac/ogg/aac/wma,1-30 秒,16kHz"),
+):
+    """主动注册声纹(从示例音频)
+
+    这是前端 "Enroll New Voice" 按钮一直缺失的 API。
+    之前声纹只能靠实时录音被动累积;加此端点让用户能"上传示例音频 + 命名 → 立即入库"。
+
+    流程:
+    1. 接收文件 + speaker_id + name
+    2. 用 librosa 加载音频(16kHz)
+    3. 用当前引擎 extract_feat 提取声纹
+    4. upsert 到 ChromaDB(已存在则覆盖)
+    5. 返 EnrollResponse
+    """
+    import tempfile
+    import os
+    import librosa
+    from fastapi import HTTPException
+
+    ALLOWED = {".wav", ".mp3", ".m4a", ".flac", ".ogg", ".aac", ".wma"}
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in ALLOWED:
+        raise HTTPException(status_code=400, detail=f"不支持的文件类型: {ext}")
+
+    # 临时保存(用完即删)
+    with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+        content = await file.read()
+        if len(content) == 0:
+            os.unlink(tmp.name)
+            raise HTTPException(status_code=400, detail="文件为空")
+        if len(content) > 500 * 1024 * 1024:
+            os.unlink(tmp.name)
+            raise HTTPException(status_code=400, detail="文件超过 500MB")
+        tmp.write(content)
+        tmp_path = tmp.name
+
+    try:
+        audio, sr = librosa.load(tmp_path, sr=16000)
+        duration = len(audio) / sr
+        if duration < 0.5:
+            raise HTTPException(status_code=400, detail="音频太短(< 0.5s),无法提取声纹")
+        if duration > 30:
+            raise HTTPException(status_code=400, detail="音频太长(> 30s),请截取 1-10 秒")
+
+        engine = get_speaker_engine()
+        feat = engine.extract_feat(audio)
+        emb = feat[0] if isinstance(feat, tuple) else feat
+
+        ok = engine.add_speaker(
+            speaker_id=speaker_id,
+            embedding=emb,
+            name=name or speaker_id,
+            session_id=None,
+        )
+        if not ok:
+            raise HTTPException(status_code=500, detail="声纹入库失败")
+
+        return EnrollResponse(
+            speaker_id=speaker_id,
+            name=name or speaker_id,
+            duration_sec=duration,
+            sample_count=1,
+        )
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
