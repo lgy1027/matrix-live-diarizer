@@ -47,9 +47,21 @@ def export_session(
 
     title = session.get("title") or session_id[:8]
     ext = {"srt": "srt", "vtt": "vtt", "markdown": "md", "json": "json"}[fmt]
-    filename = f"{title}.{ext}"
+    # 安全净化 filename: 防 HTTP 头注入(CRLF)、引号转义、防路径遍历
+    safe_title = str(title).replace("\r", "").replace("\n", "").replace('"', "'")
+    safe_title = "".join(c for c in safe_title if c.isprintable())[:80] or session_id[:8]
+    # 中文 / 非 ASCII 字符: HTTP 头默认 latin-1 编码,会抛 UnicodeEncodeError
+    # RFC 5987 方式: filename*=UTF-8''xxx(浏览器优先用)
+    try:
+        filename_ascii = f"{safe_title}.{ext}".encode("latin-1").decode("latin-1")
+        cd = f'attachment; filename="{filename_ascii}"'
+    except UnicodeEncodeError:
+        # 含非 latin-1 字符(中文等),用 RFC 5987 双语 header
+        from urllib.parse import quote
+        filename_utf8 = f"{safe_title}.{ext}"
+        cd = f"attachment; filename=\"download.{ext}\"; filename*=UTF-8''{quote(filename_utf8)}"
     return PlainTextResponse(
         content=content,
         media_type=mime_type(fmt),
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": cd},
     )

@@ -32,9 +32,13 @@ SPEAKER_ID_PATH = Path(
 
 class CleanupRequest(BaseModel):
     """清理声纹请求"""
-    session_id: Optional[str] = None         # None=全部 session
-    max_count: int = 5                       # 只删 count <= 此值的（默认 5，删低质量/单样本）
-    speaker_ids: Optional[List[str]] = None   # 显式指定要删的 ID（覆盖 max_count 过滤）
+    session_id: Optional[str] = Field(None, max_length=100, description="会话ID,最多 100 字符")
+    max_count: int = Field(5, ge=0, le=10000, description="count <= 此值的被删,默认 5,范围 0-10000")
+    speaker_ids: Optional[List[str]] = Field(
+        None,
+        max_length=1000,                      # 一次最多删 1000 个,防 DoS
+        description="显式指定要删的 ID(覆盖 max_count 过滤),最多 1000 个",
+    )
     dry_run: bool = True                      # True=只返回将删的，不真删
     cascade: bool = False                     # True 时：真删前先清空 segments.speaker_id 引用
 
