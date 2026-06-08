@@ -4,11 +4,15 @@ from app.services.llm_gateway import LLMGateway, EndpointSecurityError
 from app.config import LLMConfig
 
 
-def test_disabled_gateway_returns_none_for_all():
+def test_disabled_gateway_falls_back_to_extractive():
+    """LLM 关闭时 summarize 不抛错,降级到 extractive 兜底(返回非 None 字符串)"""
     cfg = LLMConfig(enabled=False)
     gw = LLMGateway(cfg)
     assert asyncio.run(gw.is_available()) is False
-    assert asyncio.run(gw.summarize([])) is None
+    result = asyncio.run(gw.summarize([]))
+    # 不再返回 None — 走 extractive 兜底,空段落返回 "(无内容)"
+    assert result is not None
+    assert isinstance(result, str)
 
 
 def test_rejects_public_endpoint_on_init():
@@ -177,3 +181,138 @@ def test_from_env_empty_api_key_becomes_none(monkeypatch):
     cfg = LLMConfig.from_env()
     assert cfg.api_key is None
     monkeypatch.delenv("LLM_API_KEY", raising=False)
+
+
+# ========== extractive fallback ==========
+
+def test_generate_falls_back_to_extractive_when_disabled():
+    """LLM 关掉时 _generate 走 extractive 兜底而不是返回 None"""
+    from app.services.llm_gateway import LLMGateway
+    from app.config import LLMConfig
+    cfg = LLMConfig(enabled=False)
+    gw = LLMGateway(cfg)
+    result = asyncio.run(gw.summarize([{"text": "今天讨论产品方向。张三需要做调研。"}]))
+    assert result is not None
+    assert len(result) > 0
+
+
+def test_generate_falls_back_on_llm_error(monkeypatch):
+    """LLM 抛错时降级到 extractive(不抛给调用方)"""
+    from app.services.llm_gateway import LLMGateway, LLMUnavailableError
+    from app.config import LLMConfig
+    cfg = LLMConfig(enabled=True, endpoint="http://127.0.0.1:11434/v1")
+    gw = LLMGateway(cfg)
+
+    async def fake_call(self, prompt):
+        raise LLMUnavailableError("LLM 不可用")
+    monkeypatch.setattr(LLMGateway, "_call_llm", fake_call)
+
+    result = asyncio.run(gw.summarize([{"text": "今天讨论产品方向。张三需要做调研。"}]))
+    assert result is not None
+    assert len(result) > 0
+
+
+def test_generate_falls_back_on_timeout(monkeypatch):
+    """LLM 超时时降级"""
+    from app.services.llm_gateway import LLMGateway, LLMTimeoutError
+    from app.config import LLMConfig
+    cfg = LLMConfig(enabled=True, endpoint="http://127.0.0.1:11434/v1")
+    gw = LLMGateway(cfg)
+
+    async def fake_call(self, prompt):
+        raise LLMTimeoutError("LLM 超时")
+    monkeypatch.setattr(LLMGateway, "_call_llm", fake_call)
+
+    result = asyncio.run(gw.summarize([{"text": "今天讨论产品方向。张三需要做调研。"}]))
+    assert result is not None
+
+
+def test_action_items_falls_back_returns_list():
+    """行动项降级时返回非空 list"""
+    from app.services.llm_gateway import LLMGateway
+    from app.config import LLMConfig
+    cfg = LLMConfig(enabled=False)
+    gw = LLMGateway(cfg)
+    result = asyncio.run(gw.extract_action_items([{"text": "张三需要下周完成报告。"}]))
+    # 失败的话是 None 或 [],但降级后应返回 list
+    # 即使不匹配关键词也是 []
+    assert result is not None
+    assert isinstance(result, list)
+
+
+def test_minutes_falls_back():
+    """纪要降级返回 string 含议题/决议/行动项"""
+    from app.services.llm_gateway import LLMGateway
+    from app.config import LLMConfig
+    cfg = LLMConfig(enabled=False)
+    gw = LLMGateway(cfg)
+    result = asyncio.run(gw.generate_minutes([{"text": "今天讨论产品。张三需要做调研。"}]))
+    assert result is not None
+    assert "议题" in result
+
+
+# ========== 回归测试: socket-level DNS pinning ==========
+
+def test_socket_patch_install_uninstall():
+    """_install_socket_patch / _uninstall_socket_patch 不污染全局"""
+    from app.services.llm_gateway import LLMGateway
+    import socket as _socket
+    
+    orig = _socket.getaddrinfo
+    LLMGateway._install_socket_patch("https://api.edgefn.net/v1", "198.18.0.51")
+    assert LLMGateway._socket_patch_active is True
+    assert LLMGateway._pinned_target_host == "api.edgefn.net"
+    assert LLMGateway._pinned_target_ip == "198.18.0.51"
+    # getaddrinfo 应被替换
+    assert _socket.getaddrinfo is not orig
+    
+    LLMGateway._uninstall_socket_patch()
+    assert LLMGateway._socket_patch_active is False
+    assert LLMGateway._pinned_target_host is None
+    assert LLMGateway._pinned_target_ip is None
+    assert _socket.getaddrinfo is orig
+
+
+def test_socket_patch_pins_target_host_to_pinned_ip():
+    """打补丁后,getaddrinfo('api.edgefn.net', ...) 应返回 IP '198.18.0.51' 的结果"""
+    from app.services.llm_gateway import LLMGateway
+    import socket as _socket
+    
+    LLMGateway._install_socket_patch("https://api.edgefn.net/v1", "198.18.0.51")
+    try:
+        # 调用 getaddrinfo 应该走 patched 版本,看到 api.edgefn.net 时返回 198.18.0.51
+        results = _socket.getaddrinfo("api.edgefn.net", 443, type=_socket.SOCK_STREAM)
+        assert len(results) > 0
+        # 所有结果 sockaddr[0] 应是 '198.18.0.51'
+        for family, _type, _proto, _canon, sockaddr in results:
+            assert sockaddr[0] == "198.18.0.51", f"Expected 198.18.0.51, got {sockaddr}"
+    finally:
+        LLMGateway._uninstall_socket_patch()
+
+
+def test_socket_patch_does_not_affect_other_hosts():
+    """只 patch 目标域名,其他域名走原 getaddrinfo"""
+    from app.services.llm_gateway import LLMGateway
+    import socket as _socket
+    
+    LLMGateway._install_socket_patch("https://api.edgefn.net/v1", "198.18.0.51")
+    try:
+        # 其他域名应走原 DNS,本机 'localhost' 解析成 127.0.0.1
+        results = _socket.getaddrinfo("localhost", 80, type=_socket.SOCK_STREAM)
+        ips = {r[4][0] for r in results}
+        # localhost 应解析到 127.0.0.1,不被 patch 影响
+        assert "127.0.0.1" in ips or "::1" in ips
+    finally:
+        LLMGateway._uninstall_socket_patch()
+
+
+def test_socket_patch_skips_ip_literal():
+    """URL host 已经是 IP literal 时,不应装 patch(没意义)"""
+    from app.services.llm_gateway import LLMGateway
+    import socket as _socket
+    
+    orig = _socket.getaddrinfo
+    LLMGateway._install_socket_patch("http://127.0.0.1:11434/v1", "127.0.0.1")
+    # 已是 IP literal,patch 不应安装
+    assert LLMGateway._socket_patch_active is False
+    assert _socket.getaddrinfo is orig

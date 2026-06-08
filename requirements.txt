@@ -46,3 +46,6 @@ sortedcontainers
 
 # soundfile 隐式依赖
 cffi
+
+# 摘要 (TextRank 兜底) — LLM 不可用时本地提取
+summa==1.2.0

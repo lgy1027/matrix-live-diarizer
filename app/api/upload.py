@@ -12,6 +12,7 @@ from fastapi import APIRouter, UploadFile, File, HTTPException, Query
 from app.config import config
 from app.constants import FILE_UPLOAD_SESSION
 from app.schemas import UploadResponse, ModelsResponse, SegmentResult
+from app.services.transcribe import transcribe_file
 from engine.speaker.speaker_factory import get_speaker_engine
 
 logger = logging.getLogger("Matrix_Core")
@@ -204,24 +205,32 @@ async def upload_audio(
                 detail=f"音频 {duration:.1f}s 超过限制 {config.audio.upload_max_duration}s"
             )
         
-        # 短音频直接处理
+        # 短音频直接处理 — 复用 transcribe_file 的 load+ASR+embedding 核心
+        # (transcribe_file 不写库,只返回结构化结果;写库在下面统一处理)
         if duration <= config.audio.upload_chunk_duration:
             async with inference_lock:
-                text = await asr_engine.run_asr(audio, use_preprocessing=True)
-                
                 if enable_diarization:
-                    emb_result = await asyncio.get_event_loop().run_in_executor(
-                        None, get_speaker_engine().extract_feat, audio
+                    # 启用说话人识别时,复用 transcribe_file 的核心(load+ASR+embedding)
+                    transcribe_result = await transcribe_file(
+                        audio_path=file_path,
+                        asr_engine=asr_engine,
+                        spk_engine=get_speaker_engine(),
+                        session_id="",  # session_id 写库时由 repo 生成
+                        sample_rate=config.audio.sample_rate,
+                        repo=transcript_repo,
                     )
-                    # 处理 tuple 返回值
-                    if isinstance(emb_result, tuple):
-                        embedding, _ = emb_result
+                    if transcribe_result.segments:
+                        seg0 = transcribe_result.segments[0]
+                        text = seg0.text
+                        spk_id = seg0.speaker_id
                     else:
-                        embedding = emb_result
-                    spk_id = get_speaker_engine().compare_and_identify(embedding, FILE_UPLOAD_SESSION, duration, use_buffer=False)
+                        text = ""
+                        spk_id = None
                 else:
+                    # 简单 ASR 路径(不调声纹引擎,保持原行为)
+                    text = await asr_engine.run_asr(audio, use_preprocessing=True)
                     spk_id = "SPEAKER"
-            
+
             logger.info(f"[UPLOAD] 完成, {time.time() - start_time_total:.2f}s")
 
             # 自动存档

@@ -85,7 +85,12 @@ async function llm(op) {
   llmResult.textContent = "生成中...";
   try {
     const data = await Matrix.api.post(`llm/${op}`, { session_id: sessionId });
-    llmResult.textContent = data.text || (data.items || []).join("\n") || "";
+    const text = data.text || (data.items || []).join("\n") || "";
+    if (data.source === "extractive-fallback") {
+      llmResult.textContent = `[本地摘要 · 未配置 LLM]\n\n${text}`;
+    } else {
+      llmResult.textContent = text;
+    }
   } catch (e) {
     llmResult.textContent = `错误: ${e.message}`;
   }
