@@ -504,7 +504,7 @@ footer.bar-b{height:32px;padding:0 28px;display:flex;align-items:center;justify-
   <main class="col">
     <header class="bar">
       <div class="crumb">
-        <span id="crumbView">Live</span><span class="sep">·</span><b id="crumbSub">Matrix Studio</b>
+        <span id="crumbView" data-i18n="nav.live">Live</span><span class="sep">·</span><b id="crumbSub">Matrix Studio</b>
       </div>
       <div class="lang-switcher" role="group" aria-label="Language">
         <button class="lang-btn" data-lang="zh" aria-label="中文">中文</button>
@@ -920,11 +920,11 @@ function addSegment(speaker, text, time) {
   const trEl = $("#transcript");
   if (trEl.querySelector(".empty")) trEl.innerHTML = "";
   const seg = document.createElement("div");
-  seg.className = "seg s" + spkColor(speaker);
+  seg.className = "seg s" + spkColorIndex(speaker);
   seg.id = id;
   seg.innerHTML = `
     <div class="head">
-      <span class="name" style="color:${spkPalette[spkColor(speaker)]}">${esc(speaker)}</span>
+      <span class="name" style="color:${spkPalette[spkColorIndex(speaker)]}">${esc(speaker)}</span>
       <span class="id">#${state.segments.length + 1}</span>
       <span class="time">${esc(time)}</span>
     </div>
@@ -932,6 +932,10 @@ function addSegment(speaker, text, time) {
   trEl.appendChild(seg);
   trEl.scrollTop = trEl.scrollHeight;
   state.segments.push({ id, speaker, text, time });
+  // 立即更新计数(不等打字机完成) — 解决 '0 段 · 1 人' race:
+  // speaker 已在 ws.onmessage 中累加,但 segments 刚 push,
+  // 不立即刷 segCount 会让用户看到旧值
+  $("#segCount").textContent = t("view.live.segCount", state.segments.length, state.speakers.size);
   const body = seg.querySelector(".body");
   let i = 0;
   const speed = Math.max(8, Math.min(28, 700 / Math.max(text.length, 1)));
@@ -959,10 +963,10 @@ function renderTranscript() {
   trEl.innerHTML = "";
   state.segments.forEach((s, i) => {
     const seg = document.createElement("div");
-    seg.className = "seg s" + spkColor(s.speaker);
+    seg.className = "seg s" + spkColorIndex(s.speaker);
     seg.innerHTML = `
       <div class="head">
-        <span class="name" style="color:${spkPalette[spkColor(s.speaker)]}">${esc(s.speaker)}</span>
+        <span class="name" style="color:${spkPalette[spkColorIndex(s.speaker)]}">${esc(s.speaker)}</span>
         <span class="id">#${i + 1}</span>
         <span class="time">${esc(s.time || "")}</span>
       </div>
@@ -1190,9 +1194,9 @@ async function openDetail(id) {
     const pT = $("#pane-trans");
     if (segments.length === 0) pT.innerHTML = `<div class="empty">${esc(t("detail.empty.segments"))}</div>`;
     else pT.innerHTML = `<div class="seg-list">${segments.map((s, i) => `
-      <div class="seg s${spkColor(s.speaker_id || s.speaker)}">
+      <div class="seg s${spkColorIndex(s.speaker_id || s.speaker)}">
         <div class="head">
-          <span class="name" style="color:${spkPalette[spkColor(s.speaker_id || s.speaker)]}">${esc(s.speaker_id || s.speaker || "?")}</span>
+          <span class="name" style="color:${spkPalette[spkColorIndex(s.speaker_id || s.speaker)]}">${esc(s.speaker_id || s.speaker || "?")}</span>
           <span class="id">#${i+1}</span>
           <span class="time">${esc(fmtSec(s.start_time || 0))} → ${esc(fmtSec(s.end_time || 0))}</span>
         </div>
@@ -1294,7 +1298,7 @@ function renderVoice() {
     if (!speakersCache.some(s => s.id === id)) state.selectedIds.delete(id);
   }
   const cards = speakersCache.map(sp => {
-    const c = spkPalette[spkColor(sp.id)];
+    const c = spkPalette[spkColorIndex(sp.id)];
     const init = spkInitial(sp.name || sp.id);
     const dur = ((sp.total_duration != null ? sp.total_duration : (sp.sample_count || 0) * 3) / 60).toFixed(1);
     const isSel = state.selectedIds.has(sp.id);
@@ -1532,7 +1536,7 @@ function renderEngines(r) {
   $("#engList").innerHTML = list.map(k => {
     const e = r.engines[k] || {};
     const active = k === r.current;
-    const swatch = spkPalette[spkColor(k) % 8];
+    const swatch = spkPalette[spkColorIndex(k) % 8];
     return `<div class="eng-row ${active?'active':''}" data-key="${esc(k)}">
       <div class="radio"></div>
       <div class="info">

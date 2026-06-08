@@ -43,11 +43,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         if not self.enabled:
             return await call_next(request)
-        
+
         # 获取客户端 IP
         client_ip = self._get_client_ip(request)
         now = time.time()
-        
+
         # 清理过期记录（超过1小时的）
         hour_ago = now - 3600
         self.requests[client_ip] = [
