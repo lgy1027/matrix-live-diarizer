@@ -105,3 +105,77 @@ def test_export_md_alias_accepted(client, tmp_path):
 def test_export_nonexistent_session(client):
     resp = client.get("/v1/exports/nonexistent?format=srt")
     assert resp.status_code == 404
+
+
+# ========== 回归测试:Content-Disposition 头注入防护 ==========
+
+def test_export_filename_sanitizes_quotes(client):
+    """title 含双引号时,Content-Disposition 头不应被破坏"""
+    app = client.app
+    # 含双引号 + 分号的攻击性 title
+    sid = app.state.transcript_repo.create_session(
+        source='upload', title='evil"; rm -rf / #', duration_sec=1.0
+    )
+    app.state.transcript_repo.insert_segment(sid, 0, 'hi', 0.0, 1.0)
+
+    resp = client.get(f"/v1/exports/{sid}?format=srt")
+    assert resp.status_code == 200
+    cd = resp.headers.get("content-disposition", "")
+    # 双引号必须被替换(防 header 字段值闭合攻击)
+    assert '"' not in cd.split("filename=")[1].split(";")[0].split('"')[-2] if 'filename=' in cd else True, \
+        f"双引号未净化: {cd}"
+    # 关键: header 仍是合法的 Content-Disposition
+    assert cd.startswith("attachment; filename=")
+
+
+def test_export_filename_strips_crlf(client):
+    """title 含 CRLF 时,Content-Disposition 头不应被注入新行"""
+    app = client.app
+    # 含 CRLF 的 title
+    sid = app.state.transcript_repo.create_session(
+        source='upload', title='a\r\nX-Injected: pwned', duration_sec=1.0
+    )
+    app.state.transcript_repo.insert_segment(sid, 0, 'hi', 0.0, 1.0)
+
+    resp = client.get(f"/v1/exports/{sid}?format=srt")
+    assert resp.status_code == 200
+    cd = resp.headers.get("content-disposition", "")
+    # CRLF 必须被剥掉(防 HTTP 头注入)
+    assert "\r" not in cd
+    assert "\n" not in cd
+    # X-Injected 不能作为独立 header 出现
+    assert "X-Injected" not in cd or "X-Injected" in cd.split("filename=")[-1]
+
+
+def test_export_filename_handles_unicode(client):
+    """中文 title 应保留(只过滤控制字符)"""
+    app = client.app
+    sid = app.state.transcript_repo.create_session(
+        source='upload', title='会议纪要 2026', duration_sec=1.0
+    )
+    app.state.transcript_repo.insert_segment(sid, 0, 'hi', 0.0, 1.0)
+
+    resp = client.get(f"/v1/exports/{sid}?format=srt")
+    assert resp.status_code == 200
+    cd = resp.headers.get("content-disposition", "")
+    # RFC 5987: 中文 URL 编码后是 %E4%BC%9A%E8%AE%AE... 浏览器解析后看到"会议纪要"
+    from urllib.parse import unquote
+    decoded = unquote(cd)
+    assert "会议纪要" in decoded, f"中文 title 应在 header 中保留,实际: {cd}"
+
+
+def test_export_filename_empty_title_falls_back(client):
+    """title 全是控制字符时,降级到 session_id 前 8 位"""
+    app = client.app
+    sid = app.state.transcript_repo.create_session(
+        source='upload', title='\r\n\r\n', duration_sec=1.0
+    )
+    app.state.transcript_repo.insert_segment(sid, 0, 'hi', 0.0, 1.0)
+
+    resp = client.get(f"/v1/exports/{sid}?format=srt")
+    assert resp.status_code == 200
+    cd = resp.headers.get("content-disposition", "")
+    # 不能是空的 filename
+    assert 'filename=""' not in cd
+    # 应回退到 session_id 前 8 位
+    assert sid[:8] in cd

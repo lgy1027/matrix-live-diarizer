@@ -72,7 +72,14 @@ class SpeakerListResponse(BaseModel):
 
 class SpeakerUpdateRequest(BaseModel):
     """说话人更新请求"""
-    name: str = Field(..., min_length=1, max_length=100, description="说话人名称")
+    # 防日志注入 + 控制字符: 只允许可打印字符 + 空格
+    name: str = Field(
+        ...,
+        min_length=1,
+        max_length=100,
+        pattern=r"^[\x20-\x7E一-鿿　-〿＀-￯]+$",
+        description="说话人名称(1-100 字符,只允许可打印 ASCII / 中文 / 全角标点,过滤控制字符)",
+    )
 
 
 class SpeakerDeleteResponse(BaseModel):

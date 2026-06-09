@@ -32,18 +32,21 @@ def create_app() -> FastAPI:
         version="1.0.0"
     )
     
-    # 速率限制中间件
+    # 速率限制中间件(从 config.rate_limit 读取,支持 .env 调参)
     app.add_middleware(
         RateLimitMiddleware,
-        requests_per_minute=getattr(config.server, 'rate_limit_requests', 100)
+        enabled=config.rate_limit.enabled,
+        requests_per_minute=config.rate_limit.requests_per_minute,
+        requests_per_hour=config.rate_limit.requests_per_hour,
     )
     
+    # CORS — 本地默认全开,LAN 部署可通过 .env 收紧
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_origins=list(config.cors.allowed_origins),
+        allow_credentials=config.cors.allow_credentials,
+        allow_methods=list(config.cors.allow_methods),
+        allow_headers=list(config.cors.allow_headers),
     )
     
     _init_engines(app)

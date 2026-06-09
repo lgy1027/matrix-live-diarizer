@@ -180,6 +180,43 @@ class LLMConfig:
     allowed_hosts: tuple[str, ...] = ("127.0.0.1", "::1", "localhost")
     allow_public: bool = False              # 显式开公网（默认安全 = 仅本机）
 
+
+@dataclass
+class CORSConfig:
+    """CORS 配置 — 本地部署默认全开,LAN 部署需收紧
+
+    警告: 本项目是本地工具,默认 ['*'] 是因为前端用 file:// 打开,
+    浏览器不发 Origin,等于无 CORS 限制。
+    如部署到 LAN 暴露给其他人,务必显式列出可信 Origin。
+    """
+    allowed_origins: tuple[str, ...] = ("*",)   # 默认全开(本地),LAN 部署需改成 ["http://192.168.1.10:8000", ...]
+    allow_credentials: bool = False             # Matrix 不用 cookie 认证,默认 False
+    allow_methods: tuple[str, ...] = ("*",)     # 允许所有 HTTP 方法
+    allow_headers: tuple[str, ...] = ("*",)     # 允许所有 header
+
+    @classmethod
+    def from_env(cls) -> "CORSConfig":
+        return cls(
+            allowed_origins=get_env_str_list("ALLOWED_ORIGINS", ("*",)),
+            allow_credentials=get_env_bool("CORS_ALLOW_CREDENTIALS", False),
+            allow_methods=get_env_str_list("CORS_ALLOW_METHODS", ("*",)),
+            allow_headers=get_env_str_list("CORS_ALLOW_HEADERS", ("*",)),
+        )
+
+
+@dataclass
+class LLMConfig:
+    """LLM 插件配置（默认仅本机，allow_public=True 时可走公网 OpenAI 兼容接口）"""
+    enabled: bool = False
+    endpoint: str = "http://127.0.0.1:11434/v1"
+    model: str = "qwen2.5:1.5b"
+    api_key: Optional[str] = None           # Bearer token，公网 OpenAI 兼容接口需要
+    timeout_sec: int = 60
+    max_input_tokens: int = 8000
+    mock: bool = False
+    allowed_hosts: tuple[str, ...] = ("127.0.0.1", "::1", "localhost")
+    allow_public: bool = False              # 显式开公网（默认安全 = 仅本机）
+
     @classmethod
     def from_env(cls) -> "LLMConfig":
         api_key = get_env_str("LLM_API_KEY", "") or None
@@ -221,6 +258,7 @@ class AppConfig:
     storage: StorageConfig = field(default_factory=StorageConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     history: HistoryConfig = field(default_factory=HistoryConfig)
+    cors: CORSConfig = field(default_factory=CORSConfig)
 
     @classmethod
     def load(cls) -> "AppConfig":
@@ -232,6 +270,7 @@ class AppConfig:
             storage=StorageConfig.from_env(),
             llm=LLMConfig.from_env(),
             history=HistoryConfig.from_env(),
+            cors=CORSConfig.from_env(),
         )
 
 

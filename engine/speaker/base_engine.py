@@ -127,14 +127,66 @@ class BaseSpeakerEngine(ABC):
             if not results['ids']:
                 logger.warning(f"[{self._model_name}] 说话人 {speaker_id} 不存在")
                 return False
-            
+
             self.collection.delete(ids=[speaker_id])
             logger.info(f"[{self._model_name}] 已删除说话人 {speaker_id}")
             return True
         except Exception as e:
             logger.error(f"[{self._model_name}] 删除失败: {e}")
             return False
-    
+
+    def add_speaker(
+        self,
+        speaker_id: str,
+        embedding,
+        name: Optional[str] = None,
+        session_id: Optional[str] = None,
+    ) -> bool:
+        """主动注册声纹(API enroll 用)
+
+        之前声纹只能靠 compare_and_identify 被动累积 — 没有公开 add 接口。
+        加此方法让前端可"上传示例音频 + 命名 → 立即入库"。
+
+        Args:
+            speaker_id: 声纹 ID(必须匹配 Spk_[a-zA-Z0-9_]+ 格式)
+            embedding: 一维 np.ndarray 声纹向量
+            name: 显示名(可选,自动剥除控制字符)
+            session_id: 关联会话 ID(可选)
+
+        Returns:
+            bool: 成功入库
+        """
+        import re
+        import time
+        if not re.match(r"^Spk_[a-zA-Z0-9_]{1,50}$", speaker_id):
+            logger.error(f"[{self._model_name}] 非法 speaker_id 格式: {speaker_id}")
+            return False
+        if embedding is None or len(embedding) == 0:
+            logger.error(f"[{self._model_name}] 空 embedding")
+            return False
+        # 净化 name:剥除控制字符,防止日志/响应注入
+        if name is not None:
+            clean_name = "".join(c for c in str(name) if c.isprintable() or c == " ")[:100]
+            name = clean_name.strip() or speaker_id
+        try:
+            emb_list = embedding.tolist() if hasattr(embedding, "tolist") else list(embedding)
+            self.collection.upsert(
+                ids=[speaker_id],
+                embeddings=[emb_list],
+                metadatas=[{
+                    "name": name or speaker_id,
+                    "session_id": session_id or "",
+                    "count": 1,
+                    "last_update": time.time(),
+                    "confirmed": True,
+                }],
+            )
+            logger.info(f"[{self._model_name}] 已注册声纹 {speaker_id} (主动 enroll)")
+            return True
+        except Exception as e:
+            logger.error(f"[{self._model_name}] 注册声纹失败: {e}")
+            return False
+
     def get_smoothed_embedding(self, emb: np.ndarray, client_id: str) -> np.ndarray:
         """滑动窗口平均声纹"""
         if client_id not in self.emb_buffer:
