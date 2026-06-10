@@ -37,42 +37,82 @@ def _segment_text(seg, speaker_aliases, prefix_format: str) -> str:
 
 
 def export_srt(segments: Iterable[dict], speaker_aliases: dict) -> str:
-    """SRT 字幕格式"""
+    """SRT 字幕格式
+
+    如果 segment 有 words (字级时间戳),每个字单独一行,精度 0.01s。
+    否则按 segment 整体时间。
+    """
     out_lines = []
     idx = 1
     for seg in segments:
         text = _segment_text(seg, speaker_aliases, "bracket")
         if not text:
             continue
-        start = _format_srt_time(seg["start_time"])
-        end = _format_srt_time(seg["end_time"])
-        out_lines.append(str(idx))
-        out_lines.append(f"{start} --> {end}")
-        out_lines.append(text)
-        out_lines.append("")
-        idx += 1
+        words = seg.get("words")
+        if words:
+            # 字级:每个字一个 SRT 块,start/end 来自 words
+            for w in words:
+                if not w.get("text") or not w.get("text").strip():
+                    continue
+                start = _format_srt_time(w["start"] + seg.get("start_time", 0.0))
+                end = _format_srt_time(w["end"] + seg.get("start_time", 0.0))
+                out_lines.append(str(idx))
+                out_lines.append(f"{start} --> {end}")
+                out_lines.append(w["text"])
+                out_lines.append("")
+                idx += 1
+        else:
+            start = _format_srt_time(seg["start_time"])
+            end = _format_srt_time(seg["end_time"])
+            out_lines.append(str(idx))
+            out_lines.append(f"{start} --> {end}")
+            out_lines.append(text)
+            out_lines.append("")
+            idx += 1
     return "\n".join(out_lines)
 
 
 def export_vtt(segments: Iterable[dict], speaker_aliases: dict) -> str:
-    """WebVTT 字幕格式"""
+    """WebVTT 字幕格式
+
+    如果 segment 有 words (字级时间戳),每个字单独一个 cue,精度 0.01s。
+    否则按 segment 整体时间,加 <v Speaker> 标签。
+    """
     out_lines = ["WEBVTT", ""]
     idx = 1
     for seg in segments:
         text = (seg.get("text") or "").strip()
         if not text:
             continue
-        start = _format_vtt_time(seg["start_time"])
-        end = _format_vtt_time(seg["end_time"])
-        out_lines.append(str(idx))
-        out_lines.append(f"{start} --> {end}")
-        if seg.get("speaker_id"):
-            name = speaker_aliases.get(seg["speaker_id"], seg["speaker_id"])
-            out_lines.append(f"<v {name}>{text}</v>")
+        words = seg.get("words")
+        if words:
+            for w in words:
+                wt = (w.get("text") or "").strip()
+                if not wt:
+                    continue
+                start = _format_vtt_time(w["start"] + seg.get("start_time", 0.0))
+                end = _format_vtt_time(w["end"] + seg.get("start_time", 0.0))
+                out_lines.append(str(idx))
+                out_lines.append(f"{start} --> {end}")
+                if seg.get("speaker_id"):
+                    name = speaker_aliases.get(seg["speaker_id"], seg["speaker_id"])
+                    out_lines.append(f"<v {name}>{wt}</v>")
+                else:
+                    out_lines.append(wt)
+                out_lines.append("")
+                idx += 1
         else:
-            out_lines.append(text)
-        out_lines.append("")
-        idx += 1
+            start = _format_vtt_time(seg["start_time"])
+            end = _format_vtt_time(seg["end_time"])
+            out_lines.append(str(idx))
+            out_lines.append(f"{start} --> {end}")
+            if seg.get("speaker_id"):
+                name = speaker_aliases.get(seg["speaker_id"], seg["speaker_id"])
+                out_lines.append(f"<v {name}>{text}</v>")
+            else:
+                out_lines.append(text)
+            out_lines.append("")
+            idx += 1
     return "\n".join(out_lines)
 
 

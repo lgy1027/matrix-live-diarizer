@@ -124,6 +124,8 @@ footer.bar-b{height:32px;padding:0 28px;display:flex;align-items:center;justify-
 .seg .id{font-family:var(--mono);font-size:10px;color:var(--text-3);letter-spacing:.04em}
 .seg .time{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--text-3);letter-spacing:.04em}
 .seg .body{font-family:var(--mono);font-size:15px;line-height:1.7;color:var(--text);white-space:pre-wrap;word-break:break-word;min-height:1.7em}
+.seg .body .word{cursor:default;border-bottom:1px dotted transparent;transition:background .15s,border-color .15s}
+.seg .body .word:hover{background:var(--amber-soft);border-bottom-color:var(--amber)}
 .seg .body.typing::after{content:'▍';color:var(--amber);animation:blink 1s steps(2) infinite;margin-left:2px}
 
 /* LIVE SIDEBAR */
@@ -888,7 +890,7 @@ function connectWs() {
       if (msg.speaker !== undefined) {
         if (!state.speakers.has(msg.speaker)) state.speakers.set(msg.speaker, 0);
         state.speakers.set(msg.speaker, state.speakers.get(msg.speaker) + 1);
-        addSegment(msg.speaker, msg.text || "", msg.time || "");
+        addSegment(msg.speaker, msg.text || "", msg.time || "", msg.words);
       }
     } catch (e) { /* ignore */ }
   };
@@ -962,7 +964,7 @@ function updateRecUI() {
 $("#recBtn").addEventListener("click", () => state.rec ? stopRec() : startRec());
 
 /* transcript */
-function addSegment(speaker, text, time) {
+function addSegment(speaker, text, time, words) {
   const id = "seg" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
   const trEl = $("#transcript");
   if (trEl.querySelector(".empty")) trEl.innerHTML = "";
@@ -978,7 +980,7 @@ function addSegment(speaker, text, time) {
     <div class="body typing"></div>`;
   trEl.appendChild(seg);
   trEl.scrollTop = trEl.scrollHeight;
-  state.segments.push({ id, speaker, text, time });
+  state.segments.push({ id, speaker, text, time, words: words || null });
   // 立即更新计数(不等打字机完成) — 解决 '0 段 · 1 人' race:
   // speaker 已在 ws.onmessage 中累加,但 segments 刚 push,
   // 不立即刷 segCount 会让用户看到旧值
@@ -995,6 +997,16 @@ function addSegment(speaker, text, time) {
       trEl.scrollTop = trEl.scrollHeight;
     } else {
       body.classList.remove("typing");
+      // 字级时间戳:把字拆成 <span> 渲染,hover 显示时间
+      // 真实精确对齐需要 segment 累积偏移,v0.3 先做可视化展示
+      if (words && words.length > 0) {
+        body.innerHTML = words.map(w => {
+          const wt = esc(w.text || "");
+          const s = (w.start || 0).toFixed(2);
+          const e = (w.end || 0).toFixed(2);
+          return `<span class="word" data-start="${s}" data-end="${e}" title="${s}s - ${e}s">${wt}</span>`;
+        }).join("");
+      }
       $("#segCount").textContent = t("view.live.segCount", state.segments.length, state.speakers.size);
     }
   };

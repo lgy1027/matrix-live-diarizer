@@ -244,17 +244,21 @@ async def _process_speech_segment(
         try:
             asr_task = asr_engine.run_asr(audio_data, use_preprocessing=True)
             spk_task = asyncio.to_thread(get_speaker_engine().extract_feat, audio_data)
-            full_text, emb_result = await asyncio.gather(asr_task, spk_task)
+            asr_result, emb_result = await asyncio.gather(asr_task, spk_task)
         except Exception as e:
             logger.error(f"[ENGINE ERROR] {e}")
             return
-    
+
+    # run_asr 现在返回 dict {text, words}
+    full_text = asr_result.get("text", "") if isinstance(asr_result, dict) else (asr_result or "")
+    seg_words = asr_result.get("words") if isinstance(asr_result, dict) else None
+
     # 处理声纹提取结果（extract_feat 现在返回 tuple）
     if isinstance(emb_result, tuple):
         embedding, _ = emb_result  # 忽略返回的时长，使用我们计算的
     else:
         embedding = emb_result  # 兼容旧版引擎
-    
+
     # 处理识别结果
     if full_text and full_text.strip():
         # 调用 compare_and_identify，传递音频时长
@@ -263,11 +267,16 @@ async def _process_speech_segment(
 
         if incr_text:
             try:
-                await websocket.send_json({
+                msg = {
                     "speaker": spk_id,
                     "text": incr_text,
-                    "time": time.strftime("%H:%M:%S")
-                })
+                    "time": time.strftime("%H:%M:%S"),
+                }
+                # 字级时间戳:在 incr_text 上做近似对齐(整体偏移到 segment 起始时间 0)
+                # 真实精确对齐需要 segment 累积时间偏移,留作 v0.3.x 增量
+                if seg_words:
+                    msg["words"] = seg_words
+                await websocket.send_json(msg)
                 logger.info(f"[{client_id} | {spk_id}]: {incr_text}")
             except Exception as e:
                 logger.debug(f"[PROCESSOR] 发送结果失败: {e}")
@@ -278,6 +287,8 @@ async def _process_speech_segment(
             try:
                 repo = websocket.app.state.transcript_repo
                 segs = repo.list_segments(session_id)
+                import json as _json
+                words_json = _json.dumps(seg_words, ensure_ascii=False) if seg_words else None
                 repo.insert_segment(
                     session_id,
                     segment_index=len(segs),
@@ -285,6 +296,7 @@ async def _process_speech_segment(
                     start_time=0.0,  # v0.2 MVP: 不记精确时间
                     end_time=audio_duration,
                     speaker_id=spk_id,
+                    words_json=words_json,
                 )
             except Exception as e:
                 logger.warning(f"[WS] 存档失败: {e}")

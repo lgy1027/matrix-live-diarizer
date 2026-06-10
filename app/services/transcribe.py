@@ -56,7 +56,8 @@ async def transcribe_file(
     # 简化: 一次性跑整段(短音频无需分段,后续可扩展)
     # 必须 await — run_asr 是 async,否则 coroutine 透传到下游 SQLite binding
     raw = asr_engine.run_asr(audio)
-    text = (await raw) if hasattr(raw, "__await__") else (raw or "")
+    asr_result = (await raw) if hasattr(raw, "__await__") else raw
+    text = asr_result.get("text", "") if isinstance(asr_result, dict) else (asr_result or "")
 
     # 声纹: extract_feat 返回 (embedding, duration_sec) tuple。
     # 真实引擎(campplus / eres2net / wespeaker)都遵守此签名。

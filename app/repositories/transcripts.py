@@ -96,24 +96,38 @@ class TranscriptRepository:
         end_time: float,
         speaker_id: Optional[str] = None,
         confidence: Optional[float] = None,
+        words_json: Optional[str] = None,
     ) -> int:
         with self.db.connect() as conn:
             cur = conn.execute(
                 """INSERT INTO segments
-                   (session_id, segment_index, speaker_id, text, start_time, end_time, confidence)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (session_id, segment_index, speaker_id, text, start_time, end_time, confidence),
+                   (session_id, segment_index, speaker_id, text, start_time, end_time, confidence, words_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (session_id, segment_index, speaker_id, text, start_time, end_time, confidence, words_json),
             )
             conn.commit()
         return cur.lastrowid
 
     def list_segments(self, session_id: str) -> list[dict]:
+        import json as _json
         with self.db.connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM segments WHERE session_id = ? ORDER BY segment_index ASC",
                 (session_id,),
             ).fetchall()
-        return [dict(r) for r in rows]
+        result = []
+        for r in rows:
+            d = dict(r)
+            # 解析 words_json:DB 存的是 str,前端用 list
+            if d.get("words_json"):
+                try:
+                    d["words"] = _json.loads(d["words_json"])
+                except (ValueError, TypeError):
+                    d["words"] = None
+            else:
+                d["words"] = None
+            result.append(d)
+        return result
 
     def get_enriched_sessions(self, source=None, q=None, limit=50, offset=0) -> tuple[int, list[dict]]:
         """返回 (total, items)，items 中每个 session 含

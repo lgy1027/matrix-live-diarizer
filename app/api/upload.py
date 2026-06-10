@@ -103,7 +103,8 @@ async def process_audio_chunk_with_diarization(
     """分段处理：ASR + 说话人识别"""
     audio_duration = end_time - start_time
     
-    text = await asr_engine.run_asr(chunk, use_preprocessing=True)
+    asr_result = await asr_engine.run_asr(chunk, use_preprocessing=True)
+    text = asr_result.get("text", "") if isinstance(asr_result, dict) else (asr_result or "")
     emb_result = await asyncio.get_event_loop().run_in_executor(
         None, get_speaker_engine().extract_feat, chunk
     )
@@ -130,8 +131,9 @@ async def process_audio_chunk_asr_only(
     end_time: float
 ) -> SegmentResult:
     """分段处理：仅 ASR"""
-    text = await asr_engine.run_asr(chunk, use_preprocessing=True)
-    
+    asr_result = await asr_engine.run_asr(chunk, use_preprocessing=True)
+    text = asr_result.get("text", "") if isinstance(asr_result, dict) else (asr_result or "")
+
     return SegmentResult(
         speaker="SPEAKER",
         text=text or "",
@@ -228,7 +230,8 @@ async def upload_audio(
                         spk_id = None
                 else:
                     # 简单 ASR 路径(不调声纹引擎,保持原行为)
-                    text = await asr_engine.run_asr(audio, use_preprocessing=True)
+                    asr_result = await asr_engine.run_asr(audio, use_preprocessing=True)
+                    text = asr_result.get("text", "") if isinstance(asr_result, dict) else (asr_result or "")
                     spk_id = "SPEAKER"
 
             logger.info(f"[UPLOAD] 完成, {time.time() - start_time_total:.2f}s")

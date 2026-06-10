@@ -31,8 +31,10 @@ CREATE TABLE IF NOT EXISTS segments (
     end_time      REAL NOT NULL,
     confidence    REAL,
     is_final      INTEGER DEFAULT 1,
+    words_json    TEXT,                          -- 字级时间戳 JSON, ASR_WORD_TIMESTAMPS=true 时填充
     UNIQUE(session_id, segment_index)
 );
+-- 兼容老库:老 segments 表无 words_json 列,补上(忽略"重复列"错误)
 CREATE INDEX IF NOT EXISTS idx_segments_session ON segments(session_id, segment_index);
 
 CREATE TABLE IF NOT EXISTS speaker_aliases (
@@ -60,6 +62,11 @@ class Database:
         """创建表 + 索引 + 启用 WAL"""
         with self.connect() as conn:
             conn.executescript(SCHEMA_SQL)
+            # 兼容老库:加 v0.3 新列(已存在则忽略)
+            try:
+                conn.execute("ALTER TABLE segments ADD COLUMN words_json TEXT")
+            except Exception:
+                pass  # 重复列错误,新库已含
             # WAL 模式是持久化的，单独设置
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA synchronous=NORMAL")

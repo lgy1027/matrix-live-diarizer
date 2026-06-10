@@ -98,6 +98,9 @@ class AudioConfig:
     # auto 优先 mps，加载超时后回退 cpu
     asr_device: str = "auto"
     asr_load_timeout_sec: int = 90      # 单设备加载超时（秒）
+    # ASR 字级时间戳：开启后额外加载 Qwen3-ForcedAligner-0.6B (~600MB),
+    # 用于返回每字的 start/end 时间。关闭则只返回 segment 文本。
+    asr_word_timestamps: bool = False
 
     @classmethod
     def from_env(cls) -> "AudioConfig":
@@ -122,6 +125,7 @@ class AudioConfig:
             upload_overlap_duration=get_env_float("UPLOAD_OVERLAP_DURATION", 1.0),
             asr_device=get_env_str("ASR_DEVICE", "auto").lower(),
             asr_load_timeout_sec=get_env_int("ASR_LOAD_TIMEOUT_SEC", 90),
+            asr_word_timestamps=get_env_bool("ASR_WORD_TIMESTAMPS", False),
         )
 
 
