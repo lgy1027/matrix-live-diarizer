@@ -129,6 +129,54 @@ class TranscriptRepository:
             result.append(d)
         return result
 
+    def update_segment_speaker(self, segment_id: int, new_speaker_id: Optional[str]) -> bool:
+        """更新单 segment 的 speaker_id (split / 重新指派用)
+
+        new_speaker_id 为 None 时清空(标记为未识别)
+        """
+        with self.db.connect() as conn:
+            cur = conn.execute(
+                "UPDATE segments SET speaker_id = ? WHERE id = ?",
+                (new_speaker_id, segment_id),
+            )
+            conn.commit()
+        return cur.rowcount > 0
+
+    def reassign_speaker(self, old_speaker_id: str, new_speaker_id: str) -> int:
+        """把所有 segments.speaker_id == old 的改成 new (merge 用)
+
+        返回更新的行数
+        """
+        with self.db.connect() as conn:
+            cur = conn.execute(
+                "UPDATE segments SET speaker_id = ? WHERE speaker_id = ?",
+                (new_speaker_id, old_speaker_id),
+            )
+            conn.commit()
+        return cur.rowcount
+
+    def clear_segments_speaker(self, segment_ids: list[int], speaker_id: Optional[str] = None) -> int:
+        """把指定 segments 的 speaker_id 清空(可选:仅清特定 speaker 的)
+
+        用于 split: 用户挑出"这个 segment 不该是 Spk_001" → 改 null
+        """
+        if not segment_ids:
+            return 0
+        placeholders = ",".join("?" * len(segment_ids))
+        with self.db.connect() as conn:
+            if speaker_id is not None:
+                cur = conn.execute(
+                    f"UPDATE segments SET speaker_id = NULL WHERE id IN ({placeholders}) AND speaker_id = ?",
+                    (*segment_ids, speaker_id),
+                )
+            else:
+                cur = conn.execute(
+                    f"UPDATE segments SET speaker_id = NULL WHERE id IN ({placeholders})",
+                    segment_ids,
+                )
+            conn.commit()
+        return cur.rowcount
+
     def get_enriched_sessions(self, source=None, q=None, limit=50, offset=0) -> tuple[int, list[dict]]:
         """返回 (total, items)，items 中每个 session 含
         - duration: 时长（秒）— 前端用

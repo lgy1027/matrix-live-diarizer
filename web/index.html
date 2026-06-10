@@ -634,6 +634,7 @@ footer.bar-b{height:32px;padding:0 28px;display:flex;align-items:center;justify-
             <button class="bulk-link" id="bulkSelectAll" data-i18n="view.voice.bulkAll">全选</button>
           </div>
           <div class="bulk-right">
+            <button class="btn" id="bulkMerge" disabled data-i18n="view.voice.bulkMerge">合并</button>
             <button class="btn danger" id="bulkDelete" disabled data-i18n="view.voice.bulkDelete">删除</button>
             <button class="btn ghost" id="bulkCancel" data-i18n="view.voice.bulkCancel">取消</button>
           </div>
@@ -1525,6 +1526,12 @@ function updateBulkBar() {
   delBtn.textContent = t("view.voice.bulkDeleteN", n);
   const allBtn = $("#bulkSelectAll");
   allBtn.textContent = t(n === total && total > 0 ? "view.voice.bulkNone" : "view.voice.bulkAll");
+  // 合并按钮:需要 ≥ 2 个选中,且第 1 个被选中的作为 target
+  const mergeBtn = $("#bulkMerge");
+  if (mergeBtn) {
+    mergeBtn.disabled = n < 2;
+    mergeBtn.textContent = t("view.voice.bulkMergeN", n);
+  }
 }
 
 function enterSelectMode() {
@@ -1778,6 +1785,7 @@ $("#bulkSelectAll")?.addEventListener("click", () => {
   renderVoice();
 });
 $("#bulkDelete")?.addEventListener("click", bulkDeleteSelected);
+$("#bulkMerge")?.addEventListener("click", bulkMergeSelected);
 
 async function bulkDeleteSelected() {
   if (bulkDeleteInFlight) return;
@@ -1835,6 +1843,44 @@ async function bulkDeleteSelected() {
       delBtn.disabled = state.selectedIds.size === 0;
       delBtn.textContent = origText;
     }
+  }
+}
+
+/* 合并选中的声纹 (v0.3 新增)
+   流程: 弹出 Modal 让用户选 target (默认第一个),
+         确认后调 POST /v1/speakers/merge */
+async function bulkMergeSelected() {
+  if (state.selectedIds.size < 2) return;
+  // speakersCache 按列表顺序, target = 列表里第一个被选中的
+  const selected = speakersCache.filter(s => state.selectedIds.has(s.id));
+  if (selected.length < 2) return;
+
+  // Modal 让用户选 target (默认 selected[0])
+  const items = selected.map(s => ({
+    label: `${s.name || s.id} (${s.id})`,
+    value: s.id,
+  }));
+  const targetId = await Modal.list({
+    title: t("view.voice.mergeTitle"),
+    body: t("view.voice.mergeBody", selected.length - 1),
+    items,
+    confirmText: t("view.voice.bulkMerge"),
+    cancelText: t("btn.cancel"),
+  });
+  if (!targetId) return;
+
+  // 合并
+  const sourceIds = selected.filter(s => s.id !== targetId).map(s => s.id);
+  try {
+    const result = await Matrix.api.post("speakers/merge", {
+      target_id: targetId,
+      source_ids: sourceIds,
+    });
+    toast(t("view.voice.mergeDone", result.merged_source_ids.length, result.segments_updated), "ok");
+    exitSelectMode();
+    await loadVoice();
+  } catch (e) {
+    toast(t("view.voice.mergeFail", e.message || e), "error");
   }
 }
 </script>

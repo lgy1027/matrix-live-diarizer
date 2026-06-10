@@ -187,6 +187,105 @@ class BaseSpeakerEngine(ABC):
             logger.error(f"[{self._model_name}] 注册声纹失败: {e}")
             return False
 
+    def merge_speakers(
+        self,
+        target_id: str,
+        source_ids: list,
+    ) -> dict:
+        """合并多个 source 声纹到 target (修正"同一人被识别成多 ID"问题)
+
+        步骤:
+        1. 拉取 target 和所有 source 的 embedding + metadata
+        2. 加权平均 (按 count 权重) → 新 embedding
+        3. target.upsert 新 embedding,合并 metadata.count / sample_count
+        4. 删 source 在 ChromaDB 里的记录
+        5. 返回新 metadata (供 API 层更新 segments.speaker_id)
+
+        注意: 引擎只管 ChromaDB,segments 表更新由 API 层处理
+        """
+        import re
+        import time
+        import numpy as np
+        if not re.match(r"^Spk_[a-zA-Z0-9_]{1,50}$", target_id):
+            return {"ok": False, "error": f"非法 target_id 格式: {target_id}"}
+        for sid in source_ids:
+            if not re.match(r"^Spk_[a-zA-Z0-9_]{1,50}$", sid):
+                return {"ok": False, "error": f"非法 source_id 格式: {sid}"}
+        if target_id in source_ids:
+            return {"ok": False, "error": "target_id 不能在 source_ids 里"}
+
+        try:
+            # 1. 拉取 target + 所有 source
+            all_ids = [target_id] + list(source_ids)
+            results = self.collection.get(ids=all_ids, include=["embeddings", "metadatas"])
+            fetched = dict(zip(results['ids'], zip(results['embeddings'], results['metadatas'])))
+
+            if target_id not in fetched:
+                return {"ok": False, "error": f"target_id {target_id} 不存在"}
+
+            # 2. 加权平均 (权重 = count)
+            target_emb = np.array(fetched[target_id][0], dtype=np.float32)
+            target_count = int(fetched[target_id][1].get("count", 1))
+            target_sample_count = int(fetched[target_id][1].get("sample_count", target_count))
+            merged_count = target_count
+            merged_sample_count = target_sample_count
+
+            for sid in source_ids:
+                if sid not in fetched:
+                    logger.warning(f"[MERGE] source {sid} 不在 ChromaDB,跳过")
+                    continue
+                emb = np.array(fetched[sid][0], dtype=np.float32)
+                cnt = int(fetched[sid][1].get("count", 1))
+                sc = int(fetched[sid][1].get("sample_count", cnt))
+                # 加权: target_emb * target_count + emb * cnt
+                # 然后除以总权重
+                new_emb = (target_emb * target_count + emb * cnt) / (target_count + cnt)
+                target_emb = new_emb
+                target_count += cnt
+                merged_count += cnt
+                merged_sample_count += sc
+
+            # 3. 重新 L2 normalize (ChromaDB 用 cosine 距离)
+            norm = np.linalg.norm(target_emb)
+            if norm > 1e-9:
+                target_emb = target_emb / norm
+
+            # 4. upsert target
+            target_meta = dict(fetched[target_id][1])
+            target_meta["count"] = merged_count
+            target_meta["sample_count"] = merged_sample_count
+            target_meta["last_update"] = time.time()
+            self.collection.upsert(
+                ids=[target_id],
+                embeddings=[target_emb.tolist()],
+                metadatas=[target_meta],
+            )
+
+            # 5. 删 source (只删实际存在的)
+            existing_sources = [sid for sid in source_ids if sid in fetched]
+            if existing_sources:
+                self.collection.delete(ids=existing_sources)
+
+            logger.info(f"[MERGE] {len(existing_sources)} 个 source → {target_id} (合并后 count={merged_count})")
+            return {
+                "ok": True,
+                "target_id": target_id,
+                "merged_source_ids": existing_sources,
+                "new_count": merged_count,
+            }
+        except Exception as e:
+            logger.error(f"[MERGE] 合并失败: {e}")
+            return {"ok": False, "error": str(e)}
+
+    def unassign_segments_speaker(self, speaker_id: str, segment_ids: list[int]) -> int:
+        """把一组 segments 的 speaker_id 清成 NULL (拆分用)
+
+        引擎层不直接做(segments 在 SQLite),由 API 层处理。
+        这个方法保留接口,目前仅占位 — 真实更新在 API 层做。
+        """
+        # 不在这里实现,API 层用 repo.update_segment_speaker() 替代
+        raise NotImplementedError("see app/api/speakers.py split_speaker endpoint")
+
     def get_smoothed_embedding(self, emb: np.ndarray, client_id: str) -> np.ndarray:
         """滑动窗口平均声纹"""
         if client_id not in self.emb_buffer:

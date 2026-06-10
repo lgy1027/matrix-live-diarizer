@@ -176,6 +176,131 @@ async def cleanup_speakers(body: CleanupRequest, request: Request):
     )
 
 
+# ========== 说话人合并 / 拆分 API ==========
+
+class MergeSpeakersRequest(BaseModel):
+    """合并多个 source 声纹到 target"""
+    target_id: str = Field(
+        ...,
+        pattern=r"^Spk_[a-zA-Z0-9_]{1,50}$",
+        description="保留的声纹 ID(目标)",
+        examples=["Spk_001"],
+    )
+    source_ids: list[str] = Field(
+        ...,
+        min_length=1,
+        max_length=20,
+        description="要并入 target 的 source ID 列表(1-20 个)",
+        examples=[["Spk_007", "Spk_013"]],
+    )
+
+
+class MergeSpeakersResponse(BaseModel):
+    target_id: str
+    merged_source_ids: list[str]
+    segments_updated: int
+    new_count: int
+
+
+@router.post("/v1/speakers/merge", response_model=MergeSpeakersResponse)
+async def merge_speakers(body: MergeSpeakersRequest, request: Request):
+    """合并声纹:把 source 全部并入 target
+
+    场景: CamPlus 同一物理人在音频条件变化时被识别成多个 ID
+    (Spk_001 / Spk_007 / Spk_013),用户确认后一键合并。
+
+    流程:
+    1. 引擎层: 加权平均 embedding → target,删 source 的 ChromaDB 记录
+    2. SQLite: UPDATE segments SET speaker_id=target WHERE speaker_id IN sources
+    3. 返回新 metadata
+
+    ⚠️ 不可逆: source 在 ChromaDB 里被物理删除,embedding 不可恢复
+    """
+    engine = get_speaker_engine()
+    repo = request.app.state.transcript_repo
+
+    # 1. 引擎层合并
+    result = engine.merge_speakers(body.target_id, body.source_ids)
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("error", "合并失败"))
+
+    # 2. SQLite 改 segments
+    segments_updated = 0
+    for sid in result["merged_source_ids"]:
+        try:
+            n = repo.reassign_speaker(sid, body.target_id)
+            segments_updated += n
+        except Exception as e:
+            logger.warning(f"[MERGE] reassign {sid} → {body.target_id} 失败: {e}")
+
+    return MergeSpeakersResponse(
+        target_id=body.target_id,
+        merged_source_ids=result["merged_source_ids"],
+        segments_updated=segments_updated,
+        new_count=result["new_count"],
+    )
+
+
+class SplitSpeakerRequest(BaseModel):
+    """拆分:把指定 segments 的 speaker_id 改成新值(或清空)"""
+    speaker_id: str = Field(
+        ...,
+        pattern=r"^Spk_[a-zA-Z0-9_]{1,50}$",
+        description="原声纹 ID(被拆分的)",
+    )
+    segment_ids: list[int] = Field(
+        ...,
+        min_length=1,
+        max_length=500,
+        description="要拆出去的 segment ID 列表(1-500 个)",
+    )
+    new_speaker_id: Optional[str] = Field(
+        None,
+        pattern=r"^Spk_[a-zA-Z0-9_]{1,50}$",
+        description="新归属的声纹 ID(可选,None = 标记为未识别)",
+    )
+
+
+class SplitSpeakerResponse(BaseModel):
+    segments_updated: int
+    new_speaker_id: Optional[str]
+
+
+@router.post("/v1/speakers/split", response_model=SplitSpeakerResponse)
+async def split_speaker(body: SplitSpeakerRequest, request: Request):
+    """拆分声纹:把选中的 segments 从 speaker_id 改到 new_speaker_id(或 null)
+
+    场景: 用户发现某 segment 归错人了(比如一段环境音被识别成 Spk_001),
+    把它标记为未识别(null),等下次再处理。
+
+    限制: split 不创建新 ChromaDB 记录(因为没有原音频 embedding)。
+    选 new_speaker_id 必须对应一个已存在的声纹。
+    """
+    repo = request.app.state.transcript_repo
+    engine = get_speaker_engine()
+
+    # 验证 new_speaker_id 存在(如果给了)
+    if body.new_speaker_id is not None:
+        if not engine.get_speaker(body.new_speaker_id):
+            raise HTTPException(
+                status_code=404,
+                detail=f"new_speaker_id {body.new_speaker_id} 不存在",
+            )
+
+    # 清空这些 segment 的 speaker_id(仅限原 speaker_id 匹配的)
+    updated = repo.clear_segments_speaker(body.segment_ids, speaker_id=body.speaker_id)
+
+    # 如果指定了新 speaker,重新指派
+    if body.new_speaker_id is not None:
+        for sid in body.segment_ids:
+            repo.update_segment_speaker(sid, body.new_speaker_id)
+
+    return SplitSpeakerResponse(
+        segments_updated=updated,
+        new_speaker_id=body.new_speaker_id,
+    )
+
+
 # ========== 引擎管理 API ==========
 
 @router.get("/v1/engines", response_model=EnginesListResponse)
