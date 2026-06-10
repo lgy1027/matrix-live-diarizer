@@ -701,6 +701,10 @@ const state = {
   rec: false,
   ws: null,
   wsState: "idle",
+  // WebSocket 重连:stopRec 设为 false,onclose 据此判断是否重连
+  wsShouldReconnect: false,
+  wsReconnectAttempts: 0,
+  wsReconnectTimer: null,
   audioCtx: null,
   processor: null,
   stream: null,
@@ -801,6 +805,10 @@ drawWave();
 /* recording */
 async function startRec() {
   if (state.rec) return;
+  // 允许自动重连(直到 stopRec 关闭)
+  state.wsShouldReconnect = true;
+  state.wsReconnectAttempts = 0;
+  if (state.wsReconnectTimer) { clearTimeout(state.wsReconnectTimer); state.wsReconnectTimer = null; }
   try {
     state.stream = await navigator.mediaDevices.getUserMedia({
       audio: { channelCount: 1, sampleRate: 16000, echoCancellation: true, noiseSuppression: true }
@@ -831,25 +839,43 @@ async function startRec() {
     }
     try { state.ws.send(i16.buffer); } catch (err) { /* socket closed */ }
   };
+  connectWs();
+}
+
+/* 建 WebSocket 连接(可重入,重连逻辑复用)
+   限制: 重连后服务端会建新 session_id(因为 _session_id 绑在 WS 对象上),
+   重连前已识别的 segments 仍在前端 state.segments 显示完整,
+   但历史库里会拆成两个 session。v1 限制,可接受。 */
+function connectWs() {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   const ws = new WebSocket(`${proto}//${location.host}/ws/v1/stream/${state.clientId}`);
   ws.binaryType = "arraybuffer";
   state.ws = ws;
   ws.onopen = () => {
     state.wsState = "live";
-    state.rec = true;
-    state.recStart = Date.now();
-    state.segments = [];
-    state.speakers.clear();
-    state.sessionId = null;
-    state.sessionTitle = null;
-    updateRecUI();
-    drawTimer();
-    $("#metaStart").textContent = new Date().toTimeString().slice(0, 8);
-    $("#wavePH").innerHTML = "<b>●</b>" + t("view.live.wavePH.rec", state.clientId).replace(/^● /, "");
-    renderTranscript();
+    state.wsReconnectAttempts = 0;
+    if (!state.rec) {
+      // 首次连接:初始化录音 UI
+      state.rec = true;
+      state.recStart = Date.now();
+      state.segments = [];
+      state.speakers.clear();
+      state.sessionId = null;
+      state.sessionTitle = null;
+      updateRecUI();
+      drawTimer();
+      $("#metaStart").textContent = new Date().toTimeString().slice(0, 8);
+      $("#wavePH").innerHTML = "<b>●</b>" + t("view.live.wavePH.rec", state.clientId).replace(/^● /, "");
+      renderTranscript();
+      ws.send(JSON.stringify({action: "rename", title: t("view.live.defaultSession", new Date().toTimeString().slice(0, 8))}));
+    } else {
+      // 重连成功:用原 sessionTitle(后端会建新 session_id,但 UI 体验连续)
+      toast(t("live.reconnected"), "ok");
+      if (state.sessionTitle) {
+        ws.send(JSON.stringify({action: "rename", title: state.sessionTitle}));
+      }
+    }
     setFooter("ws · live", "live");
-    ws.send(JSON.stringify({action: "rename", title: t("view.live.defaultSession", new Date().toTimeString().slice(0, 8))}));
   };
   ws.onmessage = (ev) => {
     try {
@@ -868,14 +894,35 @@ async function startRec() {
   };
   ws.onerror = () => { toast(t("live.wsError"), "error"); };
   ws.onclose = () => {
-    state.wsState = "idle";
+    state.ws = null;
     setFooter("ws · idle", "idle");
+    if (!state.wsShouldReconnect || state.wsReconnectAttempts >= 5) {
+      // 用户主动停止 / 已达最大重试次数:放弃
+      state.wsState = "idle";
+      if (state.wsReconnectAttempts >= 5) {
+        toast(t("live.reconnectFailed"), "error");
+      }
+      return;
+    }
+    // 自动重连:指数退避 1s / 2s / 4s / 8s / 16s
+    state.wsState = "reconnecting";
+    state.wsReconnectAttempts++;
+    const delay = 1000 * Math.pow(2, state.wsReconnectAttempts - 1);
+    toast(t("live.reconnecting", state.wsReconnectAttempts, Math.round(delay / 1000)), "");
+    state.wsReconnectTimer = setTimeout(() => {
+      state.wsReconnectTimer = null;
+      if (state.wsShouldReconnect) connectWs();
+    }, delay);
   };
 }
 
 function stopRec() {
   if (!state.rec) return;
   state.rec = false;
+  // 关闭 WebSocket 重连开关,清理待执行 timer
+  state.wsShouldReconnect = false;
+  if (state.wsReconnectTimer) { clearTimeout(state.wsReconnectTimer); state.wsReconnectTimer = null; }
+  state.wsReconnectAttempts = 0;
   try { state.ws && state.ws.close(); } catch (e) {}
   try { state.processor && state.processor.disconnect(); } catch (e) {}
   try { state.stream && state.stream.getTracks().forEach(t => t.stop()); } catch (e) {}
