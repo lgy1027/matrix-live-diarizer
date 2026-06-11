@@ -250,7 +250,16 @@ class BaseSpeakerEngine(ABC):
             if norm > 1e-9:
                 target_emb = target_emb / norm
 
-            # 4. upsert target
+            # 4. 检查实际命中的 source — 0 命中则直接返回 error(避免静默成功)
+            existing_sources = [sid for sid in source_ids if sid in fetched]
+            if not existing_sources:
+                return {
+                    "ok": False,
+                    "error": f"所有 source 都不存在 (传了 {len(source_ids)} 个,实际命中 0)",
+                    "missing_source_ids": list(source_ids),
+                }
+
+            # 5. upsert target(只在有实际合并时)
             target_meta = dict(fetched[target_id][1])
             target_meta["count"] = merged_count
             target_meta["sample_count"] = merged_sample_count
@@ -261,10 +270,8 @@ class BaseSpeakerEngine(ABC):
                 metadatas=[target_meta],
             )
 
-            # 5. 删 source (只删实际存在的)
-            existing_sources = [sid for sid in source_ids if sid in fetched]
-            if existing_sources:
-                self.collection.delete(ids=existing_sources)
+            # 6. 删 source (只删实际存在的)
+            self.collection.delete(ids=existing_sources)
 
             logger.info(f"[MERGE] {len(existing_sources)} 个 source → {target_id} (合并后 count={merged_count})")
             return {

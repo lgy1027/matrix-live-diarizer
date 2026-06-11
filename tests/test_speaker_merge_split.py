@@ -175,6 +175,26 @@ def test_merge_speakers_missing_source_skipped():
     assert result["new_count"] == 2
 
 
+def test_merge_speakers_all_sources_missing_returns_error():
+    """所有 source 都不在 ChromaDB → ok=False,target 不被破坏"""
+    from engine.speaker.base_engine import BaseSpeakerEngine
+    fake = _make_fake_engine_with_collection()
+    fake._store["Spk_001"] = {
+        "emb": [1.0, 0.0, 0.0],
+        "meta": {"name": "T", "count": 1, "sample_count": 1},
+    }
+    orig_emb = list(fake._store["Spk_001"]["emb"])
+    orig_meta = dict(fake._store["Spk_001"]["meta"])
+    # 所有 source 都不存在
+    result = BaseSpeakerEngine.merge_speakers(fake, "Spk_001", ["Spk_nope_1", "Spk_nope_2"])
+    assert result["ok"] is False
+    assert "都不存在" in result["error"]
+    assert set(result["missing_source_ids"]) == {"Spk_nope_1", "Spk_nope_2"}
+    # ⚠️ 关键: target 不应被破坏(没合并就不该写)
+    assert fake._store["Spk_001"]["emb"] == orig_emb
+    assert fake._store["Spk_001"]["meta"]["count"] == orig_meta["count"]
+
+
 # ========== Repo 测试 ==========
 
 def test_reassign_speaker_updates_segments(tmp_path):
