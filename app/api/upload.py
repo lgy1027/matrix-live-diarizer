@@ -105,6 +105,7 @@ async def process_audio_chunk_with_diarization(
     
     asr_result = await asr_engine.run_asr(chunk, use_preprocessing=True)
     text = asr_result.get("text", "") if isinstance(asr_result, dict) else (asr_result or "")
+    seg_words = asr_result.get("words") if isinstance(asr_result, dict) else None
     emb_result = await asyncio.get_event_loop().run_in_executor(
         None, get_speaker_engine().extract_feat, chunk
     )
@@ -121,7 +122,8 @@ async def process_audio_chunk_with_diarization(
         speaker=spk_id,
         text=text or "",
         start_time=start_time,
-        end_time=end_time
+        end_time=end_time,
+        words=seg_words,
     )
 
 
@@ -133,12 +135,14 @@ async def process_audio_chunk_asr_only(
     """分段处理：仅 ASR"""
     asr_result = await asr_engine.run_asr(chunk, use_preprocessing=True)
     text = asr_result.get("text", "") if isinstance(asr_result, dict) else (asr_result or "")
+    seg_words = asr_result.get("words") if isinstance(asr_result, dict) else None
 
     return SegmentResult(
         speaker="SPEAKER",
         text=text or "",
         start_time=start_time,
-        end_time=end_time
+        end_time=end_time,
+        words=seg_words,
     )
 
 

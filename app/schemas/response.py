@@ -9,6 +9,10 @@ class SegmentResult(BaseModel):
     text: str
     start_time: float
     end_time: float
+    words: Optional[List[Dict]] = Field(
+        None,
+        description="字级时间戳 [{text, start, end}] — 仅 ASR_WORD_TIMESTAMPS=true 时返回",
+    )
 
 
 class UploadResponse(BaseModel):
