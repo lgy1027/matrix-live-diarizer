@@ -92,16 +92,17 @@ class ASREngine:
                     model_dir = snapshot_download("Qwen/Qwen3-ASR-0.6B")
                     dtype = torch.bfloat16 if device in ("cuda", "mps") else torch.float32
                     # 可选加载 forced aligner (Qwen3-ForcedAligner-0.6B, ~600MB)
-                    # 给 asr_word_timestamps 开启用,否则 None 跳过
-                    fa = None
+                    # ⚠️ qwen_asr 的 Qwen3ASRModel.from_pretrained 把 forced_aligner 当 str(repo id) 处理
+                    # (Qwen3ASRModel.from_pretrained 内会再调 snapshot_download / Qwen3ForcedAligner.from_pretrained)
+                    # 所以只传 repo id 字符串,不要 pre-load 后再传对象
+                    # (否则会触发 "Repo id must use alphanumeric chars" 错误)
+                    forced_aligner_id = None
                     if self.config.asr_word_timestamps:
                         logger.info("[ASR] 加载 forced aligner (Qwen3-ForcedAligner-0.6B)")
-                        from qwen_asr.inference.qwen3_forced_aligner import Qwen3ForcedAligner
-                        fa_dir = snapshot_download("Qwen/Qwen3-ForcedAligner-0.6B")
-                        fa = Qwen3ForcedAligner.from_pretrained(fa_dir, dtype=dtype, device_map=device)
+                        forced_aligner_id = "Qwen/Qwen3-ForcedAligner-0.6B"
                     result["asr_model"] = Qwen3ASRModel.from_pretrained(
                         model_dir, dtype=dtype, device_map=device,
-                        forced_aligner=fa,
+                        forced_aligner=forced_aligner_id,
                     )
                     result["ok"] = True
                 except Exception as e:
