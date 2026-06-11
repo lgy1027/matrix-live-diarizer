@@ -48,6 +48,85 @@ def init_engines(asr, spk, lock):
     inference_lock = lock
 
 
+# 状态机常量(模块级,供测试 import)
+STATE_SILENCE = 0
+STATE_SPEECH = 1
+SILENCE_THRESHOLD_FRAMES = 3  # 连续 N 帧静音才算语音结束
+LOUD_RMS_THRESHOLD = 0.015    # 能量阈值:超过才走 VAD 判定
+
+
+def classify_frame(chunk: np.ndarray, asr_engine_obj) -> bool:
+    """判断单帧是否为语音
+
+    纯函数化(供测试):两步判定
+    1. 能量门: RMS > 阈值 才走 VAD,否则直接判静音
+    2. VAD: 用 asr_engine.is_silent 精判
+
+    返回 True = 是语音帧
+    """
+    if chunk is None or len(chunk) == 0:
+        return False
+    chunk_rms = float(np.sqrt(np.mean(chunk ** 2)))
+    if chunk_rms <= LOUD_RMS_THRESHOLD:
+        return False
+    # 能量足够才走 VAD(节省 CPU)
+    if asr_engine_obj is None:
+        # 测试/无引擎情况:仅靠能量
+        return True
+    return not asr_engine_obj.is_silent(chunk, use_vad=True)
+
+
+def should_emit_segment(
+    state: int,
+    silence_count: int,
+    buffer_len: int,
+    sample_rate: int,
+    max_segment_seconds: float,
+    silence_threshold: int = SILENCE_THRESHOLD_FRAMES,
+) -> bool:
+    """判断当前帧后是否应该触发 ASR 识别
+
+    触发条件(任一):
+    1. STATE_SPEECH + 静音帧数 >= 阈值(语音段自然结束)
+    2. STATE_SPEECH + 缓冲长度 >= 上限(强制识别,防 OOM)
+    """
+    if state != STATE_SPEECH:
+        return False
+    if silence_count >= silence_threshold:
+        return True
+    max_buffer = int(sample_rate * max_segment_seconds)
+    if buffer_len >= max_buffer:
+        return True
+    return False
+
+
+def next_state(state: int, is_speech: bool) -> int:
+    """状态机推进: SILENCE ↔ SPEECH
+
+    SILENCE + speech → SPEECH
+    SPEECH + speech  → SPEECH(不变)
+    SPEECH + silence → SPEECH(还在累积,等 silence_threshold 触发识别)
+    SILENCE + silence → SILENCE
+    """
+    if state == STATE_SILENCE and is_speech:
+        return STATE_SPEECH
+    return state
+
+
+def compute_skip_count(queue_size: int, threshold: int) -> int:
+    """队列满时,计算要跳过的旧帧数(保留最新一帧)
+
+    跳帧策略:当队列堆积超过阈值,丢弃旧帧防止 OOM
+    - queue_size <= threshold: 0 (不跳帧,正常处理)
+    - queue_size > threshold:  queue_size - 1 (保留最新 1 帧,跳过其他)
+
+    纯函数化(供测试):只依赖入参,不触碰真实队列
+    """
+    if queue_size <= threshold:
+        return 0
+    return queue_size - 1
+
+
 async def queue_monitor(queue: asyncio.Queue, client_id: str, stop_event: asyncio.Event):
     """队列监控：定期打印队列状态"""
     try:
@@ -93,17 +172,14 @@ async def audio_processor(
     ctx = SessionContext(client_id)
     
     # 语音活动状态机
-    STATE_SILENCE = 0
-    STATE_SPEECH = 1
     state = STATE_SILENCE
-    
+
     # 语音累积缓冲区
     speech_buffer = np.array([], dtype=np.float32)
-    
+
     # 静音帧计数（用于判断语音结束）
     silence_frame_count = 0
-    SILENCE_THRESHOLD_FRAMES = 3  # 连续 N 帧静音才算语音结束
-    
+
     # 超时追踪
     last_active_time = time.time()
     
@@ -112,16 +188,15 @@ async def audio_processor(
     skipped_frames = 0
 
     while not stop_event.is_set():
-        # 跳帧策略
+        # 跳帧策略(纯函数 compute_skip_count 算要跳的帧数)
         queue_size = queue.qsize()
-        if queue_size > skip_frame_threshold:
-            frames_to_skip = queue_size - 1
-            for _ in range(frames_to_skip):
-                try:
-                    queue.get_nowait()
-                    skipped_frames += 1
-                except asyncio.QueueEmpty:
-                    break
+        frames_to_skip = compute_skip_count(queue_size, skip_frame_threshold)
+        for _ in range(frames_to_skip):
+            try:
+                queue.get_nowait()
+                skipped_frames += 1
+            except asyncio.QueueEmpty:
+                break
         
         # 获取数据
         try:
@@ -139,20 +214,13 @@ async def audio_processor(
             break
         
         total_frames += 1
-        
+
         # 转换音频格式
         chunk = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
-        
-        # 快速能量检测
-        chunk_rms = np.sqrt(np.mean(chunk**2))
-        is_loud_chunk = chunk_rms > 0.015  # 稍微提高阈值
-        
-        # 使用 VAD 精确检测（抽样）
-        is_speech_chunk = False
-        if is_loud_chunk:
-            # 只有能量足够才做 VAD 检测（减少计算）
-            is_speech_chunk = not asr_engine.is_silent(chunk, use_vad=True)
-        
+
+        # 调用纯函数 classify_frame(单帧 VAD 判定)
+        is_speech_chunk = classify_frame(chunk, asr_engine)
+
         # 状态机处理
         if state == STATE_SILENCE:
             if is_speech_chunk:
@@ -184,10 +252,12 @@ async def audio_processor(
                 speech_buffer = np.concatenate([speech_buffer, chunk])
                 silence_frame_count = 0
                 last_active_time = time.time()
-                
+
                 # 缓冲区达到上限：强制识别
-                max_buffer = sample_rate * max_segment_seconds
-                if len(speech_buffer) >= max_buffer:
+                if should_emit_segment(
+                    state, silence_frame_count, len(speech_buffer),
+                    sample_rate, max_segment_seconds,
+                ):
                     logger.debug(f"[PROCESSOR] {client_id} 达到上限，强制识别")
                     await _process_speech_segment(
                         websocket, ctx, speech_buffer, client_id, sample_rate
@@ -195,14 +265,17 @@ async def audio_processor(
                     # 保留最后 0.5 秒作为上下文
                     keep_samples = int(sample_rate * 0.5)
                     speech_buffer = speech_buffer[-keep_samples:] if len(speech_buffer) > keep_samples else np.array([], dtype=np.float32)
-            
+
             else:
                 # 语音中检测到静音帧
                 speech_buffer = np.concatenate([speech_buffer, chunk])
                 silence_frame_count += 1
-                
+
                 # 连续静音帧达到阈值：语音结束
-                if silence_frame_count >= SILENCE_THRESHOLD_FRAMES:
+                if should_emit_segment(
+                    state, silence_frame_count, len(speech_buffer),
+                    sample_rate, max_segment_seconds,
+                ):
                     logger.debug(f"[PROCESSOR] {client_id} 语音结束，开始识别")
                     
                     # 触发 ASR
