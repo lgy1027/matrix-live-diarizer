@@ -385,6 +385,21 @@ footer.bar-b{height:32px;padding:0 28px;display:flex;align-items:center;justify-
   .view{padding:12px 0}
   /* 录音按钮缩小 */
   .rec-fab{width:64px;height:64px}
+  /* Bug-70 修复: wrap 容器 padding 减(原 32px 36px 在 360px 屏占 10% 边距)*/
+  .live-wrap{padding:12px 14px 80px;max-width:none}
+  .lib-wrap{padding:12px 14px 80px;max-width:none}
+  .voice-wrap{padding:12px 14px 80px;max-width:none}
+  .set-wrap{padding:12px 14px 80px;max-width:none;margin:0}
+  /* 头部 h1 字号缩(原 48px 太大)*/
+  .set-wrap > h1{font-size:32px}
+  /* 段落标题/大字号调整 */
+  .view > h1,.view-head h1{font-size:24px !important}
+  /* 字号基线 */
+  html,body{font-size:13px}
+  /* 卡片 padding 减 */
+  .card{padding:14px 16px}
+  /* 录音波形容器 */
+  .rec-fab-wrap{bottom:80px}
 }
 
 /* < 480px 极窄屏(老款手机)进一步压缩 */
@@ -392,6 +407,14 @@ footer.bar-b{height:32px;padding:0 28px;display:flex;align-items:center;justify-
   .nav .nav-item::after{font-size:9px}
   .lib-stats{flex-wrap:wrap;gap:12px}
   .lib-stats .item{flex:1 1 40%}
+  /* Bug-70: 极窄屏 wrap 容器进一步压 */
+  .live-wrap,.lib-wrap,.voice-wrap,.set-wrap{padding:8px 10px 80px}
+  .set-wrap > h1{font-size:24px}
+  .view > h1,.view-head h1{font-size:20px !important}
+  /* 字体基线再缩 */
+  html,body{font-size:12px}
+  /* 卡片 padding 更紧 */
+  .card{padding:10px 12px}
 }
 
 /* language switcher (top-right, segmented control) */
