@@ -326,6 +326,74 @@ footer.bar-b{height:32px;padding:0 28px;display:flex;align-items:center;justify-
   .lib-stats .item .n{font-size:48px}
 }
 
+/* Roadmap #1.5 移动端响应式(< 768px) */
+@media (max-width:768px){
+  /* 左侧 56px nav 改底部 tab bar(类似手机 App 底部导航) */
+  aside.nav{
+    position:fixed;
+    bottom:0; left:0; right:0;
+    top:auto;
+    width:auto;
+    height:56px;
+    flex-direction:row;
+    justify-content:space-around;
+    align-items:stretch;
+    padding:0;
+    border-right:none;
+    border-top:1px solid var(--border-soft);
+    background:var(--ink-2);
+    z-index:50;
+  }
+  /* 隐藏 logo(已在顶 header 显示) */
+  aside.nav .brand{display:none}
+  /* 隐藏中间 spacer */
+  aside.nav .spacer{display:none}
+  /* nav-item 横向平分,显示文字 */
+  .nav .nav-item{
+    width:auto; height:auto;
+    flex:1;
+    flex-direction:column;
+    gap:2px;
+    padding:6px 0;
+    border-radius:0;
+    font-size:10px;
+  }
+  .nav .nav-item::after{
+    content:attr(title);
+    font-family:var(--sans);
+    font-size:10px;
+    line-height:1;
+    color:inherit;
+  }
+  /* active 指示器: 从左竖条改成顶横条 */
+  .nav .nav-item.active::before{
+    left:50%; top:0;
+    transform:translateX(-50%);
+    width:24px; height:2px;
+    border-radius:0 0 2px 2px;
+  }
+  /* main 内容让出底部 nav 空间 */
+  main{padding-bottom:64px !important}
+  /* 容器 padding 减 */
+  .container{padding:1rem}
+  /* 直播 grid 进一步优化: stat 卡片变小 */
+  .lib-stats{gap:18px}
+  .lib-stats .item .n{font-size:36px}
+  /* top header 缩小 */
+  .topbar{padding:10px 16px}
+  /* 段落 padding 减 */
+  .view{padding:12px 0}
+  /* 录音按钮缩小 */
+  .rec-fab{width:64px;height:64px}
+}
+
+/* < 480px 极窄屏(老款手机)进一步压缩 */
+@media (max-width:480px){
+  .nav .nav-item::after{font-size:9px}
+  .lib-stats{flex-wrap:wrap;gap:12px}
+  .lib-stats .item{flex:1 1 40%}
+}
+
 /* language switcher (top-right, segmented control) */
 .lang-switcher{
   display:inline-flex;

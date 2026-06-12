@@ -94,6 +94,7 @@ open web/index.html               # macOS
 - 🛡️ **离线兜底** — LLM 未配时自动用 TextRank 提取本地摘要,不出错也不空白
 - 📚 **历史会话** — 所有转写本地存库（SQLite），随时回看
 - 🔐 **安全默认** — DNS rebinding 防御 + 仅本机改 LLM 配置 + prompt 注入隔离
+- 📱 **移动端响应式** — < 768px 自动改底部 tab bar,手机/平板可用(roadmap #1.5)
 
 ## 📚 详细文档
 
@@ -103,6 +104,14 @@ open web/index.html               # macOS
 | **[docs/API.md](docs/API.md)** | 所有 API 端点（WebSocket/上传/说话人/引擎）+ 环境变量 |
 | **[docs/LLM_SETUP.md](docs/LLM_SETUP.md)** | LLM 配置：本地 Ollama / 公网 OpenAI / 局域网 vLLM |
 | **[docs/PRIVACY.md](docs/PRIVACY.md)** | 隐私保证：默认本地 + 可选远程 + 4 道护栏 |
+
+## 📱 移动端使用
+
+打开 `web/index.html` 在手机/平板浏览器即可:
+- **< 768px** 自动改底部 tab bar(实时/历史/说话人/设置),不再挤 56px 左侧栏
+- **< 480px** 极窄屏额外压缩字体和 stat 卡片
+- 录音、说话人识别、SRT 导出等所有功能在移动端可用
+- 注意: Web 端录音需 HTTPS 或 `localhost`/`file://` — 局域网手机访问后端需配置 CORS(`ALLOWED_ORIGINS` env,详见 `docs/USAGE.md`)
 
 ## 🎯 声纹引擎对比
 
