@@ -255,6 +255,8 @@ async def upload_audio(
                     # 简单 ASR 路径(不调声纹引擎,保持原行为)
                     asr_result = await asr_engine.run_asr(audio, use_preprocessing=True)
                     text = asr_result.get("text", "") if isinstance(asr_result, dict) else (asr_result or "")
+                    # 字级时间戳:从 ASR 返 dict 中取 words,稍后写库
+                    seg_words = asr_result.get("words") if isinstance(asr_result, dict) else None
                     spk_id = "SPEAKER"
 
             logger.info(f"[UPLOAD] 完成, {time.time() - start_time_total:.2f}s")
@@ -267,6 +269,9 @@ async def upload_audio(
                     original_filename=file.filename,
                     duration_sec=duration,
                 )
+                # 字级时间戳:把 words 序列化为 words_json 存到 DB
+                import json as _json
+                words_json = _json.dumps(seg_words, ensure_ascii=False) if seg_words else None
                 # 短音频：单 segment
                 transcript_repo.insert_segment(
                     sid,
@@ -275,6 +280,7 @@ async def upload_audio(
                     start_time=0.0,
                     end_time=duration,
                     speaker_id=spk_id if enable_diarization else None,
+                    words_json=words_json,
                 )
                 session_id = sid
             else:
