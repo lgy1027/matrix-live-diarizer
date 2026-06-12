@@ -29,10 +29,35 @@ class CamPlusEngine(BaseSpeakerEngine):
     """
     
     _instance = None
-    
-    # 最小音频长度（秒）用于可靠声纹提取
-    MIN_AUDIO_DURATION = 1.5
-    
+
+    # Bug-68: 短于这个时长的音频直接跳过声纹匹配,标 "Spk_unknown"
+    # 典型场景: 用户短促回复"嗯/对/好"(0.1-0.3s)cosine 距离波动大,易误合
+    # 0.3s 是经验值:CamPlus 训练在 4-10s 段,<0.3s 段 embedding 无意义
+    MIN_USABLE_DURATION = 0.3
+
+    # 最小音频长度(秒)用于"可靠"声纹提取(走正常阈值 vs 宽松阈值)
+    # 方向 A: 从 1.5 降到 1.0,让更多段参与声纹(但仍要求有起码质量)
+    MIN_AUDIO_DURATION = 1.0
+
+    # 短于这个时长的段(<MIN_AUDIO 但 >=MIN_USABLE)走更宽容阈值
+    # 让短段能合并到现有 Spk(避免空库期碎片)
+    SHORT_SEGMENT_DURATION = 0.5
+
+    @staticmethod
+    def _classify_segment_duration(audio_duration: float) -> str:
+        """纯函数(供测试):根据 audio_duration 分类声纹匹配策略
+
+        Returns:
+            "skip":  audio_duration < MIN_USABLE_DURATION — 直接返 "Spk_unknown"
+            "short": MIN_USABLE ≤ audio_duration < SHORT_SEGMENT — 走宽松阈值
+            "reliable": audio_duration ≥ SHORT_SEGMENT — 走正常阈值
+        """
+        if audio_duration < CamPlusEngine.MIN_USABLE_DURATION:
+            return "skip"
+        if audio_duration < CamPlusEngine.SHORT_SEGMENT_DURATION:
+            return "short"
+        return "reliable"
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super(CamPlusEngine, cls).__new__(cls)
@@ -152,24 +177,34 @@ class CamPlusEngine(BaseSpeakerEngine):
             use_buffer: 是否使用滑动窗口平滑。
                 - True (默认): 实时流场景，同一 client 持续说话，buffer 平滑抖动
                 - False: 文件上传场景，每次上传是独立 speaker 查询，buffer 残留会污染
+
+        Returns:
+            说话人 ID 字符串;短段(<MIN_USABLE_DURATION)返 "Spk_unknown",不参与匹配
         """
         if current_emb is None:
             return "Unknown"
 
-        # 确定是否为可靠样本
-        is_reliable = audio_duration >= self.MIN_AUDIO_DURATION
+        # Bug-68: 用纯函数分类段类型(supports testable + 复用)
+        segment_class = self._classify_segment_duration(audio_duration)
+        if segment_class == "skip":
+            return "Spk_unknown"
+        is_short_segment = (segment_class == "short")
+        is_reliable = (segment_class == "reliable")
 
         # 阈值: 距离越小越相似
-        # 放宽高置信度阈值，收紧边缘阈值
-        LOW_THRESHOLD = 0.40      # 高置信度 (相似度 > 60%)
-        HIGH_THRESHOLD = 0.50     # 边缘区域 (相似度 > 50%)
+        # 方向 A: 收紧 LOW(避免误合) + 放宽 HIGH(容错短段) + 加宽 grace
+        LOW_THRESHOLD = 0.50      # 高置信度(原 0.40,收紧避免误合)
+        HIGH_THRESHOLD = 0.60     # 边缘区域(原 0.50,放宽容错短段)
+        # 短段(0.3-0.5s)用更宽松阈值
+        if is_short_segment:
+            LOW_THRESHOLD = 0.65
+            HIGH_THRESHOLD = 0.75
         MIN_SAMPLES_FOR_EDGE = 2  # 降低边缘匹配样本要求
 
-        # Bug-04: 新创建的 Spk 在 grace period 内(刚创建,样本数 < 3),
-        # 匹配阈值小幅放宽 0.05,避免空库阶段同一说话人因 TTS 失真/短段变异
-        # 被错分成多个 Spk。已积累足够样本后,恢复正常阈值(避免误合并)
+        # Bug-04 + 方向 A: 新 Spk grace period 阈值从 0.05 提到 0.08
+        # 空库期更宽容(短段 cosine 波动 0.05-0.10 是常态)
         GRACE_PERIOD_SAMPLES = 3
-        GRACE_THRESHOLD_BOOST = 0.05
+        GRACE_THRESHOLD_BOOST = 0.08
         import time as _time
         current_ts = _time.time()
 
