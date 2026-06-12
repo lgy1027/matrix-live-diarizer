@@ -13,6 +13,17 @@
     .tab-content.active { display: block; }
     .segment { padding: 0.5rem; border-left: 3px solid #4ade80; margin: 0.5rem 0; background: #1a1a1a; }
     .segment .meta { color: #888; font-size: 0.85rem; }
+    .segment .text { font-family: ui-monospace, "SF Mono", Menlo, monospace; line-height: 1.8; }
+    /* 字级时间戳:hover 显示该字时间范围(同 index.html 风格) */
+    .segment .text .word {
+      cursor: default;
+      border-bottom: 1px dotted transparent;
+      transition: background .15s, border-color .15s;
+    }
+    .segment .text .word:hover {
+      background: rgba(251, 191, 36, 0.15);
+      border-bottom-color: #fbbf24;
+    }
     .stat-bar { display: flex; align-items: center; gap: 0.5rem; margin: 0.5rem 0; }
     .stat-bar .name { width: 120px; }
     .stat-bar .bar { background: #4ade80; height: 20px; min-width: 2px; }

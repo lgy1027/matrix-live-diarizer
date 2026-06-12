@@ -38,14 +38,27 @@ function renderText(segs) {
     textEl.innerHTML = `<div class="empty">无转写内容</div>`;
     return;
   }
-  textEl.innerHTML = segs.map((s) => `
+  // 套餐 1: 字级时间戳 — 优先渲染 words 数组,每个字一个 .word span
+  // hover 显示该字的绝对时间(同 index.html 风格)
+  // 没 words 时降级到整段 text
+  textEl.innerHTML = segs.map((s) => {
+    const wordsHtml = (s.words && s.words.length)
+      ? s.words.map((w) => {
+          const absStart = (s.start_time + (w.start || 0)).toFixed(2);
+          const absEnd = (s.start_time + (w.end || 0)).toFixed(2);
+          return `<span class="word" data-start="${w.start || 0}" data-end="${w.end || 0}" title="${absStart}s - ${absEnd}s">${escapeHtml(w.text || "")}</span>`;
+        }).join("")
+      : escapeHtml(s.text || "");
+    return `
     <div class="segment">
       <div class="meta">${Matrix.formatTime(s.start_time)} - ${Matrix.formatTime(s.end_time)}
         ${s.speaker_id ? ` · <strong>${escapeHtml(s.speaker_id)}</strong>` : ""}
+        ${s.words ? ` · <span style="color:#fbbf24">字级</span>` : ""}
       </div>
-      <div>${escapeHtml(s.text)}</div>
+      <div class="text">${wordsHtml}</div>
     </div>
-  `).join("");
+  `;
+  }).join("");
 }
 
 function renderStats(stats) {

@@ -12,6 +12,15 @@
 - **设备**: MPS / CUDA / CPU(默认 auto,mps 优先,90s 超时回退)
 - **能力**: 多语种(中英日韩等)、50+ 语言识别、自动语言检测、长音频(分段)
 - **可选**: Qwen3-ForcedAligner-0.6B(600MB),给字级时间戳用,`ASR_WORD_TIMESTAMPS=true` 启用
+  - **开启后效果**:
+    - WebSocket 响应 / upload 响应 / SQLite 存档的 segments 都会带 `words: [{text, start, end}]`
+    - SRT/VTT 字幕按字切分(0.3s/字 vs 默认 3s/段),适合视频剪辑/卡拉 OK
+    - 前端 detail.html / index.html hover 字幕显示该字时间
+  - **代价**:
+    - 首次启动多下载 600MB 模型(国内需 HF 镜像)
+    - ASR 加载多 5-10s(MPS 上偶发死锁,90s 超时回退 CPU)
+    - 每次推理多 50-200ms(对齐计算)
+  - **推荐**: 个人学习保持 false(轻量);需要精确字幕/视频剪辑场景开 true
 - **优点**: 中文识别极强,SOTA 表现,社区活跃
 - **缺点**: 体积较大,低端机器加载慢;HF 镜像依赖
 
