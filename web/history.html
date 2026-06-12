@@ -5,6 +5,19 @@
   <title>历史会话 - Matrix Live Diarizer</title>
   <link rel="icon" type="image/x-icon" href="/web/favicon.ico">
   <link rel="stylesheet" href="/web/css/common.css">
+  <style>
+    /* Roadmap #2.2 全文搜索命中面板 */
+    .hits-header { padding: 0.5rem 0; border-bottom: 1px solid #2a2a2a; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 1rem; }
+    .hits-header strong { color: #4ade80; font-size: 1.2em; }
+    .hit { padding: 0.75rem 1rem; margin: 0.5rem 0; background: #1a1a1a; border-left: 3px solid #4ade80; border-radius: 0 4px 4px 0; }
+    .hit-meta { color: #888; font-size: 0.85rem; margin-bottom: 0.25rem; }
+    .hit-meta a { color: #4ade80; }
+    .hit-spk { font-family: ui-monospace, monospace; }
+    .hit-time { color: #666; }
+    .hit-snippet { font-family: ui-monospace, "SF Mono", Menlo, monospace; line-height: 1.6; }
+    .hit-snippet mark { background: rgba(251, 191, 36, 0.3); color: #fbbf24; padding: 0 2px; border-radius: 2px; }
+    .btn-sm { padding: 0.2rem 0.6rem; font-size: 0.85rem; }
+  </style>
 </head>
 <body>
   <nav class="top-nav">
@@ -40,6 +53,8 @@
         </tbody>
       </table>
     </div>
+    <div id="hits-panel" style="display:none"></div>
+  </div>
   </div>
   <script src="/web/js/api.js"></script>
   <script src="/web/js/history.js"></script>

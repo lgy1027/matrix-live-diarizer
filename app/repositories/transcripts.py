@@ -265,3 +265,151 @@ class TranscriptRepository:
             )
             conn.commit()
         return cur.rowcount
+
+    # ---- 全文搜索 (Roadmap #2.2) ----
+
+    @staticmethod
+    def _sanitize_fts_query(q: str) -> str:
+        """FTS5 MATCH query 清洗: 去除特殊字符 (", *, :, -, .) 避免解析错误
+
+        FTS5 把 - 当 NOT 运算符,4o 会被当 column name 而报错。
+        简单方案: 把非 [中文/英文/数字] 字符替换为空格。
+        """
+        import re
+        # 保留中文、英文、数字;其他字符替换为空格
+        cleaned = re.sub(r"[^\w一-鿿]+", " ", q, flags=re.UNICODE)
+        return cleaned.strip()
+
+    def search_segments(
+        self,
+        q: str,
+        session_id: Optional[str] = None,
+        speaker_id: Optional[str] = None,
+        limit: int = 50,
+    ) -> tuple[int, list[dict]]:
+        """全文搜索 segments (Roadmap #2.2)
+
+        Args:
+            q: 搜索关键词(3+ 字中文命中率高,英文/数字也支持)
+            session_id: 限定会话(可选)
+            speaker_id: 限定说话人(可选)
+            limit: 返回数量上限
+
+        Returns:
+            (total, hits) — hits 含 segment 字段 + session 元数据 + snippet 高亮
+
+        策略: FTS5 trigram 主路径 + LIKE '%q%' 兜底(2 字 / 含特殊字符场景)
+        """
+        if not q or not q.strip():
+            return 0, []
+
+        # 1. FTS5 路径
+        fts_q = self._sanitize_fts_query(q)
+        fts_results: list[dict] = []
+        if fts_q:
+            with self.db.connect() as conn:
+                # contentless FTS5 不支持 snippet() (因为没存原 text)
+                # 用 s.text 自己造 snippet: 找 query 第一次出现位置 + 前后各 N 字符
+                sql = """
+                    SELECT
+                        s.id            AS segment_id,
+                        s.session_id    AS session_id,
+                        s.speaker_id    AS speaker_id,
+                        s.text          AS text,
+                        s.start_time    AS start_time,
+                        s.end_time      AS end_time,
+                        sess.title      AS session_title,
+                        sess.original_filename AS session_filename
+                    FROM segments_fts
+                    JOIN segments s ON s.id = segments_fts.rowid
+                    JOIN sessions sess ON sess.id = s.session_id
+                    WHERE segments_fts MATCH ?
+                """
+                params: list = [fts_q + "*"]  # 前缀匹配: 兜底 "语音" 也能命中"语音识别"
+                if session_id:
+                    sql += " AND s.session_id = ?"
+                    params.append(session_id)
+                if speaker_id:
+                    sql += " AND s.speaker_id = ?"
+                    params.append(speaker_id)
+                sql += " ORDER BY rank LIMIT ?"
+                params.append(limit)
+                fts_results = [dict(r) for r in conn.execute(sql, params).fetchall()]
+                # 自己造 snippet: 找 q (或 q 的子串) 位置,前后 8 字符包 [match]X[/match]
+                for hit in fts_results:
+                    text = hit["text"] or ""
+                    # 先找完整 q,失败再尝试 q 的子串(trigram 跨边界场景)
+                    match_str = q
+                    pos = text.find(match_str)
+                    if pos < 0:
+                        # 降级:取 q 的前 2 字符(对单字 / 2 字 substring 兜底)
+                        for sub_len in (min(2, len(q)), 1):
+                            if sub_len == 0:
+                                break
+                            sub = q[:sub_len]
+                            p = text.find(sub)
+                            if p >= 0:
+                                pos = p
+                                match_str = sub
+                                break
+                    if pos < 0:
+                        # 实在找不到(罕见):取前 32 字符不包 match 标记
+                        snippet_text = text[:32] + ("..." if len(text) > 32 else "")
+                    else:
+                        start = max(0, pos - 8)
+                        end = min(len(text), pos + len(match_str) + 8)
+                        prefix = ("..." if start > 0 else "")
+                        suffix = ("..." if end < len(text) else "")
+                        # 把 text[start:end] 切成 [prefix] + [前] + [match] + [match_str] + [/match] + [后] + [suffix]
+                        window = text[start:end]
+                        mp = pos - start  # match_str 在 window 内的位置
+                        snippet_text = (
+                            prefix
+                            + window[:mp]
+                            + "[match]" + match_str + "[/match]"
+                            + window[mp + len(match_str):]
+                            + suffix
+                        )
+                    hit["snippet"] = snippet_text
+
+        # 2. LIKE 兜底路径(对 FTS5 未命中场景: 2 字 / 特殊字符)
+        like_q = q.strip()
+        like_results: list[dict] = []
+        if like_q:
+            with self.db.connect() as conn:
+                sql = """
+                    SELECT
+                        s.id            AS segment_id,
+                        s.session_id    AS session_id,
+                        s.speaker_id    AS speaker_id,
+                        s.text          AS text,
+                        s.start_time    AS start_time,
+                        s.end_time      AS end_time,
+                        sess.title      AS session_title,
+                        sess.original_filename AS session_filename,
+                        s.text          AS snippet
+                    FROM segments s
+                    JOIN sessions sess ON sess.id = s.session_id
+                    WHERE s.text LIKE ?
+                """
+                params = [f"%{like_q}%"]
+                if session_id:
+                    sql += " AND s.session_id = ?"
+                    params.append(session_id)
+                if speaker_id:
+                    sql += " AND s.speaker_id = ?"
+                    params.append(speaker_id)
+                sql += " LIMIT ?"
+                params.append(limit)
+                like_results = [dict(r) for r in conn.execute(sql, params).fetchall()]
+
+        # 3. UNION 去重 (FTS5 优先,因为有 snippet 高亮)
+        seen: set[int] = set()
+        merged: list[dict] = []
+        for hit in fts_results + like_results:
+            sid = hit["segment_id"]
+            if sid not in seen:
+                seen.add(sid)
+                merged.append(hit)
+        total = len(merged)
+        return total, merged[:limit]

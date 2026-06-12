@@ -37,6 +37,36 @@ CREATE TABLE IF NOT EXISTS segments (
 -- 兼容老库:老 segments 表无 words_json 列,补上(忽略"重复列"错误)
 CREATE INDEX IF NOT EXISTS idx_segments_session ON segments(session_id, segment_index);
 
+-- Roadmap #2.2: FTS5 全文搜索虚表(trigram 分词, contentless 模式)
+-- trigram 把每 3 字符切为 token,中文 substring 搜 3+ 字命中率高
+-- content='' (contentless) 模式: 索引存但 content 仍由 segments.text 提供
+--   优势: 支持 'delete' / 'delete-all' 命令(否则 cascade DELETE 报 SQL logic error)
+--   限制: SQLite FTS5 无 jieba,2 字以下中文搜不到(建议输入 ≥3 字)
+CREATE VIRTUAL TABLE IF NOT EXISTS segments_fts USING fts5(
+    text,
+    session_id UNINDEXED,
+    speaker_id UNINDEXED,
+    content='',
+    tokenize='trigram'
+);
+
+-- 触发器: 同步 segments ↔ segments_fts
+-- 注意: FTS5 列不接受 NULL,speaker_id / session_id 为 NULL 时用空串兜底
+CREATE TRIGGER IF NOT EXISTS segments_ai AFTER INSERT ON segments BEGIN
+    INSERT INTO segments_fts(rowid, text, session_id, speaker_id)
+    VALUES (new.id, new.text, COALESCE(new.session_id, ''), COALESCE(new.speaker_id, ''));
+END;
+CREATE TRIGGER IF NOT EXISTS segments_ad AFTER DELETE ON segments BEGIN
+    INSERT INTO segments_fts(segments_fts, rowid, text, session_id, speaker_id)
+    VALUES ('delete', old.id, old.text, COALESCE(old.session_id, ''), COALESCE(old.speaker_id, ''));
+END;
+CREATE TRIGGER IF NOT EXISTS segments_au AFTER UPDATE ON segments BEGIN
+    INSERT INTO segments_fts(segments_fts, rowid, text, session_id, speaker_id)
+    VALUES ('delete', old.id, old.text, COALESCE(old.session_id, ''), COALESCE(old.speaker_id, ''));
+    INSERT INTO segments_fts(rowid, text, session_id, speaker_id)
+    VALUES (new.id, new.text, COALESCE(new.session_id, ''), COALESCE(new.speaker_id, ''));
+END;
+
 CREATE TABLE IF NOT EXISTS speaker_aliases (
     speaker_id    TEXT PRIMARY KEY,
     display_name  TEXT NOT NULL,
@@ -51,6 +81,15 @@ CREATE TABLE IF NOT EXISTS settings (
 """
 
 
+# 老库升级: 把已有 segments 一次性回填到 segments_fts
+# 用 IF NOT EXISTS 模式 — 第一次运行回填,后续幂等
+FTS_BACKFILL_SQL = """
+INSERT OR IGNORE INTO segments_fts(rowid, text, session_id, speaker_id)
+SELECT id, text, session_id, speaker_id FROM segments
+WHERE id NOT IN (SELECT rowid FROM segments_fts WHERE rowid IS NOT NULL);
+"""
+
+
 class Database:
     """SQLite 包装：自动建目录、WAL 模式、Row 工厂"""
 
@@ -59,7 +98,7 @@ class Database:
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
 
     def init_schema(self) -> None:
-        """创建表 + 索引 + 启用 WAL"""
+        """创建表 + 索引 + FTS5 虚表 + 触发器 + 回填老数据 + 启用 WAL"""
         with self.connect() as conn:
             conn.executescript(SCHEMA_SQL)
             # 兼容老库:加 v0.3 新列(已存在则忽略)
@@ -67,6 +106,8 @@ class Database:
                 conn.execute("ALTER TABLE segments ADD COLUMN words_json TEXT")
             except Exception:
                 pass  # 重复列错误,新库已含
+            # 回填老 segments 到 FTS5(对已有库,触发器不会追溯历史 insert)
+            conn.executescript(FTS_BACKFILL_SQL)
             # WAL 模式是持久化的，单独设置
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA synchronous=NORMAL")
@@ -75,6 +116,7 @@ class Database:
     def _init_schema_on_conn(self, conn: sqlite3.Connection) -> None:
         """在已开启的连接上建表(兜底用)"""
         conn.executescript(SCHEMA_SQL)
+        conn.executescript(FTS_BACKFILL_SQL)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
         conn.commit()

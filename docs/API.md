@@ -195,6 +195,50 @@ curl http://127.0.0.1:8000/ready
 | `/v1/history` | GET | 转写历史列表（分页 + 搜索）|
 | `/v1/sessions/{id}` | GET | 会话详情 |
 | `/v1/exports/{id}?format=srt\|vtt\|md\|json` | GET | 4 种格式导出 |
+| `/v1/search?q=...&session_id=...&speaker_id=...&limit=50` | GET | 全文搜索（v0.4+,Roadmap #2.2）|
+
+### `/v1/search` 全文搜索（v0.4+）
+
+搜所有 segment.text 内的关键词,返回带高亮 snippet 的命中列表。
+
+**Query 参数**:
+- `q` (必填,1-200 字符):搜索关键词
+- `session_id` (可选):限定会话
+- `speaker_id` (可选):限定说话人
+- `limit` (可选,默认 50,1-200):返回数量
+
+**响应**:
+```json
+{
+  "query": "今天我们",
+  "total": 5,
+  "session_id": null,
+  "speaker_id": null,
+  "hits": [
+    {
+      "segment_id": 42,
+      "session_id": "abc-123",
+      "session_title": "周会-1",
+      "session_filename": "weekly.wav",
+      "speaker_id": "Spk_001",
+      "text": "今天我们讨论语音识别...",
+      "snippet": "今天[match]我们[/match]讨论语音识别",
+      "start_time": 0.0,
+      "end_time": 5.2,
+      "jump_url": "/web/detail.html?id=abc-123&seg=42"
+    }
+  ]
+}
+```
+
+**中文支持**:FTS5 trigram 分词。3+ 字命中率高,2 字走 LIKE 兜底(2 字中文 substring 也能搜)。
+
+**示例**:
+```bash
+curl 'http://127.0.0.1:8000/v1/search?q=今天我们'
+curl 'http://127.0.0.1:8000/v1/search?q=语音识别&session_id=abc-123'
+curl 'http://127.0.0.1:8000/v1/search?q=OpenAI&limit=20'
+```
 
 ## 8. 环境变量参考
 

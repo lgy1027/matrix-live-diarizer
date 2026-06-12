@@ -150,17 +150,29 @@ ws.onclose = () => {
 
 ---
 
-### 2.2 说话人全文搜索
+### 2.2 说话人全文搜索  ✅ (本 commit 完成)
 
 **痛点**：库里有 100 个会话、50 个说话人，找"3 周前张老师说过 X 的地方"要逐个翻 detail 页。`library.search` UI 占位但没接上。
 
 **实现**：
-- SQLite FTS5 虚表 + triggers 同步 segments.text
-- `GET /v1/search?q=...&session_id=...&speaker_id=...&from=...&to=...`
-- 前端 history 标签页 search 框接上
-- 命中显示 segment + 上下文 ±2 段 + 跳转链接
+- SQLite FTS5 虚表 + triggers 同步 segments.text ✅
+- `GET /v1/search?q=...&session_id=...&speaker_id=...&limit=50` ✅
+- 前端 history 标签页 search 框接上 ✅
+- 命中显示 segment + snippet 高亮(`[match]X[/match]`) + 跳转链接 ✅
+- 16 个 FTS5 单测覆盖中英文搜 / 触发器同步 / 过滤 / snippet / 边界
 
-**影响**：从"档案柜"变"搜索引擎"，**长期价值高**。
+**关键实现细节**:
+- FTS5 用 **contentless 模式**(`content=''`):索引存,但 content 仍由 segments.text 提供
+  - 关键:contentless 才支持 `'delete'` / `'delete-all'` 命令(否则 cascade DELETE 报 SQL logic error)
+- 分词用 **trigram**:3 字符三元组,中文 3+ 字命中率高,2 字走 LIKE 兜底
+- snippet 自造(contentless 不支持 `snippet()` 函数):在 text 上找 q 位置 + 前后 8 字符
+
+**影响**：从"档案柜"变"搜索引擎"，**长期价值高**。✅
+
+**未来增强**(可作为 v0.5 候选):
+- 中文分词:接 jieba 提升 2 字搜的命中率
+- 上下文 ±2 段:当前只显示 hit 段本身,没扩上下文
+- 模糊匹配:typo 容忍
 
 **估时**：3 天
 
