@@ -113,18 +113,25 @@ def next_state(state: int, is_speech: bool) -> int:
     return state
 
 
-def compute_skip_count(queue_size: int, threshold: int) -> int:
-    """队列满时,计算要跳过的旧帧数(保留最新一帧)
+def compute_skip_count(queue_size: int, threshold: int, keep_recent: int = 25) -> int:
+    """队列满时,计算要跳过的旧帧数(保留最近 N 帧)
 
     跳帧策略:当队列堆积超过阈值,丢弃旧帧防止 OOM
     - queue_size <= threshold: 0 (不跳帧,正常处理)
-    - queue_size > threshold:  queue_size - 1 (保留最新 1 帧,跳过其他)
+    - queue_size > threshold: 跳过 queue_size - keep_recent 帧
+      默认 keep_recent=25 ≈ 0.5s(50fps 帧率 @ 20ms)
+
+    Bug-02: 之前只保留 1 帧,在极速发送场景下(0.1ms 间隔 1000 帧),
+    保留的 1 帧在 20s 音频里占比 0.005%,ASR 无法累积到完整语音段 → 0 识别
+    改为保留 0.5s(25 帧),既能防止 OOM,又能给 ASR 足够上下文
 
     纯函数化(供测试):只依赖入参,不触碰真实队列
     """
     if queue_size <= threshold:
         return 0
-    return queue_size - 1
+    # 至少保留 1 帧(防止 keep_recent=0 时跳过全部)
+    keep = max(1, min(keep_recent, queue_size))
+    return queue_size - keep
 
 
 async def queue_monitor(queue: asyncio.Queue, client_id: str, stop_event: asyncio.Event):
@@ -268,7 +275,9 @@ async def audio_processor(
 
             else:
                 # 语音中检测到静音帧
-                speech_buffer = np.concatenate([speech_buffer, chunk])
+                # Bug-01: 静音帧只用来计数,不再累积到 speech_buffer
+                # 之前把静音帧也加到 buffer,导致 ASR 看到"语音+静音"混合
+                # 在短音频(0.5-1s)上经常识别空(text="")
                 silence_frame_count += 1
 
                 # 连续静音帧达到阈值：语音结束
@@ -291,6 +300,17 @@ async def audio_processor(
                     ctx.last_full_text = ""  # 语音段结束，重置上下文
                     get_speaker_engine().reset_buffer(client_id)
                     logger.info(f"[RESET] {client_id} 语义重置（语音段结束）")
+
+    # Bug-01: 退出前 flush 残余 buffer,避免短音频(<1.5s)在 close 时被丢
+    # 触发条件: state 是 SPEECH(累积了语音但没等到 silence_threshold) 或 buffer > 0
+    if state == STATE_SPEECH and len(speech_buffer) > sample_rate * 0.1:
+        logger.debug(f"[PROCESSOR] {client_id} 退出前 flush 残余 buffer ({len(speech_buffer)/sample_rate:.2f}s)")
+        try:
+            await _process_speech_segment(
+                websocket, ctx, speech_buffer, client_id, sample_rate
+            )
+        except Exception as e:
+            logger.warning(f"[PROCESSOR] flush 失败: {e}")
 
     # 打印统计
     if total_frames > 0:
@@ -496,14 +516,27 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
     finally:
         # 设置停止信号
         stop_event.set()
-        
-        # 取消任务
-        processor_task.cancel()
+
+        # Bug-01: 给 processor 2s 自然退出,让它执行残余 buffer flush(短音频)
+        # 不立刻 cancel,避免打断短音频的最后一次 ASR 识别
+        try:
+            await asyncio.wait_for(asyncio.shield(processor_task), timeout=2.0)
+        except asyncio.TimeoutError:
+            logger.warning(f"[WS] {client_id} processor 2s 内未退出,强制 cancel")
+            processor_task.cancel()
+            try:
+                await processor_task
+            except asyncio.CancelledError:
+                pass
+        except Exception as e:
+            logger.warning(f"[WS] {client_id} processor 异常: {e}")
+
         monitor_task.cancel()
-        
-        # 等待取消完成
-        await asyncio.gather(processor_task, monitor_task, return_exceptions=True)
-        
+        try:
+            await monitor_task
+        except asyncio.CancelledError:
+            pass
+
         # 清理客户端资源，防止内存泄漏
         get_speaker_engine().cleanup_client(client_id)
         logger.info(f"[WS] 用户 {client_id} 连接已释放")

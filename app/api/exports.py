@@ -11,7 +11,8 @@ router = APIRouter()
 def export_session(
     session_id: str,
     request: Request,
-    format: str = Query(..., pattern="^(srt|vtt|markdown|md|json)$"),
+    # Bug-07: format 给默认值 "json",不再 422
+    format: str = Query("json", pattern="^(srt|vtt|markdown|md|json)$"),
 ):
     # 兼容前端常见写法 md → markdown
     fmt = "markdown" if format == "md" else format

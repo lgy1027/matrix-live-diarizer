@@ -279,6 +279,13 @@ async def split_speaker(body: SplitSpeakerRequest, request: Request):
     repo = request.app.state.transcript_repo
     engine = get_speaker_engine()
 
+    # Bug-09: 之前 speaker_id 不存在时静默 200 + 0 updated,改为 404 显式报错
+    if not engine.get_speaker(body.speaker_id):
+        raise HTTPException(
+            status_code=404,
+            detail=f"speaker_id {body.speaker_id} 不存在",
+        )
+
     # 验证 new_speaker_id 存在(如果给了)
     if body.new_speaker_id is not None:
         if not engine.get_speaker(body.new_speaker_id):

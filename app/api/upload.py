@@ -9,6 +9,16 @@ import numpy as np
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, Query
 
+# Bug-03: 显式 import 音频解码可能抛的异常,避免泄漏内部错误到用户
+try:
+    from soundfile import LibsndfileError
+except ImportError:  # soundfile 未装(理论上有 librosa 就有 soundfile,但兜底)
+    LibsndfileError = Exception
+try:
+    from audioread.exceptions import NoBackendError
+except ImportError:
+    NoBackendError = Exception
+
 from app.config import config
 from app.constants import FILE_UPLOAD_SESSION
 from app.schemas import UploadResponse, ModelsResponse, SegmentResult
@@ -197,7 +207,16 @@ async def upload_audio(
             raise HTTPException(status_code=400, detail="文件为空")
 
         import librosa
-        audio, _ = librosa.load(file_path, sr=config.audio.sample_rate)
+        try:
+            audio, _ = librosa.load(file_path, sr=config.audio.sample_rate)
+        except (LibsndfileError, NoBackendError, FileNotFoundError, EOFError, OSError) as e:
+            # Bug-03: 损坏文件之前会泄露内部异常名 + 返 500,改为 400 + 友好消息
+            # 覆盖 librosa 走 soundfile/audioread 两个后端的格式错误
+            logger.warning(f"[UPLOAD] 音频解码失败: {type(e).__name__}: {e}")
+            raise HTTPException(
+                status_code=400,
+                detail="音频文件无法解码,请检查格式是否正确(支持 WAV / MP3 / FLAC / M4A / OGG)",
+            )
         if len(audio) == 0:
             raise HTTPException(status_code=400, detail="音频解码后无有效采样,请检查文件是否损坏")
         duration = len(audio) / config.audio.sample_rate

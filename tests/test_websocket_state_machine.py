@@ -206,29 +206,32 @@ def test_compute_skip_count_below_threshold_no_skip():
 
 
 def test_compute_skip_count_at_threshold_boundary():
-    """刚超阈值 1 帧 → 跳 queue_size-1 帧(保留最新 1 帧)"""
-    # queue_size=51, threshold=50: 51 > 50 → 跳 51-1=50 帧(留 1 帧最新)
-    assert compute_skip_count(51, 50) == 50
+    """刚超阈值 1 帧 → 跳 queue_size-25 帧(保留 25 帧最近)"""
+    # queue_size=51, threshold=50: 51 > 50 → 跳 51-25=26 帧(留 25 帧最近)
+    assert compute_skip_count(51, 50) == 26
 
 
 def test_compute_skip_count_above_threshold_skip_all_but_one():
-    """队列堆积 → 保留最新 1 帧,跳过其余"""
-    # queue_size=100, threshold=50: 保留 1 帧,跳 99 帧
-    assert compute_skip_count(100, 50) == 99
-    # queue_size=60, threshold=50: 保留 1 帧,跳 59 帧
-    assert compute_skip_count(60, 50) == 59
+    """队列堆积 → 保留最近 25 帧(0.5s),跳过其余"""
+    # queue_size=100, threshold=50: 保留 25 帧,跳 75 帧
+    assert compute_skip_count(100, 50) == 75
+    # queue_size=60, threshold=50: 保留 25 帧,跳 35 帧
+    assert compute_skip_count(60, 50) == 35
 
 
 def test_compute_skip_count_custom_threshold():
     """自定义阈值"""
-    # threshold=10, queue_size=20 → 跳 19
-    assert compute_skip_count(20, 10) == 19
+    # threshold=10, queue_size=20 → 跳 20-25 = max(0, -5) = 0
+    # (因为 keep_recent=25 > queue_size=20,不能跳)
+    assert compute_skip_count(20, 10) == 0
     # threshold=10, queue_size=10 → 跳 0
     assert compute_skip_count(10, 10) == 0
     # threshold=0, queue_size=1 → 跳 0(任何 queue_size>0 都跳,只保留 1 帧)
     assert compute_skip_count(1, 0) == 0
-    # threshold=0, queue_size=5 → 跳 4
-    assert compute_skip_count(5, 0) == 4
+    # threshold=0, queue_size=5 → 跳 0(keep_recent=25>5)
+    assert compute_skip_count(5, 0) == 0
+    # threshold=0, queue_size=100 → 跳 75(留 25)
+    assert compute_skip_count(100, 0) == 75
 
 
 def test_compute_skip_count_empty_queue():
@@ -238,19 +241,35 @@ def test_compute_skip_count_empty_queue():
 
 
 def test_compute_skip_count_total_consistency():
-    """跳帧数 + 保留 1 帧 = queue_size(可证伪)"""
+    """跳帧数 + 保留 = queue_size(可证伪)"""
+    # keep_recent=25 默认
     for q, t in [(10, 5), (20, 10), (100, 50), (51, 50), (1, 0)]:
         if q > t:
-            assert compute_skip_count(q, t) == q - 1, f"q={q} t={t}"
+            keep = min(25, q)
+            assert compute_skip_count(q, t) == q - keep, f"q={q} t={t}"
         else:
             assert compute_skip_count(q, t) == 0, f"q={q} t={t}"
 
 
 def test_compute_skip_count_idempotent_at_maxsize():
-    """极端情况:阈值=0 时,任何非空队列都跳完只留 1 帧"""
-    for q in [1, 2, 10, 100]:
-        # threshold=0 → 任何 queue_size>0 都跳
-        # q=1 → 跳 0(因为 1-1=0,只留 1 帧就是这 1 帧)
-        # q=2 → 跳 1
-        expected = q - 1
-        assert compute_skip_count(q, 0) == expected, f"q={q}"
+    """极端情况:阈值=0 时,跳到只留 25 帧(keep_recent)"""
+    # threshold=0, queue_size=30 → 跳 5(留 25)
+    assert compute_skip_count(30, 0) == 5
+    # threshold=0, queue_size=25 → 跳 0(已等于 keep_recent)
+    assert compute_skip_count(25, 0) == 0
+    # threshold=0, queue_size=24 → 跳 0(queue_size < keep_recent)
+    assert compute_skip_count(24, 0) == 0
+
+
+def test_compute_skip_count_custom_keep_recent():
+    """可自定义 keep_recent(测试用)"""
+    # keep_recent=5: queue_size=100, threshold=50 → 跳 95
+    assert compute_skip_count(100, 50, keep_recent=5) == 95
+    # keep_recent=1: 行为等同原版(仅留 1 帧)
+    assert compute_skip_count(100, 50, keep_recent=1) == 99
+
+
+def test_compute_skip_count_keep_at_least_one():
+    """保证至少保留 1 帧(防止 keep_recent=0 时跳过全部)"""
+    # keep_recent=0 时: 兜底保留 1 帧,跳 queue_size-1 帧
+    assert compute_skip_count(100, 50, keep_recent=0) == 99
