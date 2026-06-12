@@ -165,6 +165,14 @@ class CamPlusEngine(BaseSpeakerEngine):
         HIGH_THRESHOLD = 0.50     # 边缘区域 (相似度 > 50%)
         MIN_SAMPLES_FOR_EDGE = 2  # 降低边缘匹配样本要求
 
+        # Bug-04: 新创建的 Spk 在 grace period 内(刚创建,样本数 < 3),
+        # 匹配阈值小幅放宽 0.05,避免空库阶段同一说话人因 TTS 失真/短段变异
+        # 被错分成多个 Spk。已积累足够样本后,恢复正常阈值(避免误合并)
+        GRACE_PERIOD_SAMPLES = 3
+        GRACE_THRESHOLD_BOOST = 0.05
+        import time as _time
+        current_ts = _time.time()
+
         # 实时流：用滑动窗口平滑（抖动场景）
         # 文件上传：直接用当前 embedding（避免 buffer 跨文件污染）
         if use_buffer:
@@ -196,6 +204,14 @@ class CamPlusEngine(BaseSpeakerEngine):
             # 对于不可靠样本，使用更宽松的阈值（倾向于匹配已有说话人）
             low_thresh = LOW_THRESHOLD if is_reliable else LOW_THRESHOLD + 0.10
             high_thresh = HIGH_THRESHOLD if is_reliable else HIGH_THRESHOLD + 0.10
+
+            # Bug-04: 若最佳候选是新建 Spk(样本 < 3),进一步放宽 high 阈值
+            # 给新声纹"软启动"窗口,让后续短段/失真样本能合并进来
+            if best_count < GRACE_PERIOD_SAMPLES:
+                high_thresh += GRACE_THRESHOLD_BOOST
+                logger.debug(
+                    f"[GRACE] {best_id} samples={best_count}, high_thresh 放宽到 {high_thresh:.2f}"
+                )
             
             logger.debug(f"[MATCH] Dist={best_dist:.4f}, Best={best_id}, Count={best_count}, Reliable={is_reliable}")
             

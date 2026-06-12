@@ -25,6 +25,7 @@ from app.api.websocket import (
     should_emit_segment,
     next_state,
     compute_skip_count,
+    _strip_filler_words,
 )
 
 
@@ -273,3 +274,39 @@ def test_compute_skip_count_keep_at_least_one():
     """保证至少保留 1 帧(防止 keep_recent=0 时跳过全部)"""
     # keep_recent=0 时: 兜底保留 1 帧,跳 queue_size-1 帧
     assert compute_skip_count(100, 50, keep_recent=0) == 99
+
+
+# ========== _strip_filler_words (Bug-12) ==========
+
+def test_strip_filler_basic_chinese():
+    """中文典型填充词:嗯,这个,呃 等独立位置应被删"""
+    # 中间"呃," 删除
+    assert _strip_filler_words("我们今天讨论一下,呃,语音识别") == "我们今天讨论一下,语音识别"
+
+
+def test_strip_filler_preserves_normal_usage():
+    """正常用法不被误删"""
+    assert _strip_filler_words("今天天气不错") == "今天天气不错"
+    assert _strip_filler_words("这个方案很好") == "这个方案很好"  # '这个' 后跟名词不删
+    assert _strip_filler_words("那个东西呢") == "那个东西呢"      # '那个' 后跟名词不删
+
+
+def test_strip_filler_preserves_punctuation():
+    """保留句末标点"""
+    assert _strip_filler_words("再见,拜拜。") == "再见,拜拜。"
+
+
+def test_strip_filler_empty_input():
+    assert _strip_filler_words("") == ""
+
+
+def test_strip_filler_only_filler():
+    """全部是填充词 + 标点"""
+    # 全是填充,删完应为空
+    assert _strip_filler_words("嗯, 啊, 呃") == ""
+
+
+def test_strip_filler_collapses_punctuation():
+    """删除后产生的连续标点应被压缩"""
+    # 删掉",呃," 后留 ",,",应压成 ","
+    assert _strip_filler_words("abc,呃,def") == "abc,def"

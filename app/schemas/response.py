@@ -1,6 +1,6 @@
 """响应数据模型"""
 from typing import Optional, Dict, List
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class SegmentResult(BaseModel):
@@ -77,13 +77,29 @@ class SpeakerListResponse(BaseModel):
 class SpeakerUpdateRequest(BaseModel):
     """说话人更新请求"""
     # 防日志注入 + 控制字符: 只允许可打印字符 + 空格
+    # Bug-11: 增加 SQL 关键字拒绝,防止破坏性 SQL 注入 payload 通过 schema
     name: str = Field(
         ...,
         min_length=1,
         max_length=100,
         pattern=r"^[\x20-\x7E一-鿿　-〿＀-￯]+$",
-        description="说话人名称(1-100 字符,只允许可打印 ASCII / 中文 / 全角标点,过滤控制字符)",
+        description=(
+            "说话人名称(1-100 字符,只允许可打印 ASCII / 中文 / 全角标点,过滤控制字符; "
+            "拒绝包含 SQL 关键字的名称,如 DROP/DELETE/SELECT/INSERT/UPDATE/UNION 等)"
+        ),
     )
+
+    @field_validator("name")
+    @classmethod
+    def _reject_sql_keywords(cls, v: str) -> str:
+        # Bug-11: 拒绝明显是 SQL 注入的字符串(ORM 自身已安全,这里是产品级防御)
+        upper = v.upper()
+        for kw in ("DROP", "DELETE", "TRUNCATE", "INSERT", "UPDATE", "UNION", "--", "/*"):
+            if kw in upper:
+                raise ValueError(
+                    f"名称包含禁止关键字 {kw!r},请改用其他名称"
+                )
+        return v
 
 
 class SpeakerDeleteResponse(BaseModel):

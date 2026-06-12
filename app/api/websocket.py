@@ -15,6 +15,20 @@ from engine.speaker.speaker_factory import get_speaker_engine
 
 logger = logging.getLogger("Matrix_Core")
 
+# Bug-12: 实时字幕里的填充词/语气词,提升可读性
+# 规则: 这些词如果独立出现(前后是标点/空格/字符串边界)就删掉
+# 避免误伤"这个方案"等正常使用 — 只删独立位置
+_FILLER_PATTERNS = [
+    # 嗯/呃/啊 等单字语气词(独立位置: 字符串边界 或 前后是标点/空格)
+    r"(?:^|(?<=[,，。、\s]))[嗯呃啊唉哦哈嘿哟]{1,2}(?=[,，。、\s]|$)",
+    # 独立 "这个" 填充(后跟标点/空格/结束)
+    r"(?:^|(?<=[,，。、\s]))这个(?=[,，。、\s]|$)",
+    # 独立 "那个" 填充
+    r"(?:^|(?<=[,，。、\s]))那个(?=[,，。、\s]|$)",
+    # "就是说/讲讲"
+    r"(?:^|(?<=[,，。、\s]))就是[说讲]?下?(?=[,，。、\s]|$)",
+]
+
 router = APIRouter()
 
 asr_engine = None
@@ -111,6 +125,28 @@ def next_state(state: int, is_speech: bool) -> int:
     if state == STATE_SILENCE and is_speech:
         return STATE_SPEECH
     return state
+
+
+def _strip_filler_words(text: str) -> str:
+    """Bug-12: 删除独立位置的填充词/语气词,提升实时字幕可读性。
+
+    只删除独立位置的填充词(前后是标点/空格/字符串边界),避免误伤"这个方案"等正常使用。
+    例: "嗯,我们今天讨论一下,呃,语音识别" → "我们今天讨论一下,语音识别"
+    保留句末句号/问号/感叹号,只清掉由删除造成的孤立尾标(逗号)。
+    """
+    if not text:
+        return text
+    out = text
+    for pattern in _FILLER_PATTERNS:
+        out = re.sub(pattern, "", out)
+    # 连续逗号压成单个
+    out = re.sub(r"[,，]{2,}", ",", out)
+    # 多个空格压成单个
+    out = re.sub(r"[ \t]+", " ", out)
+    # 清理因删除导致的孤立前导/后置逗号(保留句号/问号/感叹号)
+    out = re.sub(r"^\s*[,，]\s*", "", out)
+    out = re.sub(r"[,，]\s*$", "", out)
+    return out.strip()
 
 
 def compute_skip_count(queue_size: int, threshold: int, keep_recent: int = 25) -> int:
@@ -354,6 +390,11 @@ async def _process_speech_segment(
 
     # 处理识别结果
     if full_text and full_text.strip():
+        # Bug-12: 过滤常见填充词/语气词,避免实时字幕被噪音淹没
+        full_text = _strip_filler_words(full_text)
+        if not full_text or not full_text.strip():
+            return  # 过滤后空,不发
+
         # 调用 compare_and_identify，传递音频时长
         spk_id = get_speaker_engine().compare_and_identify(embedding, ctx.client_id, audio_duration)
         incr_text = ctx.get_incremental_text(full_text)
@@ -374,25 +415,42 @@ async def _process_speech_segment(
             except Exception as e:
                 logger.debug(f"[PROCESSOR] 发送结果失败: {e}")
 
-        # 自动存档到 SQLite（仅当会话已被命名且启用了历史）
-        session_id = getattr(websocket, "_session_id", None)
-        if session_id and config.storage.history_enabled and full_text:
-            try:
-                repo = websocket.app.state.transcript_repo
-                segs = repo.list_segments(session_id)
-                import json as _json
-                words_json = _json.dumps(seg_words, ensure_ascii=False) if seg_words else None
-                repo.insert_segment(
-                    session_id,
-                    segment_index=len(segs),
-                    text=full_text,
-                    start_time=0.0,  # v0.2 MVP: 不记精确时间
-                    end_time=audio_duration,
-                    speaker_id=spk_id,
-                    words_json=words_json,
-                )
-            except Exception as e:
-                logger.warning(f"[WS] 存档失败: {e}")
+        # Bug-10: 自动存档 — 有 segment 累积就存档,不再要求 rename 才创建
+        if config.storage.history_enabled and full_text:
+            # 懒创建 session(用 client_id + 时间为默认 title)
+            session_id = getattr(websocket, "_session_id", None)
+            if session_id is None:
+                try:
+                    repo = websocket.app.state.transcript_repo
+                    default_title = f"{ctx.client_id}-{time.strftime('%H%M%S')}"
+                    session_id = repo.create_session(
+                        source="websocket",
+                        title=default_title,
+                        client_id=ctx.client_id,
+                    )
+                    websocket._session_id = session_id
+                    logger.info(f"[WS] {client_id} 自动创建会话: {session_id} ({default_title})")
+                except Exception as e:
+                    logger.warning(f"[WS] 创建 session 失败: {e}")
+                    session_id = None
+
+            if session_id:
+                try:
+                    repo = websocket.app.state.transcript_repo
+                    segs = repo.list_segments(session_id)
+                    import json as _json
+                    words_json = _json.dumps(seg_words, ensure_ascii=False) if seg_words else None
+                    repo.insert_segment(
+                        session_id,
+                        segment_index=len(segs),
+                        text=full_text,
+                        start_time=0.0,  # v0.2 MVP: 不记精确时间
+                        end_time=audio_duration,
+                        speaker_id=spk_id,
+                        words_json=words_json,
+                    )
+                except Exception as e:
+                    logger.warning(f"[WS] 存档失败: {e}")
 
 
 @router.websocket("/ws/v1/stream/{client_id}")
