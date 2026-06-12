@@ -17,6 +17,9 @@ class TranscribedSegment:
     text: str
     speaker_id: Optional[str] = None
     confidence: float = 1.0
+    # 字级时间戳(Roadmap #1.2): words: [{text, start, end}]
+    # ASR_WORD_TIMESTAMPS=true 时填充
+    words: Optional[list] = None
 
 
 @dataclass
@@ -76,11 +79,14 @@ async def transcribe_file(
 
     # speaker_id 留空: 说话人识别是另一回事(基于 embedding 在 ChromaDB 里搜最近邻),
     # 由调用方(上传 API / seed 脚本)用 spk_engine.identify() 自行识别。
+    # 提取字级时间戳(Bug-66: 之前 upload 长路径 seg_words 未定义)
+    seg_words = asr_result.get("words") if isinstance(asr_result, dict) else None
     seg = TranscribedSegment(
         start_time=0.0,
         end_time=duration,
         text=text,
         speaker_id=None,
+        words=seg_words,
     )
     return TranscriptionResult(
         session_id=session_id,

@@ -280,6 +280,43 @@ class TranscriptRepository:
         cleaned = re.sub(r"[^\w一-鿿]+", " ", q, flags=re.UNICODE)
         return cleaned.strip()
 
+    @staticmethod
+    def _build_snippet(text: str, q: str, ctx_chars: int = 8) -> str:
+        """造 snippet: 找 q 位置 + 前后 ctx_chars 字符 + [match]X[/match]
+
+        q 含特殊字符或 trigram 跨边界时,先尝试完整 q,失败再退化到 q 前缀。
+        找不到任何位置时,返回前 32 字符不包 [match] 标记。
+        """
+        if not text:
+            return ""
+        match_str = q
+        pos = text.find(match_str)
+        if pos < 0:
+            for sub_len in (min(2, len(q)), 1):
+                if sub_len == 0:
+                    break
+                sub = q[:sub_len]
+                p = text.find(sub)
+                if p >= 0:
+                    pos = p
+                    match_str = sub
+                    break
+        if pos < 0:
+            return text[:32] + ("..." if len(text) > 32 else "")
+        start = max(0, pos - ctx_chars)
+        end = min(len(text), pos + len(match_str) + ctx_chars)
+        prefix = ("..." if start > 0 else "")
+        suffix = ("..." if end < len(text) else "")
+        window = text[start:end]
+        mp = pos - start
+        return (
+            prefix
+            + window[:mp]
+            + "[match]" + match_str + "[/match]"
+            + window[mp + len(match_str):]
+            + suffix
+        )
+
     def search_segments(
         self,
         q: str,
@@ -335,42 +372,9 @@ class TranscriptRepository:
                 sql += " ORDER BY rank LIMIT ?"
                 params.append(limit)
                 fts_results = [dict(r) for r in conn.execute(sql, params).fetchall()]
-                # 自己造 snippet: 找 q (或 q 的子串) 位置,前后 8 字符包 [match]X[/match]
+                # 用 helper 造 snippet(支持 FTS5 命中 + LIKE 兜底两种场景)
                 for hit in fts_results:
-                    text = hit["text"] or ""
-                    # 先找完整 q,失败再尝试 q 的子串(trigram 跨边界场景)
-                    match_str = q
-                    pos = text.find(match_str)
-                    if pos < 0:
-                        # 降级:取 q 的前 2 字符(对单字 / 2 字 substring 兜底)
-                        for sub_len in (min(2, len(q)), 1):
-                            if sub_len == 0:
-                                break
-                            sub = q[:sub_len]
-                            p = text.find(sub)
-                            if p >= 0:
-                                pos = p
-                                match_str = sub
-                                break
-                    if pos < 0:
-                        # 实在找不到(罕见):取前 32 字符不包 match 标记
-                        snippet_text = text[:32] + ("..." if len(text) > 32 else "")
-                    else:
-                        start = max(0, pos - 8)
-                        end = min(len(text), pos + len(match_str) + 8)
-                        prefix = ("..." if start > 0 else "")
-                        suffix = ("..." if end < len(text) else "")
-                        # 把 text[start:end] 切成 [prefix] + [前] + [match] + [match_str] + [/match] + [后] + [suffix]
-                        window = text[start:end]
-                        mp = pos - start  # match_str 在 window 内的位置
-                        snippet_text = (
-                            prefix
-                            + window[:mp]
-                            + "[match]" + match_str + "[/match]"
-                            + window[mp + len(match_str):]
-                            + suffix
-                        )
-                    hit["snippet"] = snippet_text
+                    hit["snippet"] = self._build_snippet(hit["text"] or "", q)
 
         # 2. LIKE 兜底路径(对 FTS5 未命中场景: 2 字 / 特殊字符)
         like_q = q.strip()
@@ -410,6 +414,9 @@ class TranscriptRepository:
             sid = hit["segment_id"]
             if sid not in seen:
                 seen.add(sid)
+                # LIKE 路径的 snippet 是 raw text,补 [match] 标记
+                if not hit.get("snippet") or hit["snippet"] == hit.get("text"):
+                    hit["snippet"] = self._build_snippet(hit["text"] or "", like_q or q)
                 merged.append(hit)
         total = len(merged)
         return total, merged[:limit]

@@ -248,9 +248,13 @@ async def upload_audio(
                         seg0 = transcribe_result.segments[0]
                         text = seg0.text
                         spk_id = seg0.speaker_id
+                        # Bug-66 修复: seg_words 之前没在 enable_diarization 路径定义
+                        # 现在从 transcribe_result.segments[0].words 取
+                        seg_words = seg0.words
                     else:
                         text = ""
                         spk_id = None
+                        seg_words = None
                 else:
                     # 简单 ASR 路径(不调声纹引擎,保持原行为)
                     asr_result = await asr_engine.run_asr(audio, use_preprocessing=True)
