@@ -52,8 +52,90 @@
         通过环境变量 <code>STORAGE_HISTORY_ENABLED</code> 配置（重启后生效）。
       </p>
     </div>
+
+    <div class="card">
+      <h2>账户</h2>
+      <p>当前: <strong id="current-user">加载中...</strong></p>
+      <div style="display:flex; gap:8px; margin-top:0.5rem;">
+        <button class="btn" id="btn-change-pwd">修改密码</button>
+        <button class="btn" id="btn-logout" style="background:#FF4757; color:#fff; border:none; padding:8px 16px; border-radius:4px; cursor:pointer;">退出登录</button>
+      </div>
+    </div>
   </div>
+
+  <!-- 修改密码 modal -->
+  <div id="pwdModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); place-items:center; z-index:200; padding:16px;">
+    <div style="background:#1a1a1a; border:1px solid #4ECDC4; border-radius:8px; padding:32px 28px; max-width:380px; width:100%; margin:auto;">
+      <h2 style="font-family:Georgia,serif; font-size:22px; margin-bottom:6px; color:#4ECDC4;">修改密码</h2>
+      <div style="margin-bottom:12px; margin-top:18px;">
+        <label style="display:block; font-family:monospace; font-size:10px; color:#888; text-transform:uppercase; margin-bottom:4px">当前密码</label>
+        <input id="modal-old-pwd" type="password" style="width:100%; padding:10px 12px; background:#0a0a0a; border:1px solid #333; border-radius:4px; color:#fff; font-family:monospace; box-sizing:border-box;" />
+      </div>
+      <div style="margin-bottom:12px;">
+        <label style="display:block; font-family:monospace; font-size:10px; color:#888; text-transform:uppercase; margin-bottom:4px">新密码(≥6 字符)</label>
+        <input id="modal-new-pwd" type="password" style="width:100%; padding:10px 12px; background:#0a0a0a; border:1px solid #333; border-radius:4px; color:#fff; font-family:monospace; box-sizing:border-box;" />
+      </div>
+      <div id="modal-pwd-err" style="color:#FF4757; font-size:11px; margin:8px 0; min-height:14px;"></div>
+      <div style="display:flex; gap:8px;">
+        <button class="btn" id="modal-pwd-cancel" style="background:transparent; color:#888; border:1px solid #333; padding:10px 16px; border-radius:4px; cursor:pointer; flex:1">取消</button>
+        <button class="btn" id="modal-pwd-submit" style="background:#4ECDC4; color:#000; border:none; padding:10px 16px; border-radius:4px; cursor:pointer; font-weight:500; flex:1">确认</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/web/js/auth.js"></script>
   <script src="/web/js/api.js"></script>
   <script src="/web/js/settings.js"></script>
+  <script>MatrixAuth.requireAuth();</script>
+  <script>
+    // 显示当前用户
+    (function () {
+      const u = MatrixAuth.getUser();
+      document.getElementById("current-user").textContent = u ? u.username : "未知";
+    })();
+    // 退出登录
+    document.getElementById("btn-logout").addEventListener("click", async () => {
+      if (!confirm("确认退出登录?")) return;
+      try { await Matrix.api.post("auth/logout", {}); } catch {}
+      MatrixAuth.clearToken();
+      location.href = "/web/login.html";
+    });
+    // 修改密码 modal
+    const pwdModal = document.getElementById("pwdModal");
+    const pwdModalErr = document.getElementById("modal-pwd-err");
+    document.getElementById("btn-change-pwd").addEventListener("click", () => {
+      pwdModal.style.display = "grid";
+      pwdModalErr.textContent = "";
+      document.getElementById("modal-old-pwd").value = "";
+      document.getElementById("modal-new-pwd").value = "";
+      document.getElementById("modal-old-pwd").focus();
+    });
+    document.getElementById("modal-pwd-cancel").addEventListener("click", () => {
+      pwdModal.style.display = "none";
+    });
+    document.getElementById("modal-pwd-submit").addEventListener("click", async () => {
+      const oldP = document.getElementById("modal-old-pwd").value;
+      const newP = document.getElementById("modal-new-pwd").value;
+      if (!oldP || newP.length < 6) {
+        pwdModalErr.textContent = "新密码 ≥ 6 字符";
+        return;
+      }
+      const btn = document.getElementById("modal-pwd-submit");
+      btn.disabled = true; btn.textContent = "修改中...";
+      try {
+        const data = await Matrix.api.post("auth/change-password", { old_password: oldP, new_password: newP });
+        if (data.token) {
+          localStorage.setItem("matrix_token", data.token);
+          localStorage.setItem("matrix_user", JSON.stringify(data.user));
+        }
+        pwdModal.style.display = "none";
+        alert("密码已修改 ✓");
+      } catch (e) {
+        pwdModalErr.textContent = e.message || "修改失败";
+      } finally {
+        btn.disabled = false; btn.textContent = "确认";
+      }
+    });
+  </script>
 </body>
 </html>

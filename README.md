@@ -93,8 +93,23 @@ open web/index.html               # macOS
 - 🤖 **可选 LLM** — 摘要 / 行动项 / 会议纪要；默认关，启用时支持 Ollama / 局域网 vLLM / OpenAI 兼容 endpoint
 - 🛡️ **离线兜底** — LLM 未配时自动用 TextRank 提取本地摘要,不出错也不空白
 - 📚 **历史会话** — 所有转写本地存库（SQLite），随时回看
-- 🔐 **安全默认** — DNS rebinding 防御 + 仅本机改 LLM 配置 + prompt 注入隔离
+- 🔐 **JWT 鉴权** — 默认 `admin/admin`, 首次登录强制改密; 全部 `/v1/*` 需 Bearer token (roadmap 安全项)
+- 🛡️ **安全默认** — DNS rebinding 防御 + 仅本机改 LLM 配置 + prompt 注入隔离
 - 📱 **移动端响应式** — < 768px 自动改底部 tab bar,手机/平板可用(roadmap #1.5)
+
+## 🔐 鉴权 (Roadmap 安全项)
+
+- 首次启动自动建默认账户 `admin/admin`
+- 登录后**强制弹窗**改密,改完才能用其他功能
+- 全部 `/v1/*` 端点需 `Authorization: Bearer <token>` header
+- Token 默认 24h 有效(JWT HS256, 存 `localStorage`)
+
+**生产部署前必检**:
+- 设 `JWT_SECRET` 环境变量(否则 token 跨重启失效)
+- 用 HTTPS(JWT 明文有中间人风险)
+- 改 `ALLOWED_ORIGINS` 为具体域名(默认 `*`)
+
+详见 **[docs/SECURITY.md](docs/SECURITY.md)**。
 
 ## 📚 详细文档
 

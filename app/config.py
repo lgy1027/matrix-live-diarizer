@@ -253,6 +253,31 @@ class HistoryConfig:
 
 
 @dataclass
+class AuthConfig:
+    """JWT 鉴权配置(Roadmap 安全项)
+
+    jwt_secret: HMAC-SHA256 签名密钥
+        ⚠️ 生产部署务必设 JWT_SECRET 环境变量!
+        缺失时启动会警告(用随机密钥,token 跨重启失效,但本地 OK)
+    token_ttl_hours: token 有效期(小时);过期需重新登录
+    skip_default_admin: True 时不自动创建 admin/admin(留空让用户自建)
+        默认 False (首次启动自动建)
+    """
+    jwt_secret: Optional[str] = None
+    token_ttl_hours: int = 24
+    skip_default_admin: bool = False
+
+    @classmethod
+    def from_env(cls) -> "AuthConfig":
+        import os as _os
+        return cls(
+            jwt_secret=get_env_str("JWT_SECRET", "") or None,
+            token_ttl_hours=get_env_int("TOKEN_TTL_HOURS", 24),
+            skip_default_admin=get_env_bool("SKIP_DEFAULT_ADMIN", False),
+        )
+
+
+@dataclass
 class AppConfig:
     """应用配置"""
     server: ServerConfig = field(default_factory=ServerConfig)
@@ -263,6 +288,7 @@ class AppConfig:
     llm: LLMConfig = field(default_factory=LLMConfig)
     history: HistoryConfig = field(default_factory=HistoryConfig)
     cors: CORSConfig = field(default_factory=CORSConfig)
+    auth: AuthConfig = field(default_factory=AuthConfig)
 
     @classmethod
     def load(cls) -> "AppConfig":
@@ -275,6 +301,7 @@ class AppConfig:
             llm=LLMConfig.from_env(),
             history=HistoryConfig.from_env(),
             cors=CORSConfig.from_env(),
+            auth=AuthConfig.from_env(),
         )
 
 

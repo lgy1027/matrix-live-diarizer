@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>登录 - Matrix Live Diarizer</title>
+  <link rel="icon" type="image/x-icon" href="/web/favicon.ico">
+  <link rel="stylesheet" href="/web/css/common.css">
+  <style>
+    body {
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background: var(--ink);
+      padding: 24px 16px;
+    }
+    .login-card {
+      width: 100%;
+      max-width: 380px;
+      background: var(--ink-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 36px 32px 28px;
+      box-shadow: 0 20px 60px rgba(0,0,0,.5);
+    }
+    .login-card h1 {
+      font-family: var(--serif);
+      font-variation-settings: 'SOFT' 50, 'WONK' 1;
+      font-size: 32px;
+      font-weight: 400;
+      letter-spacing: -.02em;
+      margin-bottom: 4px;
+    }
+    .login-card h1 em {
+      color: var(--amber);
+      font-style: italic;
+    }
+    .login-card .sub {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-3);
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      margin-bottom: 28px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--border);
+    }
+    .field { margin-bottom: 16px; }
+    .field label {
+      display: block;
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--text-3);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+    .field input {
+      width: 100%;
+      padding: 12px 14px;
+      background: var(--ink-3);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 14px;
+      transition: border-color .15s;
+    }
+    .field input:focus {
+      border-color: var(--amber);
+      outline: none;
+    }
+    .submit-btn {
+      width: 100%;
+      padding: 12px;
+      background: var(--amber);
+      color: var(--ink);
+      font-family: var(--sans);
+      font-size: 14px;
+      font-weight: 500;
+      letter-spacing: .04em;
+      border-radius: 4px;
+      cursor: pointer;
+      margin-top: 8px;
+      transition: opacity .15s, transform .1s;
+    }
+    .submit-btn:hover { opacity: .88; }
+    .submit-btn:active { transform: scale(.98); }
+    .submit-btn:disabled { opacity: .5; cursor: not-allowed; }
+    .err {
+      margin-top: 12px;
+      padding: 10px 12px;
+      background: rgba(255, 71, 87, .12);
+      border: 1px solid rgba(255, 71, 87, .4);
+      border-radius: 4px;
+      color: var(--red);
+      font-family: var(--mono);
+      font-size: 12px;
+      display: none;
+    }
+    .err.show { display: block; }
+    .hint {
+      margin-top: 18px;
+      padding-top: 14px;
+      border-top: 1px solid var(--border-soft);
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--text-3);
+      letter-spacing: .04em;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <form class="login-card" id="loginForm" autocomplete="on">
+    <h1>Matrix <em>·</em></h1>
+    <div class="sub">Live Diarizer · 登录</div>
+
+    <div class="field">
+      <label for="username">用户名</label>
+      <input id="username" name="username" type="text" autocomplete="username"
+             required autofocus spellcheck="false" />
+    </div>
+    <div class="field">
+      <label for="password">密码</label>
+      <input id="password" name="password" type="password" autocomplete="current-password"
+             required />
+    </div>
+
+    <button class="submit-btn" type="submit" id="submitBtn">登 录</button>
+    <div class="err" id="errBox"></div>
+
+    <div class="hint">
+      默认账号: <strong style="color:var(--text-2)">admin</strong>
+      &nbsp;/&nbsp; 默认密码: <strong style="color:var(--text-2)">admin</strong>
+      <br><span style="color:var(--text-3)">首次登录后系统会强制你修改密码</span>
+    </div>
+  </form>
+
+  <script>
+    const form = document.getElementById("loginForm");
+    const errBox = document.getElementById("errBox");
+    const submitBtn = document.getElementById("submitBtn");
+
+    function showError(msg) {
+      errBox.textContent = msg;
+      errBox.classList.add("show");
+    }
+
+    // 如果已登录,直接跳走
+    if (localStorage.getItem("matrix_token")) {
+      location.href = "/web/index.html";
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      errBox.classList.remove("show");
+      submitBtn.disabled = true;
+      submitBtn.textContent = "登录中...";
+      const username = document.getElementById("username").value.trim();
+      const password = document.getElementById("password").value;
+      try {
+        const r = await fetch("/v1/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username, password }),
+        });
+        const data = await r.json();
+        if (!r.ok) {
+          showError(data.detail || "登录失败");
+          submitBtn.disabled = false;
+          submitBtn.textContent = "登 录";
+          return;
+        }
+        // 存 token + user
+        localStorage.setItem("matrix_token", data.token);
+        localStorage.setItem("matrix_user", JSON.stringify(data.user));
+        // 跳到首页(index.html 会检查 must_change_password 弹窗)
+        location.href = "/web/index.html";
+      } catch (err) {
+        showError("网络错误: " + err.message);
+        submitBtn.disabled = false;
+        submitBtn.textContent = "登 录";
+      }
+    });
+  </script>
+</body>
+</html>

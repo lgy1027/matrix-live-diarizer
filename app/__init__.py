@@ -13,6 +13,7 @@ from app.api import api_router
 from app.api.websocket import init_engines as init_ws_engines
 from app.api.upload import init_engines as init_upload_engines
 from app.middleware.rate_limit import RateLimitMiddleware
+from app.middleware.auth import AuthMiddleware
 
 tf_logging.set_verbosity_error()
 
@@ -48,7 +49,11 @@ def create_app() -> FastAPI:
         allow_methods=list(config.cors.allow_methods),
         allow_headers=list(config.cors.allow_headers),
     )
-    
+
+    # 鉴权中间件 (Roadmap 安全项)
+    # 全部 /v1/* 需 Bearer token, 白名单路径除外
+    app.add_middleware(AuthMiddleware)
+
     _init_engines(app)
     app.include_router(api_router)
 
@@ -90,6 +95,10 @@ def _init_engines(app: FastAPI):
     app.state.db = db
     app.state.transcript_repo = transcript_repo
     app.state.settings_repo = settings_repo
+
+    # 鉴权服务 (Roadmap 安全项)
+    from app.services.auth import AuthService
+    app.state.auth_service = AuthService(db)
 
     current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     init_ws_engines(asr_engine, spk_engine, inference_lock)

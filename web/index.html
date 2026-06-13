@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600&family=Outfit:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" />
+<script src="/web/js/auth.js"></script>
 <script src="/web/js/api.js"></script>
 <script src="/web/js/i18n.js"></script>
 <script src="/web/js/util.js"></script>
@@ -1990,6 +1991,82 @@ async function bulkMergeSelected() {
     toast(t("view.voice.mergeFail", e.message || e), "error");
   }
 }
+</script>
+
+<!-- 鉴权检查 + 首次登录强制改密 modal (Roadmap 安全项) -->
+<script>
+  // 启动鉴权: 无 token 跳 login
+  const _user = MatrixAuth.requireAuth();
+  // 首次登录 (must_change_password=1) 弹强制改密 modal
+  if (_user && _user.must_change_password) {
+    document.addEventListener("DOMContentLoaded", () => {
+      const html = `
+        <div id="pwdChangeModal" style="position:fixed;inset:0;background:rgba(0,0,0,.7);display:grid;place-items:center;z-index:200;padding:16px">
+          <div style="background:var(--ink-2);border:1px solid var(--amber);border-radius:8px;padding:32px 28px;max-width:380px;width:100%">
+            <h2 style="font-family:var(--serif);font-size:22px;margin-bottom:6px;color:var(--amber)">⚠ 修改默认密码</h2>
+            <p style="font-family:var(--mono);font-size:11px;color:var(--text-2);margin-bottom:18px;line-height:1.6">
+              检测到你正在使用默认密码 <strong style="color:var(--text)">admin</strong>。为了安全,请立即修改。
+            </p>
+            <div style="margin-bottom:12px">
+              <label style="display:block;font-family:var(--mono);font-size:10px;color:var(--text-3);text-transform:uppercase;margin-bottom:4px">当前密码</label>
+              <input id="oldPwd" type="password" value="admin" style="width:100%;padding:10px 12px;background:var(--ink-3);border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:var(--mono)" />
+            </div>
+            <div style="margin-bottom:12px">
+              <label style="display:block;font-family:var(--mono);font-size:10px;color:var(--text-3);text-transform:uppercase;margin-bottom:4px">新密码(≥6 字符)</label>
+              <input id="newPwd" type="password" style="width:100%;padding:10px 12px;background:var(--ink-3);border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:var(--mono)" />
+            </div>
+            <div id="pwdErr" style="color:var(--red);font-size:11px;margin:8px 0;display:none"></div>
+            <button id="pwdSubmit" style="width:100%;padding:11px;background:var(--amber);color:var(--ink);font-weight:500;border-radius:4px;cursor:pointer">确认修改</button>
+            <p style="font-family:var(--mono);font-size:10px;color:var(--text-3);margin-top:12px;text-align:center">不修改无法使用其他功能</p>
+          </div>
+        </div>
+      `;
+      document.body.insertAdjacentHTML("beforeend", html);
+      const errEl = document.getElementById("pwdErr");
+      const submitBtn = document.getElementById("pwdSubmit");
+      const oldPwd = document.getElementById("oldPwd");
+      const newPwd = document.getElementById("newPwd");
+      const modal = document.getElementById("pwdChangeModal");
+      // 不允许点空白关掉(强制改)
+      modal.addEventListener("click", (e) => { if (e.target === modal) e.stopPropagation(); });
+      submitBtn.addEventListener("click", async () => {
+        if (!oldPwd.value || newPwd.value.length < 6) {
+          errEl.textContent = "请输入完整(新密码 ≥ 6 字符)";
+          errEl.style.display = "block";
+          return;
+        }
+        submitBtn.disabled = true;
+        submitBtn.textContent = "修改中...";
+        try {
+          const data = await Matrix.api.post("auth/change-password", {
+            old_password: oldPwd.value,
+            new_password: newPwd.value,
+          });
+          // 改密成功: 更新 token + user
+          if (data.token) {
+            localStorage.setItem("matrix_token", data.token);
+            localStorage.setItem("matrix_user", JSON.stringify(data.user));
+          }
+          modal.remove();
+          // 提示一下
+          const t = document.createElement("div");
+          t.textContent = "密码已修改 ✓";
+          Object.assign(t.style, {
+            position: "fixed", top: "16px", left: "50%", transform: "translateX(-50%)",
+            padding: "10px 18px", background: "var(--green)", color: "var(--ink)",
+            borderRadius: "6px", fontFamily: "var(--mono)", fontSize: "12px", zIndex: "300",
+          });
+          document.body.appendChild(t);
+          setTimeout(() => t.remove(), 2500);
+        } catch (e) {
+          errEl.textContent = e.message || "修改失败";
+          errEl.style.display = "block";
+          submitBtn.disabled = false;
+          submitBtn.textContent = "确认修改";
+        }
+      });
+    });
+  }
 </script>
 </body>
 </html>

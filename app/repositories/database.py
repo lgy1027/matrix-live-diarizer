@@ -1,8 +1,11 @@
 """SQLite 数据库连接与 schema 初始化"""
 import os
 import sqlite3
+import logging
 from pathlib import Path
 from contextlib import contextmanager
+
+logger = logging.getLogger("Matrix_DB")
 
 
 SCHEMA_SQL = """
@@ -78,6 +81,18 @@ CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+-- 用户表 (Roadmap 安全项: admin/admin 默认账户 + 强制改密)
+CREATE TABLE IF NOT EXISTS users (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    username              TEXT UNIQUE NOT NULL,
+    password_hash         TEXT NOT NULL,                -- werkzeug pbkdf2:sha256 哈希
+    must_change_password  INTEGER DEFAULT 0,           -- 1 = 下次登录强制改密
+    is_active             INTEGER DEFAULT 1,
+    created_at            TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_login_at         TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 """
 
 
@@ -100,6 +115,9 @@ class Database:
     def init_schema(self) -> None:
         """创建表 + 索引 + FTS5 虚表 + 触发器 + 回填老数据 + 启用 WAL"""
         with self.connect() as conn:
+            # PRAGMA 必须在任何 INSERT/executescript 之前(不能在事务中)
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
             conn.executescript(SCHEMA_SQL)
             # 兼容老库:加 v0.3 新列(已存在则忽略)
             try:
@@ -108,10 +126,27 @@ class Database:
                 pass  # 重复列错误,新库已含
             # 回填老 segments 到 FTS5(对已有库,触发器不会追溯历史 insert)
             conn.executescript(FTS_BACKFILL_SQL)
-            # WAL 模式是持久化的，单独设置
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA synchronous=NORMAL")
+            # 默认 admin 账户初始化(空表时插入)
+            self._ensure_default_admin(conn)
             conn.commit()
+
+    def _ensure_default_admin(self, conn: sqlite3.Connection) -> None:
+        """确保默认 admin 账户存在
+
+        首次启动: 自动创建 admin/admin, 设 must_change_password=1
+        已存在: 跳过(不覆盖)
+        """
+        cur = conn.execute("SELECT COUNT(*) FROM users")
+        if cur.fetchone()[0] > 0:
+            return
+        # 用 werkzeug 生成 pbkdf2 哈希(项目已有依赖)
+        from werkzeug.security import generate_password_hash
+        pwd_hash = generate_password_hash("admin", method="pbkdf2:sha256", salt_length=16)
+        conn.execute(
+            "INSERT INTO users (username, password_hash, must_change_password) VALUES (?, ?, 1)",
+            ("admin", pwd_hash),
+        )
+        logger.info("[DB] 已创建默认 admin 账户(密码: admin, 首次登录需修改)")
 
     def _init_schema_on_conn(self, conn: sqlite3.Connection) -> None:
         """在已开启的连接上建表(兜底用)"""
