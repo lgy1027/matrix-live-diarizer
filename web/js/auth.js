@@ -29,13 +29,15 @@ window.MatrixAuth = {
   },
 
   /**
-   * requireAuth() — 启动时调,无 token 跳 login
+   * requireAuth() — 启动时调,无 token 跳 login (带 next 跳回原页)
    * 返 user 对象(若可解析)或 None
    */
   requireAuth() {
     const t = this.getToken();
     if (!t) {
-      location.href = "/web/login.html";
+      // Bug-84 (审核 #3): 带 next 参数跳回原页(login.html 读完会跳回)
+      const here = location.pathname + location.search;
+      location.href = "/web/login.html?next=" + encodeURIComponent(here);
       return null;
     }
     return this.getUser();
@@ -70,10 +72,16 @@ window.MatrixAuth = {
 };
 
 // 全局 fetch 拦截: 给所有 /v1/* 请求自动加 Authorization (除 /v1/auth/login 本身)
+// Bug-90 (审核 #9): 用 startsWith 严格匹配 (原 includes 太宽, 理论上 /web/malicious//v1/... 会被加 token)
 const _origFetch = window.fetch;
 window.fetch = function (url, opts = {}) {
   try {
-    if (typeof url === "string" && url.includes("/v1/") && !url.includes("/v1/auth/login") && !url.includes("/v1/auth/logout")) {
+    if (typeof url === "string" &&
+        (url.startsWith("/v1/") || url.includes("/v1/")) &&
+        !url.startsWith("/v1/auth/login") &&
+        !url.startsWith("/v1/auth/logout") &&
+        !/^https?:\/\/[^/]+\/v1\/auth\/login/.test(url) &&
+        !/^https?:\/\/[^/]+\/v1\/auth\/logout/.test(url)) {
       const t = MatrixAuth.getToken();
       if (t) {
         opts.headers = { ...(opts.headers || {}), Authorization: `Bearer ${t}` };
@@ -83,56 +91,48 @@ window.fetch = function (url, opts = {}) {
   return _origFetch.call(this, url, opts);
 };
 
-// 401 全局处理:如果 fetch 返 401,清 token 跳 login
-const _origApiGet = Matrix.api.get.bind(Matrix.api);
-Matrix.api.get = async function (path) {
-  try { return await _origApiGet(path); }
-  catch (err) {
-    if (err && /未登录|token|401/i.test(String(err.message || ""))) {
-      MatrixAuth.clearToken();
-      location.href = "/web/login.html";
+// 401 全局处理: 用 Proxy 拦截 Matrix.api 所有方法
+// (覆盖 get/post/put/del 任何未来加的方法, Bug-85 审核 #4)
+const _origApi = Matrix.api;
+Matrix.api = new Proxy(_origApi, {
+  get(target, prop) {
+    const v = target[prop];
+    if (typeof v === "function") {
+      return async function (...args) {
+        try {
+          return await v.apply(target, args);
+        } catch (err) {
+          // 401: token 失效 / 过期 / 错 — 清 token 跳 login
+          if (err && /未登录|token|已过期|无效或已过期/i.test(String(err.message || ""))) {
+            MatrixAuth.clearToken();
+            const here = location.pathname + location.search;
+            location.href = "/web/login.html?next=" + encodeURIComponent(here);
+          }
+          throw err;
+        }
+      };
     }
-    throw err;
-  }
-};
-const _origApiPost = Matrix.api.post.bind(Matrix.api);
-Matrix.api.post = async function (path, body) {
-  try { return await _origApiPost(path, body); }
-  catch (err) {
-    if (err && /未登录|token|401/i.test(String(err.message || ""))) {
-      MatrixAuth.clearToken();
-      location.href = "/web/login.html";
-    }
-    throw err;
-  }
-};
-const _origApiDel = Matrix.api.del.bind(Matrix.api);
-Matrix.api.del = async function (path) {
-  try { return await _origApiDel(path); }
-  catch (err) {
-    if (err && /未登录|token|401/i.test(String(err.message || ""))) {
-      MatrixAuth.clearToken();
-      location.href = "/web/login.html";
-    }
-    throw err;
-  }
-};
+    return v;
+  },
+});
 
 // 渲染全局账户菜单(任何页面有 #userMenu 容器就生效)
 MatrixAuth.renderUserMenu = function (containerId = "userMenu") {
   const host = document.getElementById(containerId);
   if (!host) return;
   const user = this.getUser() || {};
+  // Bug-90 (审核 #11): 用 Matrix.escape 统一(原 auth.js 重复定义 escapeHtml)
+  const esc = (Matrix && Matrix.escape) || ((s) => String(s || ""));
   // 头部 pill: ● 用户名 ▾
   host.innerHTML = `
     <button class="um-trigger" id="umTrigger" type="button">
       <span class="um-dot"></span>
-      <span class="um-name">${escapeHtml(user.username || "未知")}</span>
+      <span class="um-name">${esc(user.username || "未知")}</span>
       <span class="um-caret">▾</span>
     </button>
     <div class="um-dropdown" id="umDropdown" hidden>
       <div class="um-info">
-        <div class="um-info-name">${escapeHtml(user.username || "未知")}</div>
+        <div class="um-info-name">${esc(user.username || "未知")}</div>
         <div class="um-info-tag">已登录</div>
       </div>
       <button class="um-item" data-act="change-pwd">🔑 修改密码</button>
@@ -216,7 +216,3 @@ MatrixAuth.renderUserMenu = function (containerId = "userMenu") {
     location.href = "/web/login.html";
   });
 };
-
-function escapeHtml(s) {
-  return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}

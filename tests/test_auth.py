@@ -201,10 +201,11 @@ def test_login_unknown_user_returns_401(monkeypatch):
 
 
 def test_login_validation_short_password(monkeypatch):
-    """空密码 422 (Pydantic 校验)"""
+    """空密码返 401 (Bug-90 模糊化,不暴露 schema)"""
     client = _make_client(monkeypatch)
     r = client.post("/v1/auth/login", json={"username": "admin", "password": ""})
-    assert r.status_code == 422
+    assert r.status_code == 401
+    assert "登录信息格式错误" in r.json()["detail"]
 
 
 def test_whitelist_health_no_auth(monkeypatch):
@@ -326,3 +327,141 @@ def test_options_request_passes(monkeypatch):
     r = client.options("/v1/speakers")
     # FastAPI 默认 CORS middleware 处理 OPTIONS,可能 200 或 405 — 只要不是 401
     assert r.status_code != 401
+
+
+# ========== 审核 #1-#12 修复覆盖 ==========
+
+def test_login_rate_limit_blocks_brute_force(monkeypatch):
+    """审核 #1: /v1/auth/login 限流(防暴力破解, 5次/60s, 触发锁 60s)"""
+    client = _make_client(monkeypatch)
+    # 6 次错误登录(同 IP)
+    for i in range(6):
+        r = client.post("/v1/auth/login", json={"username": "admin", "password": f"wrong{i}"})
+        if i < 5:
+            # 前 5 次: 401 (错密码)
+            assert r.status_code == 401, f"第 {i+1} 次应 401, 实际 {r.status_code}: {r.text}"
+        else:
+            # 第 6 次: 429 (触发限流)
+            assert r.status_code == 429, f"第 6 次应触发限流 429, 实际 {r.status_code}"
+            assert "登录尝试过多" in r.json()["detail"]
+            assert "Retry-After" in r.headers
+
+
+def test_change_password_weak_password_returns_401(monkeypatch):
+    """审核 #5: 弱密码(< 8 字符)返 401 模糊错误"""
+    client = _make_client(monkeypatch)
+    lr = client.post("/v1/auth/login", json={"username": "admin", "password": "admin"})
+    token = lr.json()["token"]
+    # 短密码
+    r = client.post(
+        "/v1/auth/change-password",
+        json={"old_password": "admin", "new_password": "abc"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r.status_code == 401
+    # 不暴露具体校验规则
+    assert "登录信息格式错误" in r.json()["detail"]
+
+
+def test_change_password_no_letter_returns_401(monkeypatch):
+    """审核 #5: 纯数字(8 字符)返 401"""
+    client = _make_client(monkeypatch)
+    lr = client.post("/v1/auth/login", json={"username": "admin", "password": "admin"})
+    token = lr.json()["token"]
+    r = client.post(
+        "/v1/auth/change-password",
+        json={"old_password": "admin", "new_password": "12345678"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r.status_code == 401
+
+
+def test_change_password_no_digit_returns_401(monkeypatch):
+    """审核 #5: 纯字母(8 字符)返 401"""
+    client = _make_client(monkeypatch)
+    lr = client.post("/v1/auth/login", json={"username": "admin", "password": "admin"})
+    token = lr.json()["token"]
+    r = client.post(
+        "/v1/auth/change-password",
+        json={"old_password": "admin", "new_password": "abcdefgh"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r.status_code == 401
+
+
+def test_change_password_strong_password_works(monkeypatch):
+    """审核 #5: 强密码(8+ 字符, 字母+数字)通过"""
+    client = _make_client(monkeypatch)
+    lr = client.post("/v1/auth/login", json={"username": "admin", "password": "admin"})
+    token = lr.json()["token"]
+    r = client.post(
+        "/v1/auth/change-password",
+        json={"old_password": "admin", "new_password": "newpass123"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r.status_code == 200
+
+
+def test_old_token_invalidated_after_password_change(monkeypatch):
+    """审核 #7: 改密后旧 token 失效"""
+    client = _make_client(monkeypatch)
+    lr = client.post("/v1/auth/login", json={"username": "admin", "password": "admin"})
+    old_token = lr.json()["token"]
+    # 改密
+    cr = client.post(
+        "/v1/auth/change-password",
+        json={"old_password": "admin", "new_password": "newpass456"},
+        headers={"Authorization": f"Bearer {old_token}"},
+    )
+    assert cr.status_code == 200
+    new_token = cr.json()["token"]
+    # 旧 token 调 /me 应 401
+    r = client.get("/v1/auth/me", headers={"Authorization": f"Bearer {old_token}"})
+    assert r.status_code == 401
+    assert "密码已修改" in r.json()["detail"]
+    # 新 token 调 /me 应 200
+    r = client.get("/v1/auth/me", headers={"Authorization": f"Bearer {new_token}"})
+    assert r.status_code == 200
+
+
+def test_jwt_includes_iss_aud_claims(monkeypatch):
+    """审核 #10: JWT 包含 iss/aud claims, 错 iss 拒绝"""
+    import jwt
+    # 拿到 token
+    client = _make_client(monkeypatch)
+    lr = client.post("/v1/auth/login", json={"username": "admin", "password": "admin"})
+    token = lr.json()["token"]
+    # 解码看 claims
+    payload = jwt.decode(token, options={"verify_signature": False})
+    assert payload.get("iss") == "matrix-live-diarizer"
+    assert payload.get("aud") == "matrix-client"
+
+
+def test_jwt_aud_validation_rejects_wrong_aud():
+    """审核 #10: 错 aud 的 token 应解码失败"""
+    import jwt
+    from werkzeug.security import generate_password_hash
+    secret = "test-secret"
+    # 造一个 aud 错的 token
+    bad_token = jwt.encode(
+        {"sub": "1", "username": "admin", "iss": "matrix-live-diarizer", "aud": "OTHER"},
+        secret, algorithm="HS256"
+    )
+    with pytest.raises(jwt.InvalidAudienceError):
+        jwt.decode(bad_token, secret, algorithms=["HS256"],
+                   audience="matrix-client", issuer="matrix-live-diarizer")
+
+
+def test_login_with_bad_password_returns_401_not_422(monkeypatch):
+    """审核 #12: 缺字段返 401 (模糊), 不返 422 暴露 schema"""
+    client = _make_client(monkeypatch)
+    # 完全没字段
+    r = client.post("/v1/auth/login", json={})
+    assert r.status_code == 401
+    assert "登录信息格式错误" in r.json()["detail"]
+    # 缺 password
+    r = client.post("/v1/auth/login", json={"username": "admin"})
+    assert r.status_code == 401
+    # 错类型
+    r = client.post("/v1/auth/login", json={"username": 123, "password": []})
+    assert r.status_code == 401

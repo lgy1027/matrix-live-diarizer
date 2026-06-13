@@ -982,6 +982,11 @@ function connectWs() {
       $("#metaStart").textContent = new Date().toTimeString().slice(0, 8);
       $("#wavePH").innerHTML = "<b>●</b>" + t("view.live.wavePH.rec", state.clientId).replace(/^● /, "");
       renderTranscript();
+      // Bug-89 (审核 #8): WS 鉴权 — 先发 auth (后端要求首条消息)
+      const token = MatrixAuth.getToken();
+      if (token) {
+        ws.send(JSON.stringify({action: "auth", token}));
+      }
       ws.send(JSON.stringify({action: "rename", title: t("view.live.defaultSession", new Date().toTimeString().slice(0, 8))}));
     } else {
       // 重连成功:用原 sessionTitle(后端会建新 session_id,但 UI 体验连续)

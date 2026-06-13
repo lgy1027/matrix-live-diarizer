@@ -90,9 +90,11 @@ CREATE TABLE IF NOT EXISTS users (
     must_change_password  INTEGER DEFAULT 0,           -- 1 = 下次登录强制改密
     is_active             INTEGER DEFAULT 1,
     created_at            TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    last_login_at         TIMESTAMP
+    last_login_at         TIMESTAMP,
+    password_changed_at   REAL DEFAULT 0                -- Bug-88: 改密时间戳(token pwd_iat 校验)
 );
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+-- 老库兼容: ALTER TABLE 不能在 executescript(隐式事务)里, 单独跑 (Bug-91 审核)
 """
 
 
@@ -124,6 +126,11 @@ class Database:
                 conn.execute("ALTER TABLE segments ADD COLUMN words_json TEXT")
             except Exception:
                 pass  # 重复列错误,新库已含
+            # 兼容老库:加 v0.4 新列 password_changed_at (Bug-91 审核)
+            try:
+                conn.execute("ALTER TABLE users ADD COLUMN password_changed_at REAL DEFAULT 0")
+            except Exception:
+                pass  # 重复列错误,新库已含
             # 回填老 segments 到 FTS5(对已有库,触发器不会追溯历史 insert)
             conn.executescript(FTS_BACKFILL_SQL)
             # 默认 admin 账户初始化(空表时插入)
@@ -151,6 +158,11 @@ class Database:
     def _init_schema_on_conn(self, conn: sqlite3.Connection) -> None:
         """在已开启的连接上建表(兜底用)"""
         conn.executescript(SCHEMA_SQL)
+        # 老库兼容 ALTER (Bug-91 审核)
+        try:
+            conn.execute("ALTER TABLE users ADD COLUMN password_changed_at REAL DEFAULT 0")
+        except Exception:
+            pass
         conn.executescript(FTS_BACKFILL_SQL)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")

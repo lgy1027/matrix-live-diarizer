@@ -471,7 +471,59 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
         return
     
     await websocket.accept()
-    
+
+    # Bug-89 (审核 #8): WebSocket 鉴权 — 接受后等首条 JSON {"action":"auth","token":"..."}
+    # 5s 内没收到或鉴权失败, close(4401)
+    # 测试模式绕过 (TEST_AUTH_BYPASS=1, 跟 HTTP 中间件同款)
+    import os as _os
+    if _os.environ.get("TEST_AUTH_BYPASS") == "1":
+        logger.info(f"[WS] {client_id} 测试模式 bypass 鉴权")
+    else:
+        try:
+            auth_msg = await asyncio.wait_for(websocket.receive(), timeout=5.0)
+            auth_payload = json.loads(auth_msg.get("text", "{}"))
+            if not (isinstance(auth_payload, dict) and auth_payload.get("action") == "auth"):
+                logger.warning(f"[WS] {client_id} 首条消息不是 auth action")
+                await websocket.close(code=4401, reason="需要 auth")
+                return
+            token = auth_payload.get("token", "")
+            if not token:
+                logger.warning(f"[WS] {client_id} 缺 token")
+                await websocket.close(code=4401, reason="缺 token")
+                return
+            # 校验 token
+            auth_service = websocket.app.state.auth_service
+            decoded = auth_service.decode_token(token)
+            if not decoded:
+                logger.warning(f"[WS] {client_id} token 无效")
+                await websocket.close(code=4401, reason="token 无效")
+                return
+            # 校验 pwd_iat (Bug-88 同款)
+            try:
+                user_id = int(decoded["sub"])
+                user_row = auth_service.get_user(user_id)
+                if not user_row or not user_row.get("is_active"):
+                    await websocket.close(code=4401, reason="用户不存在/禁用")
+                    return
+                token_pwd_iat = float(decoded.get("pwd_iat", 0))
+                current_pwd_iat = float(user_row.get("password_changed_at") or 0)
+                if current_pwd_iat > token_pwd_iat:
+                    await websocket.close(code=4401, reason="密码已修改, 请重新登录")
+                    return
+            except (ValueError, TypeError, KeyError):
+                await websocket.close(code=4401, reason="token 格式错")
+                return
+            logger.info(f"[WS] {client_id} 鉴权通过 (user_id={user_id})")
+        except asyncio.TimeoutError:
+            logger.warning(f"[WS] {client_id} 5s 内没发 auth, 关闭")
+            await websocket.close(code=4401, reason="auth 超时")
+            return
+        except json.JSONDecodeError:
+            logger.warning(f"[WS] {client_id} 首条消息不是 JSON")
+            await websocket.close(code=4401, reason="auth 格式错")
+            return
+    # end TEST_AUTH_BYPASS else
+
     # 创建有界队列
     try:
         queue = asyncio.Queue(maxsize=config.audio.queue_size)
@@ -479,10 +531,10 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
         logger.error(f"[WS] 队列创建失败: {e}")
         await websocket.close(code=1011, reason="Config error")
         return
-    
+
     # 停止信号
     stop_event = asyncio.Event()
-    
+
     # 超时配置
     try:
         receive_timeout = config.audio.heartbeat_timeout + 5
@@ -511,7 +563,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                 logger.warning(f"[RECEIVER] {client_id} 接收超时，断开连接")
                 stop_event.set()
                 break
-            
+
             msg_type = message.get("type")
 
             if msg_type == "websocket.receive":

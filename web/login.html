@@ -279,9 +279,11 @@
       errBox.classList.add("show");
     }
 
-    // 已登录直接跳走
+    // 已登录直接跳走(支持 next 跳回)
+    const next = new URLSearchParams(location.search).get("next");
+    const safeNext = next && /^\/web\//.test(next) ? next : "/web/index.html";
     if (MatrixAuth && MatrixAuth.getToken && MatrixAuth.getToken()) {
-      location.href = "/web/index.html";
+      location.href = safeNext;
     }
 
     form.addEventListener("submit", async (e) => {
@@ -305,7 +307,7 @@
           return;
         }
         MatrixAuth.setToken(data.token, data.user);
-        location.href = "/web/index.html";
+        location.href = safeNext;  // Bug-84: 跳回原页(从 ?next= 读)
       } catch (err) {
         showError("网络错误: " + err.message);
         submitBtn.disabled = false;

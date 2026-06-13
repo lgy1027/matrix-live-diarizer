@@ -66,11 +66,38 @@ class AuthMiddleware(BaseHTTPMiddleware):
             )
         # 把 user_id 注入 request.state 给 endpoint 用
         try:
-            request.state.user_id = int(payload["sub"])
+            user_id = int(payload["sub"])
+            request.state.user_id = user_id
             request.state.username = payload.get("username", "")
         except (KeyError, ValueError, TypeError):
             return JSONResponse(
                 status_code=401,
                 content={"detail": "token 格式错误"},
+            )
+        # Bug-88 (审核 #7): 改密后旧 token 失效
+        # 校验: token.pwd_iat < user.password_changed_at → 401
+        # 防 token 泄露后被滥用: 改密后即使 token 没过期也不能用
+        try:
+            user_row = auth_service.get_user(user_id)
+            if not user_row:
+                raise HTTPException(status_code=401, detail="用户不存在")
+            if not user_row.get("is_active"):
+                raise HTTPException(status_code=401, detail="账户已禁用")
+            token_pwd_iat = float(payload.get("pwd_iat", 0))
+            current_pwd_iat = float(user_row.get("password_changed_at") or 0)
+            if current_pwd_iat > token_pwd_iat:
+                # 用户改过密,旧 token 失效
+                logger.info(f"[AUTH] user_id={user_id} 改密后旧 token 失效")
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "密码已修改, 请重新登录"},
+                )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning(f"[AUTH] pwd_iat 校验失败: {e}")
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "鉴权失败"},
             )
         return await call_next(request)
