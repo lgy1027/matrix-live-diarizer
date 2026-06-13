@@ -13,6 +13,8 @@
     <a href="/web/index.html">实时</a>
     <a href="/web/history.html">历史</a>
     <a href="/web/settings.html" class="active">设置</a>
+    <div style="flex:1"></div>
+    <div id="userMenu"></div>
     <span class="badge-private">🔒 离线</span>
   </nav>
   <div class="container">
@@ -53,7 +55,7 @@
       </p>
     </div>
 
-    <div class="card">
+    <div class="card" id="account">
       <h2>账户</h2>
       <p>当前: <strong id="current-user">加载中...</strong></p>
       <div style="display:flex; gap:8px; margin-top:0.5rem;">
@@ -86,7 +88,7 @@
   <script src="/web/js/auth.js"></script>
   <script src="/web/js/api.js"></script>
   <script src="/web/js/settings.js"></script>
-  <script>MatrixAuth.requireAuth();</script>
+  <script>MatrixAuth.requireAuth(); MatrixAuth.renderUserMenu();</script>
   <script>
     // 显示当前用户
     (function () {
@@ -136,6 +138,10 @@
         btn.disabled = false; btn.textContent = "确认";
       }
     });
+    // 顶部 userMenu 点"修改密码"会跳 #account 锚点,自动弹 modal
+    if (location.hash === "#account") {
+      setTimeout(() => document.getElementById("btn-change-pwd").click(), 200);
+    }
   </script>
 </body>
 </html>

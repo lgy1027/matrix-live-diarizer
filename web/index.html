@@ -617,9 +617,12 @@ footer.bar-b{height:32px;padding:0 28px;display:flex;align-items:center;justify-
       <div class="crumb">
         <span id="crumbView" data-i18n="nav.live">Live</span><span class="sep">·</span><b id="crumbSub">Matrix Studio</b>
       </div>
-      <div class="lang-switcher" role="group" aria-label="Language">
+      <div style="display:flex;align-items:center;gap:14px">
+        <div id="userMenu"></div>
+        <div class="lang-switcher" role="group" aria-label="Language">
         <button class="lang-btn" data-lang="zh" aria-label="中文">中文</button>
         <button class="lang-btn" data-lang="en" aria-label="English">EN</button>
+      </div>
       </div>
     </header>
 
@@ -1997,6 +2000,8 @@ async function bulkMergeSelected() {
 <script>
   // 启动鉴权: 无 token 跳 login
   const _user = MatrixAuth.requireAuth();
+  // 渲染顶部账户菜单(用户名 + 退出登录 + 改密)
+  MatrixAuth.renderUserMenu();
   // 首次登录 (must_change_password=1) 弹强制改密 modal
   if (_user && _user.must_change_password) {
     document.addEventListener("DOMContentLoaded", () => {

@@ -3,140 +3,272 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>登录 - Matrix Live Diarizer</title>
+  <title>登录 · Matrix Live Diarizer</title>
   <link rel="icon" type="image/x-icon" href="/web/favicon.ico">
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600&family=Outfit:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" />
   <link rel="stylesheet" href="/web/css/common.css">
   <style>
+    /* 整体 — 同项目: --ink 背景, --teal/--amber/--green 主题色 */
     body {
       min-height: 100vh;
       display: grid;
-      place-items: center;
+      grid-template-rows: auto 1fr auto;
       background: var(--ink);
-      padding: 24px 16px;
+      color: var(--text);
+      font-family: var(--sans);
+      overflow-x: hidden;
+      position: relative;
+    }
+    /* 装饰:背景 grid 点(同项目卡片设计) */
+    body::before {
+      content: '';
+      position: fixed; inset: 0;
+      background-image: radial-gradient(circle, var(--border) 1px, transparent 1px);
+      background-size: 24px 24px;
+      opacity: 0.18;
+      pointer-events: none;
+      z-index: 0;
+    }
+    /* 装饰:右上 amber 小光晕 */
+    body::after {
+      content: '';
+      position: fixed;
+      top: -200px; right: -200px;
+      width: 500px; height: 500px;
+      background: radial-gradient(circle, var(--amber-soft) 0%, transparent 60%);
+      pointer-events: none;
+      z-index: 0;
+    }
+    /* 顶部 brand — 同 index 顶 bar 风格 */
+    .login-top {
+      position: relative; z-index: 1;
+      height: 56px; padding: 0 28px;
+      display: flex; align-items: center; justify-content: space-between;
+      border-bottom: 1px solid var(--border-soft);
+      background: var(--ink);
+    }
+    .login-top .brand {
+      display: flex; align-items: center; gap: 10px;
+      font-family: var(--serif);
+      font-variation-settings: 'SOFT' 30, 'WONK' 1;
+      font-size: 18px;
+      letter-spacing: -.01em;
+    }
+    .login-top .brand .mark {
+      width: 24px; height: 24px;
+      color: var(--amber);
+      display: grid; place-items: center;
+    }
+    .login-top .brand .mark svg { width: 100%; height: 100%; }
+    .login-top .brand .accent em {
+      color: var(--amber);
+      font-style: italic;
+      font-variation-settings: 'SOFT' 50, 'WONK' 1;
+    }
+    .login-top .corner {
+      display: flex; align-items: center; gap: 8px;
+      font-family: var(--mono); font-size: 10px;
+      color: var(--text-3);
+      letter-spacing: .08em; text-transform: uppercase;
+    }
+    .login-top .corner .dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 0 3px rgba(107, 203, 119, .15);
+    }
+    /* 主区 */
+    .login-main {
+      position: relative; z-index: 1;
+      display: grid; place-items: center;
+      padding: 40px 16px;
     }
     .login-card {
-      width: 100%;
-      max-width: 380px;
+      width: 100%; max-width: 420px;
       background: var(--ink-2);
       border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 36px 32px 28px;
-      box-shadow: 0 20px 60px rgba(0,0,0,.5);
+      border-radius: 10px;
+      padding: 44px 40px 36px;
+      box-shadow:
+        0 30px 80px rgba(0, 0, 0, .5),
+        0 0 0 1px rgba(255, 255, 255, .02) inset;
+    }
+    .login-card .eyebrow {
+      display: flex; align-items: center; gap: 8px;
+      font-family: var(--mono);
+      font-size: 10px; letter-spacing: .12em; text-transform: uppercase;
+      color: var(--amber);
+      margin-bottom: 12px;
+    }
+    .login-card .eyebrow .bar {
+      width: 24px; height: 1px;
+      background: var(--amber);
     }
     .login-card h1 {
       font-family: var(--serif);
-      font-variation-settings: 'SOFT' 50, 'WONK' 1;
-      font-size: 32px;
+      font-variation-settings: 'SOFT' 50, 'WONK' 1, 'opsz' 144;
+      font-size: 44px;
       font-weight: 400;
       letter-spacing: -.02em;
-      margin-bottom: 4px;
+      line-height: 1;
+      margin-bottom: 8px;
     }
     .login-card h1 em {
       color: var(--amber);
       font-style: italic;
+      font-variation-settings: 'SOFT' 80, 'WONK' 1, 'opsz' 144;
     }
     .login-card .sub {
       font-family: var(--mono);
-      font-size: 11px;
-      color: var(--text-3);
-      letter-spacing: .06em;
-      text-transform: uppercase;
+      font-size: 11px; letter-spacing: .04em;
+      color: var(--text-2);
       margin-bottom: 28px;
-      padding-bottom: 20px;
+      padding-bottom: 22px;
       border-bottom: 1px solid var(--border);
     }
-    .field { margin-bottom: 16px; }
+    .login-card .sub .label { color: var(--text-3); }
+    /* 表单 */
+    .field { margin-bottom: 14px; }
     .field label {
-      display: block;
+      display: flex; align-items: center; gap: 6px;
       font-family: var(--mono);
       font-size: 10px;
       color: var(--text-3);
-      letter-spacing: .08em;
-      text-transform: uppercase;
-      margin-bottom: 6px;
+      letter-spacing: .12em; text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .field label .key {
+      color: var(--text-2);
+      font-weight: 500;
     }
     .field input {
       width: 100%;
-      padding: 12px 14px;
+      padding: 13px 14px;
       background: var(--ink-3);
       border: 1px solid var(--border);
-      border-radius: 4px;
+      border-radius: 6px;
       color: var(--text);
       font-family: var(--mono);
       font-size: 14px;
-      transition: border-color .15s;
+      letter-spacing: .02em;
+      transition: border-color .15s, box-shadow .15s, background .15s;
     }
     .field input:focus {
       border-color: var(--amber);
+      background: var(--ink-2);
       outline: none;
+      box-shadow: 0 0 0 3px var(--amber-soft);
     }
+    .field input::placeholder { color: var(--text-3); }
+    /* 主按钮 — 跟项目 amber 风格 */
     .submit-btn {
       width: 100%;
-      padding: 12px;
+      padding: 13px 18px;
+      margin-top: 12px;
       background: var(--amber);
       color: var(--ink);
       font-family: var(--sans);
-      font-size: 14px;
-      font-weight: 500;
+      font-size: 14px; font-weight: 600;
       letter-spacing: .04em;
-      border-radius: 4px;
+      border: none;
+      border-radius: 6px;
       cursor: pointer;
-      margin-top: 8px;
       transition: opacity .15s, transform .1s;
     }
     .submit-btn:hover { opacity: .88; }
-    .submit-btn:active { transform: scale(.98); }
-    .submit-btn:disabled { opacity: .5; cursor: not-allowed; }
+    .submit-btn:active { transform: scale(.985); }
+    .submit-btn:disabled { opacity: .4; cursor: not-allowed; }
+    /* 错误提示 */
     .err {
-      margin-top: 12px;
-      padding: 10px 12px;
-      background: rgba(255, 71, 87, .12);
+      margin-top: 14px;
+      padding: 11px 14px;
+      background: rgba(255, 71, 87, .1);
       border: 1px solid rgba(255, 71, 87, .4);
-      border-radius: 4px;
+      border-radius: 6px;
       color: var(--red);
       font-family: var(--mono);
       font-size: 12px;
       display: none;
     }
     .err.show { display: block; }
-    .hint {
-      margin-top: 18px;
-      padding-top: 14px;
-      border-top: 1px solid var(--border-soft);
+    /* 底部 footer 提示 */
+    .login-foot {
+      position: relative; z-index: 1;
+      padding: 16px;
+      text-align: center;
       font-family: var(--mono);
       font-size: 10px;
       color: var(--text-3);
       letter-spacing: .04em;
-      text-align: center;
+    }
+    .login-foot strong { color: var(--text-2); }
+    /* 移动端适配 */
+    @media (max-width: 480px) {
+      .login-top { padding: 0 16px; }
+      .login-card { padding: 32px 24px 24px; }
+      .login-card h1 { font-size: 32px; }
+      .login-top .corner { display: none; }
     }
   </style>
 </head>
 <body>
-  <form class="login-card" id="loginForm" autocomplete="on">
-    <h1>Matrix <em>·</em></h1>
-    <div class="sub">Live Diarizer · 登录</div>
-
-    <div class="field">
-      <label for="username">用户名</label>
-      <input id="username" name="username" type="text" autocomplete="username"
-             required autofocus spellcheck="false" />
+  <!-- 顶部 brand — 同 index .bar 风格 -->
+  <header class="login-top">
+    <div class="brand">
+      <span class="mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9"/>
+          <path d="M3 12h18M12 3v18M5.6 5.6l12.8 12.8M18.4 5.6L5.6 18.4"/>
+        </svg>
+      </span>
+      <span class="accent">Matrix<em>·</em>Studio</span>
     </div>
-    <div class="field">
-      <label for="password">密码</label>
-      <input id="password" name="password" type="password" autocomplete="current-password"
-             required />
+    <div class="corner">
+      <span class="dot"></span>
+      <span>SYSTEM IDLE</span>
     </div>
+  </header>
 
-    <button class="submit-btn" type="submit" id="submitBtn">登 录</button>
-    <div class="err" id="errBox"></div>
+  <!-- 主区 -->
+  <main class="login-main">
+    <form class="login-card" id="loginForm" autocomplete="on" novalidate>
+      <div class="eyebrow">
+        <span class="bar"></span>
+        <span>Authentication</span>
+      </div>
+      <h1>Log<em>·</em>in</h1>
+      <div class="sub">
+        <span class="label">// </span>Live transcription &amp; speaker diarization
+      </div>
 
-    <div class="hint">
-      默认账号: <strong style="color:var(--text-2)">admin</strong>
-      &nbsp;/&nbsp; 默认密码: <strong style="color:var(--text-2)">admin</strong>
-      <br><span style="color:var(--text-3)">首次登录后系统会强制你修改密码</span>
-    </div>
-  </form>
+      <div class="field">
+        <label for="username">
+          <span class="key">USERNAME</span>
+        </label>
+        <input id="username" name="username" type="text" autocomplete="username"
+               required autofocus spellcheck="false" placeholder="admin" />
+      </div>
 
+      <div class="field">
+        <label for="password">
+          <span class="key">PASSWORD</span>
+        </label>
+        <input id="password" name="password" type="password" autocomplete="current-password"
+               required placeholder="••••••" />
+      </div>
+
+      <button class="submit-btn" type="submit" id="submitBtn">登 录</button>
+      <div class="err" id="errBox"></div>
+    </form>
+  </main>
+
+  <footer class="login-foot">
+    默认账户 <strong>admin</strong> · 密码 <strong>admin</strong>
+    &nbsp;·&nbsp; 首次登录后系统强制修改密码
+  </footer>
+
+  <script src="/web/js/auth.js"></script>
   <script>
     const form = document.getElementById("loginForm");
     const errBox = document.getElementById("errBox");
@@ -147,8 +279,8 @@
       errBox.classList.add("show");
     }
 
-    // 如果已登录,直接跳走
-    if (localStorage.getItem("matrix_token")) {
+    // 已登录直接跳走
+    if (MatrixAuth && MatrixAuth.getToken && MatrixAuth.getToken()) {
       location.href = "/web/index.html";
     }
 
@@ -165,23 +297,25 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ username, password }),
         });
-        const data = await r.json();
+        const data = await r.json().catch(() => ({}));
         if (!r.ok) {
           showError(data.detail || "登录失败");
           submitBtn.disabled = false;
           submitBtn.textContent = "登 录";
           return;
         }
-        // 存 token + user
-        localStorage.setItem("matrix_token", data.token);
-        localStorage.setItem("matrix_user", JSON.stringify(data.user));
-        // 跳到首页(index.html 会检查 must_change_password 弹窗)
+        MatrixAuth.setToken(data.token, data.user);
         location.href = "/web/index.html";
       } catch (err) {
         showError("网络错误: " + err.message);
         submitBtn.disabled = false;
         submitBtn.textContent = "登 录";
       }
+    });
+
+    // Enter 提交(虽然 form 自带,但显式支持)
+    document.getElementById("password").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") form.dispatchEvent(new Event("submit"));
     });
   </script>
 </body>

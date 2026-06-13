@@ -117,3 +117,106 @@ Matrix.api.del = async function (path) {
     throw err;
   }
 };
+
+// 渲染全局账户菜单(任何页面有 #userMenu 容器就生效)
+MatrixAuth.renderUserMenu = function (containerId = "userMenu") {
+  const host = document.getElementById(containerId);
+  if (!host) return;
+  const user = this.getUser() || {};
+  // 头部 pill: ● 用户名 ▾
+  host.innerHTML = `
+    <button class="um-trigger" id="umTrigger" type="button">
+      <span class="um-dot"></span>
+      <span class="um-name">${escapeHtml(user.username || "未知")}</span>
+      <span class="um-caret">▾</span>
+    </button>
+    <div class="um-dropdown" id="umDropdown" hidden>
+      <div class="um-info">
+        <div class="um-info-name">${escapeHtml(user.username || "未知")}</div>
+        <div class="um-info-tag">已登录</div>
+      </div>
+      <button class="um-item" data-act="change-pwd">🔑 修改密码</button>
+      <button class="um-item danger" data-act="logout">⎋ 退出登录</button>
+    </div>
+  `;
+  // 注入样式(只一次)
+  if (!document.getElementById("um-styles")) {
+    const s = document.createElement("style");
+    s.id = "um-styles";
+    s.textContent = `
+      #${containerId}{position:relative;display:inline-block}
+      .um-trigger{
+        display:flex;align-items:center;gap:8px;
+        padding:6px 10px 6px 8px;
+        background:rgba(20,17,15,.6);
+        border:1px solid var(--border-soft);
+        border-radius:20px;
+        font-family:var(--mono);font-size:11px;
+        color:var(--text-2);
+        cursor:pointer;
+        transition:background .15s,border-color .15s;
+      }
+      .um-trigger:hover{background:var(--ink-3);border-color:var(--border)}
+      .um-dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 0 2px rgba(107,203,119,.18)}
+      .um-name{color:var(--text);font-weight:500;letter-spacing:.04em}
+      .um-caret{color:var(--text-3);font-size:9px;margin-top:-1px}
+      .um-dropdown{
+        position:absolute;right:0;top:calc(100% + 6px);
+        min-width:200px;
+        background:var(--ink-2);
+        border:1px solid var(--border);
+        border-radius:8px;
+        box-shadow:0 16px 40px rgba(0,0,0,.5);
+        padding:6px;
+        z-index:60;
+      }
+      .um-info{padding:10px 12px 8px;border-bottom:1px solid var(--border-soft);margin-bottom:4px}
+      .um-info-name{font-family:var(--mono);font-size:12px;color:var(--text);font-weight:500;margin-bottom:2px}
+      .um-info-tag{font-family:var(--mono);font-size:9px;color:var(--green);letter-spacing:.1em;text-transform:uppercase}
+      .um-item{
+        display:block;width:100%;text-align:left;
+        padding:9px 12px;
+        background:transparent;border:none;
+        border-radius:5px;
+        color:var(--text);
+        font-family:var(--sans);font-size:12px;
+        cursor:pointer;
+        transition:background .12s;
+      }
+      .um-item:hover{background:var(--ink-3)}
+      .um-item.danger{color:var(--red)}
+      .um-item.danger:hover{background:rgba(255,71,87,.12)}
+    `;
+    document.head.appendChild(s);
+  }
+  // 切换下拉
+  const trigger = document.getElementById("umTrigger");
+  const dropdown = document.getElementById("umDropdown");
+  trigger.addEventListener("click", (e) => {
+    e.stopPropagation();
+    dropdown.hidden = !dropdown.hidden;
+  });
+  document.addEventListener("click", () => { dropdown.hidden = true; });
+  // 操作
+  host.querySelector('[data-act="change-pwd"]').addEventListener("click", () => {
+    dropdown.hidden = true;
+    // 在 settings 页直接弹 modal, 否则跳过去
+    if (location.pathname.endsWith("/settings.html") || location.pathname.endsWith("/web/settings.html")) {
+      const btn = document.getElementById("btn-change-pwd");
+      if (btn) btn.click();
+      else location.href = "/web/settings.html#account";
+    } else {
+      location.href = "/web/settings.html#account";
+    }
+  });
+  host.querySelector('[data-act="logout"]').addEventListener("click", async () => {
+    if (!confirm("确认退出登录?")) return;
+    try { await Matrix.api.post("auth/logout", {}); } catch {}
+    MatrixAuth.clearToken();
+    location.href = "/web/login.html";
+  });
+};
+
+function escapeHtml(s) {
+  return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}

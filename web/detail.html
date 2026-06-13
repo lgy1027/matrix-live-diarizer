@@ -37,6 +37,8 @@
     <a href="/web/index.html">实时</a>
     <a href="/web/history.html">历史</a>
     <a href="/web/settings.html">设置</a>
+    <div style="flex:1"></div>
+    <div id="userMenu"></div>
     <span class="badge-private">🔒 离线</span>
   </nav>
   <div class="container">
@@ -71,6 +73,6 @@
   <script src="/web/js/auth.js"></script>
   <script src="/web/js/api.js"></script>
   <script src="/web/js/detail.js"></script>
-  <script>MatrixAuth.requireAuth();</script>
+  <script>MatrixAuth.requireAuth(); MatrixAuth.renderUserMenu();</script>
 </body>
 </html>
