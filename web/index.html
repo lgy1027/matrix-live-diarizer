@@ -320,6 +320,8 @@ footer.bar-b{height:32px;padding:0 28px;display:flex;align-items:center;justify-
 
 /* responsive */
 @media (max-width:980px){
+  /* Bug-70 修复: 平板及以下也用单列,避免左 56px 占位让 main 缩水 */
+  .app{grid-template-columns:1fr}
   .live-grid{grid-template-columns:1fr}
   .live-side{position:static}
   .lib-stats{gap:28px}
@@ -328,6 +330,8 @@ footer.bar-b{height:32px;padding:0 28px;display:flex;align-items:center;justify-
 
 /* Roadmap #1.5 移动端响应式(< 768px) */
 @media (max-width:768px){
+  /* Bug-70 修复: .app 改单列布局(原来 56px 1fr 让 main 仍只占右半)*/
+  .app{grid-template-columns:1fr !important}
   /* 左侧 56px nav 改底部 tab bar(类似手机 App 底部导航) */
   aside.nav{
     position:fixed;
@@ -390,6 +394,12 @@ footer.bar-b{height:32px;padding:0 28px;display:flex;align-items:center;justify-
   .lib-wrap{padding:12px 14px 80px;max-width:none}
   .voice-wrap{padding:12px 14px 80px;max-width:none}
   .set-wrap{padding:12px 14px 80px;max-width:none;margin:0}
+  /* 声纹卡片(voice 页)缩: 头像 60→42,padding 24→14,字号 24→17 */
+  .sp-card{padding:14px 12px}
+  .sp-ava{width:42px;height:42px;font-size:17px;margin-bottom:12px}
+  /* 声纹 grid 卡片最小宽 280→0,自动填满 */
+  .voice-grid{grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:1px}
+  .sp-data{font-size:11px;gap:6px;padding-top:10px}
   /* 头部 h1 字号缩(原 48px 太大)*/
   .set-wrap > h1{font-size:32px}
   /* 段落标题/大字号调整 */
