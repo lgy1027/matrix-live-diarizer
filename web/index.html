@@ -256,8 +256,8 @@ footer.bar-b{height:32px;padding:0 28px;display:flex;align-items:center;justify-
 .bulk-link{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-2);padding:4px 8px;border-radius:3px;transition:color .15s,background .15s;background:transparent;border:0;cursor:pointer}
 .bulk-link:hover{color:var(--text);background:var(--ink-3)}
 
-.sp-ava{width:60px;height:60px;border-radius:50%;display:grid;place-items:center;font-family:var(--serif);font-variation-settings:'SOFT' 30,'WONK' 1;font-size:24px;font-weight:500;color:var(--ink);margin-bottom:18px;position:relative;overflow:hidden}
-.sp-ava::after{content:'';position:absolute;inset:0;border:1px solid rgba(255,255,255,.08);border-radius:50%}
+.sp-ava{width:0;height:0;display:none}
+/* 大头像已移除(改用 .sp-id 行的小色点作声纹标识) */
 .sp-name{font-family:var(--serif);font-variation-settings:'SOFT' 30,'WONK' 1;font-size:20px;font-weight:500;letter-spacing:-.01em;margin-bottom:4px;line-height:1.2}
 .sp-id{font-family:var(--mono);font-size:10px;color:var(--text-3);letter-spacing:.04em;margin-bottom:18px;display:flex;align-items:center;gap:6px}
 .sp-id::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--teal)}
@@ -394,12 +394,19 @@ footer.bar-b{height:32px;padding:0 28px;display:flex;align-items:center;justify-
   .lib-wrap{padding:12px 14px 80px;max-width:none}
   .voice-wrap{padding:12px 14px 80px;max-width:none}
   .set-wrap{padding:12px 14px 80px;max-width:none;margin:0}
-  /* 声纹卡片(voice 页)缩: 头像 60→42,padding 24→14,字号 24→17 */
+  /* 声纹卡片(voice 页)缩: padding 24→14,大头像已删 */
   .sp-card{padding:14px 12px}
-  .sp-ava{width:42px;height:42px;font-size:17px;margin-bottom:12px}
   /* 声纹 grid 卡片最小宽 280→0,自动填满 */
   .voice-grid{grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:1px}
   .sp-data{font-size:11px;gap:6px;padding-top:10px}
+  /* sp-id 行小色点(替代大头像): 用 --sp-color 来自每个 spk 的 palette */
+  .sp-id .sp-dot{
+    display:inline-block;
+    width:8px; height:8px;
+    border-radius:50%;
+    background:var(--sp-color, var(--teal));
+    margin-right:6px;
+  }
   /* 头部 h1 字号缩(原 48px 太大)*/
   .set-wrap > h1{font-size:32px}
   /* 段落标题/大字号调整 */
@@ -1470,9 +1477,8 @@ function renderVoice() {
       <div class="menu" data-act="menu">
         <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
       </div>
-      <div class="sp-ava" style="background:${c}">${init}</div>
       <div class="sp-name">${esc(sp.name || t("voice.unnamed"))}</div>
-      <div class="sp-id">${esc(sp.id)}</div>
+      <div class="sp-id" style="--sp-color:${c}"><span class="sp-dot"></span>${esc(sp.id)}</div>
       <div class="sp-data">
         <div class="d"><div class="n">${dur}<em>m</em></div><div class="l">${esc(t("voice.card.talk"))}</div></div>
         <div class="d"><div class="n">${sp.sample_count || 0}</div><div class="l">${esc(t("voice.card.samples"))}</div></div>
