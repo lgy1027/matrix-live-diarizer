@@ -73,7 +73,7 @@ async function submit() {
       <p v-if="err" class="err">{{ err }}</p>
       <div class="modal-actions">
         <button class="btn primary" type="button" :disabled="submitting" @click="submit">
-          {{ submitting ? '...' : (t('btn.confirm') || '确认修改') }}
+          {{ submitting ? '…' : (t('btn.confirm') || '确认修改') }}  /* 整改 3: ellipsis 统一 … */
         </button>
       </div>
     </div>

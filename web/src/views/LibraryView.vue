@@ -131,7 +131,7 @@ onMounted(() => {
         <input
           ref="searchInput"
           type="text"
-          :placeholder="t('placeholder.search') || 'search transcripts'"
+          :placeholder="t('placeholder.search')"
           @input="onSearchInput"
         />
       </div>

@@ -24,6 +24,6 @@ export function spkColor(id: string | undefined | null): string {
 }
 
 export function spkInitial(name: string | undefined | null): string {
-  if (!name) return '·'
+  if (!name) return '—'  // 整改 3: 与全局占位符风格统一 (em-dash)
   return name.replace(/^Spk_/, '').slice(0, 1).toUpperCase()
 }

@@ -222,7 +222,7 @@ onMounted(() => {
         <input
           ref="searchInput"
           type="text"
-          :placeholder="t('voice.search.ph') || '搜索声纹 (按名称或 ID)'"
+          :placeholder="t('voice.search.ph')"
           autocomplete="off"
           spellcheck="false"
           @input="onSearchInput"

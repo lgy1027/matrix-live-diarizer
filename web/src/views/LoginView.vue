@@ -140,7 +140,7 @@ onMounted(() => {
         </div>
 
         <button class="submit-btn" type="submit" :disabled="submitting">
-          {{ submitting ? (t('login.submitting') || '登录中...') : (t('login.submit') || '登 录') }}
+          {{ submitting ? (t('login.submitting') || '登录中…') : (t('login.submit') || '登 录') }}  /* 整改 3: ellipsis 统一 … */
         </button>
         <p v-if="errMsg" class="err" role="alert">{{ errMsg }}</p>
 

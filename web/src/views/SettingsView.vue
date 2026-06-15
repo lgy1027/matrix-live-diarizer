@@ -178,12 +178,12 @@ onMounted(load)
 
     <!-- 历史存储 -->
     <div class="set-row">
-      <div class="l">History <em>Storage</em></div>
+      <div class="l" v-html="t('view.settings.storage')" />
       <div class="d">{{ t('settings.storage.desc') || '所有转写会话是否持久化到本地 SQLite,可在历史会话(Library)页查看。重启服务后生效。' }}</div>
       <div class="storage-state">
         <span v-if="historyEnabled === true" class="tag green">● {{ t('settings.storage.on') || '已启用' }}</span>
         <span v-else-if="historyEnabled === false" class="tag">○ {{ t('settings.storage.off') || '已停用' }}</span>
-        <span v-else class="tag">— {{ t('settings.storage.unknown') || '未知' }}</span>
+        <span v-else class="tag">? {{ t('settings.storage.unknown') || '未知' }}</span>  /* 整改 3: 状态指示器统一 ●/○/? (em-dash 不再混用) */
         <small>
           {{ t('settings.storage.hint') || '运行时配置 · 由' }}
           <code>STORAGE_HISTORY_ENABLED</code>
@@ -194,7 +194,7 @@ onMounted(load)
 
     <!-- About -->
     <div class="set-row">
-      <div class="l">{{ t('view.settings.about') }}</div>
+      <div class="l" v-html="t('view.settings.about')" />
       <div class="about">
         <span>{{ t('settings.about.text') }}</span><br />
         <span>
@@ -236,7 +236,7 @@ onMounted(load)
   margin-bottom: 4px;
 }
 .set-row .l span { color: var(--text); }
-.set-row .l em { font-style: italic; color: var(--amber); font-variation-settings: 'SOFT' 100, 'WONK' 1; }
+.set-row .l em { font-style: italic; color: var(--amber); font-variation-settings: 'SOFT' 100, 'WONK' 1; font-size: 12px; opacity: 0.7; }  /* 整改 4: em 英文副标缩小 + 降透明度, 与主标题形成视觉二级 */
 .set-row .d {
   font-family: var(--mono);
   font-size: 11px;

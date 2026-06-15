@@ -82,7 +82,7 @@ async function clearTranscript() {
 async function onFile(file: File) {
   if (!file) return
   try {
-    window.toast?.(t('upload.processing') || '处理中...', 'info')
+    window.toast?.(t('upload.processing') || '处理中…', 'info')  /* 整改 3: ellipsis 统一 … */
     const r: UploadResp = await uploadAudio(file, { enable_diarization: true })
     window.toast?.(t('upload.done') || '上传完成', 'ok')
     if (r.session_id) {
