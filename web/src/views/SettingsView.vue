@@ -89,8 +89,8 @@ onMounted(load)
 <template>
   <section class="set-wrap">
     <header class="set-head">
-      <h1 v-html="t('view.settings.title')" />
-      <p class="set-sub">{{ t('view.settings.sub') || '声纹引擎 / 本地 LLM / 历史存储' }}</p>
+      <h1 class="page-title" v-html="t('view.settings.title')" />
+      <p class="page-sub">{{ t('view.settings.sub') || '声纹引擎 / 本地 LLM / 历史存储' }}</p>
     </header>
     <div class="set-grid">
 
@@ -213,9 +213,7 @@ onMounted(load)
 <style scoped>
 .set-wrap { padding: 32px 48px 48px; max-width: 1280px; margin: 0 auto; }
 .set-head { padding-bottom: 24px; border-bottom: 1px solid var(--border); margin-bottom: 0; }
-.set-head h1 { font-family: var(--serif); font-size: 36px; font-weight: 400; line-height: 1; margin-bottom: 8px; }
-.set-head h1 em { font-style: italic; color: var(--amber); font-variation-settings: 'SOFT' 100, 'WONK' 1; }
-.set-sub { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-3); letter-spacing: 0.04em; }
+/* 整改 1: 改用 .page-title / .page-sub (components.css), scoped 块里不再重复定义 */
 .set-grid {
   display: grid;
   grid-template-columns: 1.6fr 1fr 1fr;
@@ -225,8 +223,7 @@ onMounted(load)
 .set-grid .set-row { background: var(--ink-2); border: 1px solid var(--border-soft); border-radius: 8px; padding: 22px 24px; }
 /* 声纹引擎 (第 1 个 set-row): 占左 1 列, 跨 2 行 (引擎列表高度自适应) */
 .set-grid .set-row.engine-row { grid-row: span 2; }
-.set-wrap h1 { font-family: var(--serif); font-size: 32px; margin-bottom: 24px; }
-.set-wrap h1 em { font-style: italic; color: var(--amber); }
+/* 整改 1: 删除 dead .set-wrap h1 规则 (无 live 元素匹配, 行内 section header 实际用 .set-row .l) */
 .set-row { padding: 22px 24px; background: var(--ink-2); }
 .set-row + .set-row { border-top: 1px solid var(--border-soft); }
 .set-row .l {

@@ -94,24 +94,20 @@ onMounted(() => {
 
 <template>
   <section class="lib-wrap">
-    <div class="lib-head">
-      <div class="lib-stats">
-        <div class="item">
-          <div class="n">{{ lib.items.length }}</div>
-          <span class="l">{{ t('library.stats.sessions') }}</span>
-        </div>
-        <div class="item">
-          <div class="n">{{ lib.totalHours.toFixed(1) }}<em>h</em></div>
-          <span class="l">{{ t('library.stats.recorded') }}</span>
-        </div>
-        <div class="item">
-          <div class="n">{{ lib.totalSpeakers }}</div>
-          <span class="l">{{ t('library.stats.voices') }}</span>
-        </div>
+    <h1 class="page-title" v-html="t('view.library.title')" />
+    <p class="page-sub">{{ t('view.library.sub') }}</p>
+    <div class="lib-stats">
+      <div class="item">
+        <div class="n">{{ lib.items.length }}</div>
+        <span class="l">{{ t('library.stats.sessions') }}</span>
       </div>
-      <div class="head-right">
-        <span>{{ t('library.head.title') }}</span><br />
-        <span class="sub">{{ t('library.head.sub') }}</span>
+      <div class="item">
+        <div class="n">{{ lib.totalHours.toFixed(1) }}<em>h</em></div>
+        <span class="l">{{ t('library.stats.recorded') }}</span>
+      </div>
+      <div class="item">
+        <div class="n">{{ lib.totalSpeakers }}</div>
+        <span class="l">{{ t('library.stats.voices') }}</span>
       </div>
     </div>
 
@@ -284,15 +280,15 @@ onMounted(() => {
 
 <style scoped>
 .lib-wrap { padding: 32px 48px 48px; max-width: 1280px; margin: 0 auto; }
-.lib-head {
+/* 整改 1: 删除 .lib-head 容器, 改用 .page-title + .page-sub (components.css) */
+/* 旧的 .head-right (10px mono 标签) 也已删除 */
+.lib-stats {
   display: flex;
-  justify-content: space-between;
-  align-items: end;
-  margin-bottom: 24px;
-  padding-bottom: 20px;
+  gap: 36px;
+  margin-bottom: 32px;
+  padding-bottom: 24px;
   border-bottom: 1px solid var(--border);
 }
-.lib-stats { display: flex; gap: 36px; }
 .lib-stats .n {
   font-family: var(--serif);
   font-variation-settings: 'SOFT' 50, 'WONK' 1, 'opsz' 144;
@@ -312,16 +308,7 @@ onMounted(() => {
   margin-top: 4px;
   display: block;
 }
-.head-right {
-  text-align: right;
-  font-family: var(--mono);
-  font-size: 10px;
-  color: var(--text-3);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  line-height: 1.6;
-}
-.head-right .sub { color: var(--text-2); }
+/* 整改 1: 删除 dead .head-right (旧 10px mono 标签), 改用 .page-title / .page-sub */
 
 .lib-filter {
   display: flex;

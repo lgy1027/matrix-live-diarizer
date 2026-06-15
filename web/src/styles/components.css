@@ -12,6 +12,33 @@
   color: var(--amber);
 }
 
+/* === 跨页主标题 === 整改 1: 统一 Live / Settings / Library / Voice 4 个 chrome 页面的 h1 */
+/* 响应式 36-48px, serif, 琥珀色 italic em 重音 (与 .h-display em 一致) */
+.page-title {
+  font-family: var(--serif);
+  font-variation-settings: 'SOFT' 50, 'WONK' 1, 'opsz' 144;
+  font-size: clamp(36px, 4vw, 48px);
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  margin: 0 0 12px;
+}
+.page-title em {
+  font-style: italic;
+  color: var(--amber);
+  font-variation-settings: 'SOFT' 100, 'WONK' 1, 'opsz' 144;
+}
+/* 配套副标题 (h1 下方的小写 mono 行, Settings / Library / Voice 共用) */
+.page-sub {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-3);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin: 0 0 24px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+}
 .h-mono {
   font-family: var(--mono);
   font-size: 11px;

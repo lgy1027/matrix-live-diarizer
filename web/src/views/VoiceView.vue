@@ -199,20 +199,16 @@ onMounted(() => {
 <template>
   <section class="voice-wrap" @click="closePopover">
     <!-- head -->
-    <div class="voice-head">
-      <div class="voice-stats">
-        <div>
-          <div class="n">{{ voice.speakers.length }}</div>
-          <span class="l">{{ t('voice.stats.voices') }}</span>
-        </div>
-        <div>
-          <div class="n"><em>{{ voice.sessionsCount }}</em></div>
-          <span class="l">{{ t('voice.stats.sessions') }}</span>
-        </div>
+    <h1 class="page-title" v-html="t('view.voice.title')" />
+    <p class="page-sub">{{ t('view.voice.sub') }}</p>
+    <div class="voice-stats">
+      <div>
+        <div class="n">{{ voice.speakers.length }}</div>
+        <span class="l">{{ t('voice.stats.voices') }}</span>
       </div>
-      <div class="head-right">
-        <span>{{ t('voice.head.title') }}</span><br />
-        <span class="sub">{{ t('voice.head.sub') }}</span>
+      <div>
+        <div class="n"><em>{{ voice.sessionsCount }}</em></div>
+        <span class="l">{{ t('voice.stats.sessions') }}</span>
       </div>
     </div>
 
@@ -350,15 +346,14 @@ onMounted(() => {
 
 <style scoped>
 .voice-wrap { padding: 32px 48px 48px; max-width: 1280px; margin: 0 auto; }
-.voice-head {
+/* 整改 1: 删除 .voice-head 容器, 改用 .page-title + .page-sub (components.css) */
+.voice-stats {
   display: flex;
-  justify-content: space-between;
-  align-items: end;
-  margin-bottom: 24px;
-  padding-bottom: 20px;
+  gap: 36px;
+  margin-bottom: 32px;
+  padding-bottom: 24px;
   border-bottom: 1px solid var(--border);
 }
-.voice-stats { display: flex; gap: 36px; }
 .voice-stats .n {
   font-family: var(--serif);
   font-variation-settings: 'SOFT' 50, 'WONK' 1, 'opsz' 144;
@@ -378,16 +373,7 @@ onMounted(() => {
   margin-top: 4px;
   display: block;
 }
-.head-right {
-  text-align: right;
-  font-family: var(--mono);
-  font-size: 10px;
-  color: var(--text-3);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  line-height: 1.6;
-}
-.head-right .sub { color: var(--text-2); }
+/* 整改 1: 删除 dead .head-right (旧 10px mono 标签), 改用 .page-title / .page-sub */
 .voice-toolbar {
   display: flex;
   gap: 10px;

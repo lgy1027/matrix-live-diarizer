@@ -407,10 +407,7 @@ footer.bar-b{height:32px;padding:0 28px;display:flex;align-items:center;justify-
     background:var(--sp-color, var(--teal));
     margin-right:6px;
   }
-  /* 头部 h1 字号缩(原 48px 太大)*/
-  .set-wrap > h1{font-size:32px}
-  /* 段落标题/大字号调整 */
-  .view > h1,.view-head h1{font-size:24px !important}
+  /* 整改 1: 删除 dead h1 断点规则 (无 live 元素匹配, Vue scoped h1 不响应这些 unscoped 选择器) */
   /* 字号基线 */
   html,body{font-size:13px}
   /* 卡片 padding 减 */
@@ -426,8 +423,7 @@ footer.bar-b{height:32px;padding:0 28px;display:flex;align-items:center;justify-
   .lib-stats .item{flex:1 1 40%}
   /* Bug-70: 极窄屏 wrap 容器进一步压 */
   .live-wrap,.lib-wrap,.voice-wrap,.set-wrap{padding:8px 10px 80px}
-  .set-wrap > h1{font-size:24px}
-  .view > h1,.view-head h1{font-size:20px !important}
+  /* 整改 1: 删除 dead h1 断点规则 */
   /* 字体基线再缩 */
   html,body{font-size:12px}
   /* 卡片 padding 更紧 */
@@ -701,7 +697,8 @@ footer.bar-b{height:32px;padding:0 28px;display:flex;align-items:center;justify-
             <div class="item"><div class="n" id="libSpeakers">0</div><span class="l" data-i18n="library.stats.voices">voices</span></div>
           </div>
           <div style="text-align:right;font-family:var(--mono);font-size:10px;color:var(--text-3);letter-spacing:.1em;text-transform:uppercase;line-height:1.6">
-            <span data-i18n="library.head.title">Library</span><br><span style="color:var(--text-2)" data-i18n="library.head.sub">transcripts & exports</span>
+            <!-- 整改 1: 旧 i18n key 已删, 同步更新 legacy HTML 引用 -->
+            <span data-i18n="view.library.title">Lib<em>rary</em></span><br><span style="color:var(--text-2)" data-i18n="view.library.sub">transcripts & exports</span>
           </div>
         </div>
         <div class="lib-filter">

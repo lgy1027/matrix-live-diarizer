@@ -158,7 +158,7 @@ onMounted(loadRecent)
   <section class="live-wrap">
     <div class="live-grid">
       <div class="live-main">
-        <h1 class="live-title" v-html="t('view.live.title')" />
+        <h1 class="page-title" v-html="t('view.live.title')" />
         <div class="live-meta">
           <span><span>{{ t('view.live.meta.room') }}</span> <b>A</b></span>
           <template v-if="live.rec">
@@ -279,18 +279,8 @@ onMounted(loadRecent)
 .live-grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 48px; align-items: stretch; min-height: calc(100vh - 88px); }
 .live-main { min-width: 0; display: flex; flex-direction: column; }
 .live-main > .transcript { flex: 1; min-height: 200px; }
-.live-title {
-  font-family: var(--serif);
-  font-variation-settings: 'SOFT' 50, 'WONK' 1, 'opsz' 144;
-  font-size: clamp(40px, 5vw, 64px);
-  line-height: 1;
-  letter-spacing: -0.02em;
-  font-weight: 400;
-  margin-bottom: 12px;
-  min-width: 420px;
-  display: inline-block;
-}
-.live-title em { font-style: italic; color: var(--amber); font-variation-settings: 'SOFT' 100, 'WONK' 1; }
+/* 整改 1: 改用 .page-title (components.css) 工具类; 保留 min-width 防止 reflow */
+.page-title { min-width: 420px; display: inline-block; }
 .live-meta {
   display: flex;
   flex-wrap: wrap;
