@@ -1,0 +1,31 @@
+/* Matrix Studio 主题变量 (从旧 web/index.html 内联 style 抽出) */
+:root {
+  --ink: #0A0908;
+  --ink-2: #14110F;
+  --ink-3: #1F1B17;
+  --ink-4: #2A2520;
+  --border: #2A2520;
+  --border-soft: #1F1B17;
+  --text: #F5F1EB;
+  --text-2: #8A847B;
+  --text-3: #5A554E;
+  --amber: #FF6B35;
+  --amber-soft: rgba(255, 107, 53, 0.15);
+  --teal: #4ECDC4;
+  --teal-soft: rgba(78, 205, 196, 0.12);
+  --gold: #D4A574;
+  --gold-soft: rgba(212, 165, 116, 0.14);
+  --green: #6BCB77;
+  --red: #FF4757;
+  --spk-1: #FF6B35;
+  --spk-2: #4ECDC4;
+  --spk-3: #D4A574;
+  --spk-4: #C589E8;
+  --spk-5: #7BC96F;
+  --spk-6: #FFB347;
+  --spk-7: #5DADE2;
+  --spk-8: #EC7063;
+  --sans: 'Outfit', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --serif: 'Fraunces', Georgia, 'Times New Roman', serif;
+  --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
