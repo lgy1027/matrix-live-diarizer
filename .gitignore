@@ -70,6 +70,7 @@ CLAUDE.md
 .agents/
 .iflow/
 docs/superpowers/
+docs/plans/
 skills-lock.json
 AGENTS.md
 # 本地数据
