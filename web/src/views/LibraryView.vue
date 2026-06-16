@@ -94,22 +94,26 @@ onMounted(() => {
 
 <template>
   <section class="lib-wrap">
-    <h1 class="page-title" v-html="t('view.library.title')" />
-    <p class="page-sub">{{ t('view.library.sub') }}</p>
-    <div class="lib-stats">
-      <div class="item">
-        <div class="n">{{ lib.items.length }}</div>
-        <span class="l">{{ t('library.stats.sessions') }}</span>
+    <header class="lib-head">
+      <div class="lib-titles">
+        <h1 class="page-title" v-html="t('view.library.title')" />
+        <p class="page-sub">{{ t('view.library.sub') }}</p>
       </div>
-      <div class="item">
-        <div class="n">{{ lib.totalHours.toFixed(1) }}<em>h</em></div>
-        <span class="l">{{ t('library.stats.recorded') }}</span>
+      <div class="lib-stats">
+        <div class="item">
+          <div class="n">{{ lib.items.length }}</div>
+          <span class="l">{{ t('library.stats.sessions') }}</span>
+        </div>
+        <div class="item">
+          <div class="n">{{ lib.totalHours.toFixed(1) }}<em>h</em></div>
+          <span class="l">{{ t('library.stats.recorded') }}</span>
+        </div>
+        <div class="item">
+          <div class="n">{{ lib.totalSpeakers }}</div>
+          <span class="l">{{ t('library.stats.voices') }}</span>
+        </div>
       </div>
-      <div class="item">
-        <div class="n">{{ lib.totalSpeakers }}</div>
-        <span class="l">{{ t('library.stats.voices') }}</span>
-      </div>
-    </div>
+    </header>
 
     <div class="lib-filter">
       <div class="tabs">
@@ -279,15 +283,22 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.lib-wrap { padding: 32px 48px 48px; max-width: 1280px; margin: 0 auto; }
-/* 整改 1: 删除 .lib-head 容器, 改用 .page-title + .page-sub (components.css) */
-/* 旧的 .head-right (10px mono 标签) 也已删除 */
-.lib-stats {
+.lib-wrap { padding: 32px 48px 48px; }  /* 整改: 删 max-width, 让内容平铺整页 */
+.lib-head {
   display: flex;
-  gap: 36px;
-  margin-bottom: 32px;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-bottom: 28px;
   padding-bottom: 24px;
   border-bottom: 1px solid var(--border);
+  gap: 48px;
+}
+.lib-titles { flex: 0 0 auto; min-width: 0; }
+.lib-titles .page-sub { border-bottom: 0; margin-bottom: 0; padding-bottom: 0; }  /* head 内副标不要 border-bottom, 由 .lib-head 统一画 */
+.lib-stats {
+  display: flex;
+  gap: 56px;
+  flex: 0 0 auto;
 }
 .lib-stats .n {
   font-family: var(--serif);

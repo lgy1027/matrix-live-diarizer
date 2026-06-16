@@ -82,7 +82,7 @@ async function clearTranscript() {
 async function onFile(file: File) {
   if (!file) return
   try {
-    window.toast?.(t('upload.processing') || '处理中…', 'info')  /* 整改 3: ellipsis 统一 … */
+    window.toast?.(t('upload.processing') || '处理中…', 'info')
     const r: UploadResp = await uploadAudio(file, { enable_diarization: true })
     window.toast?.(t('upload.done') || '上传完成', 'ok')
     if (r.session_id) {
@@ -275,7 +275,7 @@ onMounted(loadRecent)
 </template>
 
 <style scoped>
-.live-wrap { padding: 32px 48px 48px; max-width: 1280px; margin: 0 auto; }
+.live-wrap { padding: 32px 48px 48px; }  /* 整改: 删 max-width, 让内容平铺整页 */
 .live-grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 48px; align-items: stretch; min-height: calc(100vh - 88px); }
 .live-main { min-width: 0; display: flex; flex-direction: column; }
 .live-main > .transcript { flex: 1; min-height: 200px; }

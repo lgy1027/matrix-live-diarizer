@@ -183,7 +183,7 @@ onMounted(load)
       <div class="storage-state">
         <span v-if="historyEnabled === true" class="tag green">● {{ t('settings.storage.on') || '已启用' }}</span>
         <span v-else-if="historyEnabled === false" class="tag">○ {{ t('settings.storage.off') || '已停用' }}</span>
-        <span v-else class="tag">? {{ t('settings.storage.unknown') || '未知' }}</span>  /* 整改 3: 状态指示器统一 ●/○/? (em-dash 不再混用) */
+        <span v-else class="tag">? {{ t('settings.storage.unknown') || '未知' }}</span>
         <small>
           {{ t('settings.storage.hint') || '运行时配置 · 由' }}
           <code>STORAGE_HISTORY_ENABLED</code>
@@ -211,7 +211,7 @@ onMounted(load)
 </template>
 
 <style scoped>
-.set-wrap { padding: 32px 48px 48px; max-width: 1280px; margin: 0 auto; }
+.set-wrap { padding: 32px 48px 48px; }  /* 整改: 删 max-width */
 .set-head { padding-bottom: 24px; border-bottom: 1px solid var(--border); margin-bottom: 0; }
 /* 整改 1: 改用 .page-title / .page-sub (components.css), scoped 块里不再重复定义 */
 .set-grid {
@@ -236,7 +236,7 @@ onMounted(load)
   margin-bottom: 4px;
 }
 .set-row .l span { color: var(--text); }
-.set-row .l em { font-style: italic; color: var(--amber); font-variation-settings: 'SOFT' 100, 'WONK' 1; font-size: 12px; opacity: 0.7; }  /* 整改 4: em 英文副标缩小 + 降透明度, 与主标题形成视觉二级 */
+.set-row .l em { font-style: italic; color: var(--amber); font-variation-settings: 'SOFT' 100, 'WONK' 1; opacity: 0.55; }  /* 整改 4: em 英文副标与主标同字号 18px, 只 italic + amber, 透明度温和降以视觉二级 */
 .set-row .d {
   font-family: var(--mono);
   font-size: 11px;

@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useVoiceStore } from '../stores/voice'
 import { listHistory } from '../api/history'
+import { getSpeakerImpact } from '../api/speakers'
 import { useDialog } from '../composables/useDialog'
 import { useEnrollSpeaker } from '../composables/useEnrollSpeaker'
 import { spkColor } from '../utils/spk'
@@ -30,7 +31,7 @@ async function loadAll() {
   try {
     const r = await listHistory({ page: 1, page_size: 200 })
     const ids = new Set<string>()
-    r.items.forEach((it) => (it.speakers || []).forEach((s) => ids.add(s)))
+    r.items.forEach((it) => (it.speakers || []).forEach((s) => ids.add(s.id)))
     voice.setSessionsCount(Math.min(voice.speakers.length, ids.size))
   } catch { /* noop */ }
 }
@@ -88,17 +89,32 @@ async function onRename(id: string) {
 async function onDelete(id: string) {
   closePopover()
   const sp = voice.speakers.find((s) => s.id === id)
+  // 整改: 删声纹前先查影响 (引用了多少 segment / session), confirm 里展示
+  let impactMsg = t('voice.delete.confirmBody') || '此操作不可撤销。'
+  let impact: Awaited<ReturnType<typeof getSpeakerImpact>> | null = null
+  try {
+    impact = await getSpeakerImpact(id)
+  } catch { /* 404 等忽略, 用默认文案 */ }
+  if (impact && impact.segments_count > 0) {
+    impactMsg = `将清空 ${impact.segments_count} 个 segment 引用 (涉及 ${impact.sessions_count} 个 session)\n\n此操作不可撤销。`
+  }
+
   const ok = await dialog.showConfirm({
     title: t('voice.delete.confirmTitle', sp?.id || '') || `删除 ${sp?.id || id}?`,
-    message: t('voice.delete.confirmBody') || '此操作不可撤销。',
+    message: impactMsg,
     confirmText: t('btn.delete') || '删除',
     cancelText: t('btn.cancel') || '取消',
     danger: true,
   })
   if (!ok) return
   try {
-    await voice.remove(id)
-    window.toast?.(t('voice.delete.ok') || '已删除', 'ok')
+    const r = await voice.remove(id)
+    const cleared = r?.cascade_segments_cleared ?? 0
+    if (cleared > 0) {
+      window.toast?.(`已删除声纹, 清空 ${cleared} 个 segment 引用`, 'ok')
+    } else {
+      window.toast?.(t('voice.delete.ok') || '已删除', 'ok')
+    }
   } catch (e) {
     window.toast?.(`${t('toast.error')}: ${e instanceof Error ? e.message : e}`, 'error')
   }
@@ -199,18 +215,22 @@ onMounted(() => {
 <template>
   <section class="voice-wrap" @click="closePopover">
     <!-- head -->
-    <h1 class="page-title" v-html="t('view.voice.title')" />
-    <p class="page-sub">{{ t('view.voice.sub') }}</p>
-    <div class="voice-stats">
-      <div>
-        <div class="n">{{ voice.speakers.length }}</div>
-        <span class="l">{{ t('voice.stats.voices') }}</span>
+    <header class="voice-head">
+      <div class="voice-titles">
+        <h1 class="page-title" v-html="t('view.voice.title')" />
+        <p class="page-sub">{{ t('view.voice.sub') }}</p>
       </div>
-      <div>
-        <div class="n"><em>{{ voice.sessionsCount }}</em></div>
-        <span class="l">{{ t('voice.stats.sessions') }}</span>
+      <div class="voice-stats">
+        <div>
+          <div class="n">{{ voice.speakers.length }}</div>
+          <span class="l">{{ t('voice.stats.voices') }}</span>
+        </div>
+        <div>
+          <div class="n"><em>{{ voice.sessionsCount }}</em></div>
+          <span class="l">{{ t('voice.stats.sessions') }}</span>
+        </div>
       </div>
-    </div>
+    </header>
 
     <!-- 工具条: 搜索 / 清理 / 选择 (无 hint 文字, 顺序自然) -->
     <div class="voice-toolbar">
@@ -345,14 +365,22 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.voice-wrap { padding: 32px 48px 48px; max-width: 1280px; margin: 0 auto; }
-/* 整改 1: 删除 .voice-head 容器, 改用 .page-title + .page-sub (components.css) */
-.voice-stats {
+.voice-wrap { padding: 32px 48px 48px; }  /* 整改: 删 max-width, 让内容平铺整页 */
+.voice-head {
   display: flex;
-  gap: 36px;
-  margin-bottom: 32px;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-bottom: 28px;
   padding-bottom: 24px;
   border-bottom: 1px solid var(--border);
+  gap: 48px;
+}
+.voice-titles { flex: 0 0 auto; min-width: 0; }
+.voice-titles .page-sub { border-bottom: 0; margin-bottom: 0; padding-bottom: 0; }
+.voice-stats {
+  display: flex;
+  gap: 56px;
+  flex: 0 0 auto;
 }
 .voice-stats .n {
   font-family: var(--serif);

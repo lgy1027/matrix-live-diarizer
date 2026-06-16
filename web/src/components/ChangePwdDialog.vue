@@ -46,7 +46,7 @@ async function submit() {
       <div class="modal-actions">
         <button class="btn ghost" type="button" @click="emit('close')">{{ t('btn.cancel') }}</button>
         <button class="btn primary" type="button" :disabled="submitting" @click="submit">
-          {{ submitting ? '…' : (t('btn.confirm') || '确认') }}  /* 整改 3: ellipsis 统一 … */
+          {{ submitting ? '…' : (t('btn.confirm') || '确认') }}
         </button>
       </div>
     </div>

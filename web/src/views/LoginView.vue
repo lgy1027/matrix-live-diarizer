@@ -97,7 +97,7 @@ onMounted(() => {
         </div>
         <h1>Log<em>·</em>in</h1>
         <p class="sub">
-          <span class="label">// </span>{{ t('login.sub') || 'Live transcription & speaker diarization' }}
+          {{ t('login.sub') || 'Live transcription & speaker diarization' }}
         </p>
 
         <div class="field">
@@ -140,7 +140,7 @@ onMounted(() => {
         </div>
 
         <button class="submit-btn" type="submit" :disabled="submitting">
-          {{ submitting ? (t('login.submitting') || '登录中…') : (t('login.submit') || '登 录') }}  /* 整改 3: ellipsis 统一 … */
+          {{ submitting ? (t('login.submitting') || '登录中…') : (t('login.submit') || '登 录') }}
         </button>
         <p v-if="errMsg" class="err" role="alert">{{ errMsg }}</p>
 
@@ -289,7 +289,6 @@ onMounted(() => {
   padding-bottom: 22px;
   border-bottom: 1px solid var(--border);
 }
-.sub .label { color: var(--text-3); }
 .field { margin-bottom: 14px; }
 .field label {
   display: flex;
