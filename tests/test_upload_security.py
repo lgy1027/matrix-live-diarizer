@@ -27,7 +27,7 @@ class TestFileUploadSecurity:
         
         spk_mock = Mock()
         spk_mock.extract_feat = Mock(return_value=[0.1] * 192)
-        spk_mock.compare_and_identify = Mock(return_value="Spk_001")
+        spk_mock.compare_and_identify = Mock(return_value=("Spk_001", 0.95))
         
         import asyncio
         lock = asyncio.Lock()

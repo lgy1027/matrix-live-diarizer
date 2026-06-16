@@ -126,7 +126,7 @@ async def process_audio_chunk_with_diarization(
     else:
         embedding = emb_result
     
-    spk_id = get_speaker_engine().compare_and_identify(
+    spk_id, _spk_score = get_speaker_engine().compare_and_identify(
         embedding,
         FILE_UPLOAD_SESSION,
         audio_duration,
@@ -264,7 +264,7 @@ async def upload_audio(
                                 _emb_vec = _emb[0]
                             else:
                                 _emb_vec = _emb
-                            spk_id = get_speaker_engine().compare_and_identify(
+                            spk_id, _spk_score = get_speaker_engine().compare_and_identify(
                                 _emb_vec,
                                 FILE_UPLOAD_SESSION,
                                 duration,

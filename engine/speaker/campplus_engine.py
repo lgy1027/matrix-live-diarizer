@@ -174,7 +174,7 @@ class CamPlusEngine(BaseSpeakerEngine):
         audio_duration: float = 0,
         use_buffer: bool = True,
         default_name: str | None = None,
-    ) -> str:
+    ) -> tuple[str, float]:
         """说话人匹配与识别 - 优化版
 
         Args:
@@ -186,15 +186,19 @@ class CamPlusEngine(BaseSpeakerEngine):
                 - False: 文件上传场景，每次上传是独立 speaker 查询，buffer 残留会污染
 
         Returns:
-            说话人 ID 字符串;短段(<MIN_USABLE_DURATION)返 "Spk_unknown",不参与匹配
+            tuple[str, float]: (说话人ID, 置信度 0.0-1.0)
+                - 短段(<MIN_USABLE_DURATION) → ("Spk_unknown", 0.0)
+                - embedding=None → ("Unknown", 0.0)
+                - 命中已有 Spk(高/边缘阈值) → (spk_id, 1.0 - best_dist)
+                - 新建 Spk → (new_id, 1.0 - best_dist)  (新 Spk 通常置信度较低)
         """
         if current_emb is None:
-            return "Unknown"
+            return "Unknown", 0.0
 
         # Bug-68: 用纯函数分类段类型(supports testable + 复用)
         segment_class = self._classify_segment_duration(audio_duration)
         if segment_class == "skip":
-            return "Spk_unknown"
+            return "Spk_unknown", 0.0
         is_short_segment = (segment_class == "short")
         is_reliable = (segment_class == "reliable")
 
@@ -226,7 +230,8 @@ class CamPlusEngine(BaseSpeakerEngine):
         # 先检查临时说话人缓存
         pending_spk = self._check_pending_speakers(smoothed_emb, client_id)
         if pending_spk:
-            return pending_spk
+            # pending 命中:置信度尚未"确认"(样本累积中),用 0.5 中性值
+            return pending_spk, 0.5
 
         # 查询已确认的说话人
         results = self.collection.query(
@@ -241,7 +246,7 @@ class CamPlusEngine(BaseSpeakerEngine):
             best_id = results['ids'][0][0]
             best_meta = results['metadatas'][0][0]
             best_count = best_meta.get("count", 1)
-            
+
             # 对于可靠样本，使用更严格的阈值
             # 对于不可靠样本，使用更宽松的阈值（倾向于匹配已有说话人）
             low_thresh = LOW_THRESHOLD if is_reliable else LOW_THRESHOLD + 0.10
@@ -254,9 +259,9 @@ class CamPlusEngine(BaseSpeakerEngine):
                 logger.debug(
                     f"[GRACE] {best_id} samples={best_count}, high_thresh 放宽到 {high_thresh:.2f}"
                 )
-            
+
             logger.debug(f"[MATCH] Dist={best_dist:.4f}, Best={best_id}, Count={best_count}, Reliable={is_reliable}")
-            
+
             # 高置信度匹配
             if best_dist < low_thresh:
                 # 防漂移:已积累足够样本(>= 10)后,锁定均值不再更新,
@@ -283,7 +288,7 @@ class CamPlusEngine(BaseSpeakerEngine):
                 self.collection.update(**update_kwargs)
                 logger.info(f"[MATCHED] {best_id} (sim: {1-best_dist:.0%}, samples={best_count+1}, "
                             f"{'updated' if embedding_to_save is not None else 'locked'})")
-                return best_id
+                return best_id, float(1 - best_dist)
             
             # 边缘匹配：需要已有足够样本
             if best_dist < high_thresh and best_count >= MIN_SAMPLES_FOR_EDGE:
@@ -301,7 +306,7 @@ class CamPlusEngine(BaseSpeakerEngine):
                     metadatas=[{"session_id": client_id, "count": best_count + 1, "last_update": time.time(), "confirmed": True}]
                 )
                 logger.info(f"[EDGE OK] {best_id} (sim: {1-best_dist:.0%}, samples={best_count+1})")
-                return best_id
+                return best_id, float(1 - best_dist)
             
             # 检查第二、第三候选（可能有更好的匹配）
             for i in range(1, min(3, len(results['distances'][0]))):
@@ -325,12 +330,15 @@ class CamPlusEngine(BaseSpeakerEngine):
                         metadatas=[{"session_id": client_id, "count": count + 1, "last_update": time.time(), "confirmed": True}]
                     )
                     logger.info(f"[ALT MATCH] {spk_id} (sim: {1-dist:.0%}, samples={count+1})")
-                    return spk_id
+                    return spk_id, float(1 - dist)
             
             if best_dist < high_thresh:
                 logger.debug(f"[EDGE?] Dist={best_dist:.4f} 样本不足({best_count}<{MIN_SAMPLES_FOR_EDGE})")
             else:
                 logger.debug(f"[NEW?] Dist={best_dist:.4f}")
+        else:
+            # 空 DB / 无候选 → 新建 Spk 路径,后续 return 用 best_dist=None 兜底
+            best_dist = None
 
         # 注册新说话人（但可能还在待确认状态）
         # 整改: new_id 改用 uuid hex 8 字符, 短且唯一; 同时支持 default_name (从 filename 或 client_id 推)
@@ -374,4 +382,7 @@ class CamPlusEngine(BaseSpeakerEngine):
                 )
                 logger.info(f"[FORCE REGISTER] {old_id} (pending overflow)")
 
-        return new_id
+        # 新建 Spk 时的置信度:有候选时返 (1 - best_dist) 反映"与最近候选的相似度"
+        # 无候选(空 DB)时返 0.0;前端可据此判断"是否值得展示给用户看"
+        new_speaker_score = float(1 - best_dist) if best_dist is not None else 0.0
+        return new_id, new_speaker_score

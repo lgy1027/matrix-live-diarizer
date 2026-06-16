@@ -65,8 +65,10 @@ def init_engines(asr, spk, lock):
 # 状态机常量(模块级,供测试 import)
 STATE_SILENCE = 0
 STATE_SPEECH = 1
-SILENCE_THRESHOLD_FRAMES = 3  # 连续 N 帧静音才算语音结束
-LOUD_RMS_THRESHOLD = 0.015    # 能量阈值:超过才走 VAD 判定
+SILENCE_THRESHOLD_FRAMES = 8  # bug-fix: 3 帧 (384ms) 太短,自然换气就切碎。
+                                          # 8 帧 ≈ 1024ms 允许 1 秒停顿不切(用户感受:响应延迟略增,但完整)
+                                          # CLAUDE.md 说 .env 有 VAD_MIN_SILENCE_DURATION 但代码硬编码 3,配置漂移。
+LOUD_RMS_THRESHOLD = 0.005    # bug-fix: 0.015 偏高,某些帧瞬时 RMS 跌到这个值就被判静音 → buffer 不累积。原 0.015。
 
 
 def classify_frame(chunk: np.ndarray, asr_engine_obj) -> bool:
@@ -87,7 +89,10 @@ def classify_frame(chunk: np.ndarray, asr_engine_obj) -> bool:
     if asr_engine_obj is None:
         # 测试/无引擎情况:仅靠能量
         return True
-    return not asr_engine_obj.is_silent(chunk, use_vad=True)
+    # bug-fix: silero-vad 对 2048 samples (128ms) 单帧判定不稳定,经常假阳性判静音
+    # → buffer 永远累积不到 0.5s 以上,Qwen3-ASR 收不到长音频 → 转写空
+    # 改用纯 RMS 判定(阈值已经过第一道门)
+    return not asr_engine_obj.is_silent(chunk, use_vad=False)
 
 
 def should_emit_segment(
@@ -381,6 +386,15 @@ async def _process_speech_segment(
     # run_asr 现在返回 dict {text, words}
     full_text = asr_result.get("text", "") if isinstance(asr_result, dict) else (asr_result or "")
     seg_words = asr_result.get("words") if isinstance(asr_result, dict) else None
+    # diag: 打印 ASR 原始输出 + 音频时长,排查"很多话没转录"问题
+    logger.info(f"[DIAG-ASR] {client_id} duration={audio_duration:.2f}s full_text={full_text!r}")
+
+    # Bug-fix: Qwen3-ASR 对 < 0.5s 短音频返回空(模型没足够上下文),
+    # 用户"一直在说话"但每段 VAD 切到 0.13s 时全返空 → 前端没字幕
+    # 改成 < 0.5s 直接跳过 ASR,等累积够长再识别(用户感受延迟略增,但每段都能稳定识别)
+    if audio_duration < 0.5 and not (full_text and full_text.strip()):
+        logger.info(f"[DIAG-ASR] {client_id} 跳过短段 {audio_duration:.2f}s (< 0.5s, Qwen3-ASR 返空)")
+        return
 
     # 处理声纹提取结果（extract_feat 现在返回 tuple）
     if isinstance(emb_result, tuple):
@@ -393,23 +407,29 @@ async def _process_speech_segment(
         # Bug-12: 过滤常见填充词/语气词,避免实时字幕被噪音淹没
         full_text = _strip_filler_words(full_text)
         if not full_text or not full_text.strip():
+            logger.info(f"[DIAG-ASR] {client_id} 全是填充词,过滤后空")
             return  # 过滤后空,不发
 
         # 调用 compare_and_identify，传递音频时长
         # 整改: 用 client_id 当默认名 (SessionContext 没 session_title 属性, 简化用 client_id)
         _default_name = ctx.client_id
-        spk_id = get_speaker_engine().compare_and_identify(
+        # compare_and_identify 现在返回 (spk_id, score) — 把置信度也透出给前端做可视化
+        spk_id, spk_score = get_speaker_engine().compare_and_identify(
             embedding,
             ctx.client_id,
             audio_duration,
             default_name=_default_name,
         )
         incr_text = ctx.get_incremental_text(full_text)
+        # diag: 看增量合并把什么过滤掉了
+        if not incr_text:
+            logger.info(f"[DIAG-ASR] {client_id} 增量合并返回空 (full_text={full_text!r} last={ctx.last_full_text!r})")
 
         if incr_text:
             try:
                 msg = {
                     "speaker": spk_id,
+                    "score": round(spk_score, 4),
                     "text": incr_text,
                     "time": time.strftime("%H:%M:%S"),
                 }

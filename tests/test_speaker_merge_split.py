@@ -54,7 +54,7 @@ def test_merge_speakers_weighted_average():
         def extract_feat(self, audio):
             return np.zeros(4, dtype=np.float32), 0.0
         def compare_and_identify(self, emb, cid, dur=0):
-            return "Spk_001"
+            return "Spk_001", 0.95
         def list_speakers(self, session_id=None):
             return []
         def get_speaker(self, sid):

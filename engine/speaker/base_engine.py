@@ -38,7 +38,7 @@ class BaseSpeakerEngine(ABC):
         audio_duration: float = 0,
         use_buffer: bool = True,
         default_name: str | None = None,
-    ) -> str:
+    ) -> tuple[str, float]:
         """说话人匹配与识别 - 子类必须实现
 
         Args:
@@ -47,9 +47,13 @@ class BaseSpeakerEngine(ABC):
             audio_duration: 音频时长（秒），用于判断可靠性
             use_buffer: 是否使用滑动窗口平滑 (实时=True, 文件上传=False)
             default_name: 整改 - 新声纹的默认显示名 (从 filename / client_id 推导)
-            
+
         Returns:
-            str: 说话人ID
+            tuple[str, float]: (说话人ID, 置信度 0.0-1.0)
+                - 置信度 = 1 - cosine_distance  (1.0 = 完全匹配, 0.0 = 不匹配)
+                - 新建 Spk 时置信度通常 < 0.5, 命中已注册 Spk 时 ≥ threshold
+                - 短段(<MIN_USABLE_DURATION) 时第二个元素为 0.0
+                - embedding=None 时返 ("Unknown", 0.0)
         """
         pass
     

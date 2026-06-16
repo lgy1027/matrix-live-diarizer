@@ -101,7 +101,7 @@ def _setup_word_level_mocks(monkeypatch, with_words=True):
     # Speaker mock
     spk_mock = MagicMock()
     spk_mock.extract_feat.return_value = (np.zeros(192, dtype=np.float32), 1.0)
-    spk_mock.compare_and_identify.return_value = "Spk_test"
+    spk_mock.compare_and_identify.return_value = ("Spk_test", 0.95)
     upload_mod.get_speaker_engine = lambda: spk_mock
     transcribe_mod.get_speaker_engine = lambda: spk_mock
 

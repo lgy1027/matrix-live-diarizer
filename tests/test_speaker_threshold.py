@@ -85,31 +85,37 @@ def _make_engine_mock():
 
 
 def test_compare_skip_returns_unknown():
-    """< 0.3s 短段直接返 'Spk_unknown',不走声纹匹配"""
+    """< 0.3s 短段直接返 ('Spk_unknown', 0.0),不走声纹匹配"""
     eng = _make_engine_mock()
     emb = np.random.rand(192).astype(np.float32)
 
     # 0.2s 短段
     result = eng.compare_and_identify(emb, client_id="test", audio_duration=0.2)
-    assert result == "Spk_unknown"
+    assert isinstance(result, tuple) and len(result) == 2
+    assert result[0] == "Spk_unknown"
+    assert result[1] == 0.0
     # collection 不应被 query
     eng.collection.query.assert_not_called()
 
 
 def test_compare_zero_duration_returns_unknown():
-    """0s 默认 duration(WS 路径可能传错)返 'Spk_unknown'"""
+    """0s 默认 duration(WS 路径可能传错)返 ('Spk_unknown', 0.0)"""
     eng = _make_engine_mock()
     emb = np.random.rand(192).astype(np.float32)
 
     result = eng.compare_and_identify(emb, client_id="test", audio_duration=0.0)
-    assert result == "Spk_unknown"
+    assert isinstance(result, tuple) and len(result) == 2
+    assert result[0] == "Spk_unknown"
+    assert result[1] == 0.0
 
 
 def test_compare_none_embedding_returns_unknown():
-    """embedding=None 返 'Unknown'"""
+    """embedding=None 返 ('Unknown', 0.0)"""
     eng = _make_engine_mock()
     result = eng.compare_and_identify(None, client_id="test", audio_duration=5.0)
-    assert result == "Unknown"
+    assert isinstance(result, tuple) and len(result) == 2
+    assert result[0] == "Unknown"
+    assert result[1] == 0.0
 
 
 # ========== 阈值常量(方向 A 调整) ==========

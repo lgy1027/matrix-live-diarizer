@@ -95,5 +95,34 @@ class TestBaseEngineSharedMethods:
         assert 'speaker_id' in params
 
 
+def test_compare_and_identify_returns_tuple_with_score():
+    """回归测试:compare_and_identify 必须返回 (spk_id, score) tuple"""
+    from unittest.mock import MagicMock
+    import numpy as np
+    from engine.speaker.campplus_engine import CamPlusEngine
+
+    # 用 CamPlusEngine.__new__ 跳过 __new__ 真模型加载(同 test_speaker_threshold.py 模式)
+    engine = CamPlusEngine.__new__(CamPlusEngine)
+    engine.SIMILARITY_THRESHOLD = 0.65
+    engine._initialized = True
+    engine.collection = MagicMock()
+    # 模拟空 DB:query 返空 distances → 走"新建 Spk"路径(避免 deref best_meta MagicMock)
+    engine.collection.query.return_value = {"distances": [[]], "ids": [[]], "metadatas": [[]]}
+    engine.model = MagicMock()
+    engine.chroma_client = MagicMock()
+    emb = np.zeros(192, dtype=np.float32)
+    client_id = "test_client_returns_tuple"
+    try:
+        result = engine.compare_and_identify(emb, client_id, audio_duration=1.0)
+        assert isinstance(result, tuple), f"应返回 tuple,实际 {type(result)}"
+        assert len(result) == 2, f"应 2 元素,实际 {len(result)}"
+        spk_id, score = result
+        assert isinstance(spk_id, str)
+        assert isinstance(score, float)
+        assert 0.0 <= score <= 1.0
+    finally:
+        engine.cleanup_client(client_id)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
