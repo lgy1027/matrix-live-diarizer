@@ -396,7 +396,14 @@ async def _process_speech_segment(
             return  # 过滤后空,不发
 
         # 调用 compare_and_identify，传递音频时长
-        spk_id = get_speaker_engine().compare_and_identify(embedding, ctx.client_id, audio_duration)
+        # 整改: 用 client_id 当默认名 (SessionContext 没 session_title 属性, 简化用 client_id)
+        _default_name = ctx.client_id
+        spk_id = get_speaker_engine().compare_and_identify(
+            embedding,
+            ctx.client_id,
+            audio_duration,
+            default_name=_default_name,
+        )
         incr_text = ctx.get_incremental_text(full_text)
 
         if incr_text:

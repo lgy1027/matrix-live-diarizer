@@ -1,5 +1,10 @@
 import { call } from './client'
 
+export interface SpeakerRef {
+  id: string
+  name: string  // 整改: 显示名, 后端从 ChromaDB metadata.name 查
+}
+
 export interface HistoryItem {
   id: string
   title?: string
@@ -7,7 +12,7 @@ export interface HistoryItem {
   source: 'websocket' | 'upload'
   duration_sec: number
   segments_count: number
-  speakers: string[]
+  speakers: SpeakerRef[]  // 整改: 从 string[] 升级为 {id, name}[]
   created_at: string
   size_bytes?: number
 }

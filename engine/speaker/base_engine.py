@@ -31,13 +31,22 @@ class BaseSpeakerEngine(ABC):
         pass
     
     @abstractmethod
-    def compare_and_identify(self, current_emb, client_id: str, audio_duration: float = 0) -> str:
+    def compare_and_identify(
+        self,
+        current_emb,
+        client_id: str,
+        audio_duration: float = 0,
+        use_buffer: bool = True,
+        default_name: str | None = None,
+    ) -> str:
         """说话人匹配与识别 - 子类必须实现
-        
+
         Args:
             current_emb: 当前声纹特征
             client_id: 客户端ID
             audio_duration: 音频时长（秒），用于判断可靠性
+            use_buffer: 是否使用滑动窗口平滑 (实时=True, 文件上传=False)
+            default_name: 整改 - 新声纹的默认显示名 (从 filename / client_id 推导)
             
         Returns:
             str: 说话人ID

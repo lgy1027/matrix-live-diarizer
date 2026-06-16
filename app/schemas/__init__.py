@@ -10,10 +10,11 @@ from app.schemas.response import (
     SpeakerListResponse,
     SpeakerUpdateRequest,
     SpeakerDeleteResponse,
+    SpeakerImpactResponse,
 )
 
 __all__ = [
     'UploadResponse', 'ModelsResponse', 'EngineInfo', 'ASRInfo', 'SegmentResult',
     'SpeakerInfo', 'SpeakerResponse', 'SpeakerListResponse', 'SpeakerUpdateRequest',
-    'SpeakerDeleteResponse',
+    'SpeakerDeleteResponse', 'SpeakerImpactResponse',
 ]

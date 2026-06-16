@@ -126,7 +126,13 @@ async def process_audio_chunk_with_diarization(
     else:
         embedding = emb_result
     
-    spk_id = get_speaker_engine().compare_and_identify(embedding, FILE_UPLOAD_SESSION, audio_duration, use_buffer=False)
+    spk_id = get_speaker_engine().compare_and_identify(
+        embedding,
+        FILE_UPLOAD_SESSION,
+        audio_duration,
+        use_buffer=False,
+        default_name=os.path.splitext(original_filename)[0] if original_filename else None,  # 整改: 从文件名推默认显示名
+    )
     
     return SegmentResult(
         speaker=spk_id,
@@ -247,10 +253,27 @@ async def upload_audio(
                     if transcribe_result.segments:
                         seg0 = transcribe_result.segments[0]
                         text = seg0.text
-                        spk_id = seg0.speaker_id
-                        # Bug-66 修复: seg_words 之前没在 enable_diarization 路径定义
-                        # 现在从 transcribe_result.segments[0].words 取
                         seg_words = seg0.words
+                        # 整改: transcribe_file 不做声纹识别 (speaker_id 留空),
+                        # 短路径得自己调一次 compare_and_identify, 用 filename 当默认名
+                        try:
+                            import librosa
+                            _audio, _ = librosa.load(file_path, sr=config.audio.sample_rate)
+                            _emb = get_speaker_engine().extract_feat(_audio)
+                            if isinstance(_emb, tuple):
+                                _emb_vec = _emb[0]
+                            else:
+                                _emb_vec = _emb
+                            spk_id = get_speaker_engine().compare_and_identify(
+                                _emb_vec,
+                                FILE_UPLOAD_SESSION,
+                                duration,
+                                use_buffer=False,
+                                default_name=os.path.splitext(file.filename)[0] if file.filename else None,
+                            )
+                        except Exception as _e:
+                            logger.warning(f"[UPLOAD] 短路径声纹识别失败: {_e}")
+                            spk_id = None
                     else:
                         text = ""
                         spk_id = None
@@ -290,6 +313,12 @@ async def upload_audio(
             else:
                 session_id = None
 
+            # 整改: 短音频路径也加 has_speech + warning, 避免短文件漏检
+            _has_speech = bool((text or "").strip())
+            _warning = None
+            if not _has_speech:
+                _warning = f"未识别到语音内容。文件时长 {duration:.1f}s, 但 ASR (Qwen3-ASR) 未输出文本。常见原因: 纯静音/纯音乐/合成音频/录音质量差。"
+
             return UploadResponse(
                 status="success",
                 filename=file.filename,
@@ -297,6 +326,8 @@ async def upload_audio(
                 text=text or "",
                 duration=duration,
                 session_id=session_id,
+                has_speech=_has_speech,
+                warning=_warning,
             )
         
         # 长音频分段处理
@@ -382,6 +413,12 @@ async def upload_audio(
         else:
             session_id = None
 
+        # 整改: 检测是否有语音内容, 没语音时显式标 has_speech=False + warning
+        has_speech = bool(merged_text.strip() or (segments and any(s.text.strip() for s in segments)))
+        warning = None
+        if not has_speech:
+            warning = f"未识别到语音内容。文件时长 {duration:.1f}s, 但 ASR (Qwen3-ASR) 未输出文本。常见原因: 纯静音/纯音乐/合成音频/录音质量差。"
+
         return UploadResponse(
             status="success",
             filename=file.filename,
@@ -390,6 +427,8 @@ async def upload_audio(
             segments=segments,
             speakers=sorted(list(all_speakers)) if enable_diarization else None,
             session_id=session_id,
+            has_speech=has_speech,
+            warning=warning,
         )
         
     except HTTPException:

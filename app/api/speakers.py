@@ -10,6 +10,7 @@ from app.schemas.response import (
     SpeakerResponse,
     SpeakerUpdateRequest,
     SpeakerDeleteResponse,
+    SpeakerImpactResponse,
     EngineSwitchRequest,
     EngineSwitchResponse,
     EnginesListResponse,
@@ -73,6 +74,31 @@ async def get_speaker(speaker_id: str = SPEAKER_ID_PATH):
     return SpeakerResponse(speaker=speaker)
 
 
+@router.get("/v1/speakers/{speaker_id}/impact", response_model=SpeakerImpactResponse)
+async def get_speaker_impact(
+    speaker_id: str = SPEAKER_ID_PATH,
+    request: Request = None,
+):
+    """预览删除声纹的影响 (segments 数 / sessions 数)
+
+    整改: 前端删声纹前调用此接口, 弹 confirm 显示"将清空 N 个 segment 引用,
+    涉及 M 个 session", 避免盲目删声纹导致历史文稿归属丢失.
+    """
+    engine = get_speaker_engine()
+    speaker = engine.get_speaker(speaker_id)
+    if not speaker:
+        raise HTTPException(status_code=404, detail=f"说话人 {speaker_id} 不存在")
+
+    transcript_repo = request.app.state.transcript_repo
+    segments_count = transcript_repo.count_segments_with_speaker(speaker_id)
+    sessions_count = transcript_repo.count_sessions_with_speaker(speaker_id)
+    return SpeakerImpactResponse(
+        speaker_id=speaker_id,
+        segments_count=segments_count,
+        sessions_count=sessions_count,
+    )
+
+
 @router.patch("/v1/speakers/{speaker_id}", response_model=SpeakerResponse)
 async def rename_speaker(
     speaker_id: str = SPEAKER_ID_PATH,
@@ -93,18 +119,49 @@ async def rename_speaker(
 
 
 @router.delete("/v1/speakers/{speaker_id}", response_model=SpeakerDeleteResponse)
-async def delete_speaker(speaker_id: str = SPEAKER_ID_PATH):
-    """删除说话人"""
+async def delete_speaker(
+    speaker_id: str = SPEAKER_ID_PATH,
+    cascade: bool = True,
+    request: Request = None,
+):
+    """删除说话人
+
+    整改: 默认 cascade=True, 删除声纹前先清空 segments.speaker_id 引用
+    (与 POST /v1/speakers/cleanup cascade 行为一致), 避免孤立 Spk_xxx 引用.
+    cascade=false 时只删 ChromaDB, segments 引用保留 (允许用户主动保留历史归属).
+    """
     engine = get_speaker_engine()
     speaker = engine.get_speaker(speaker_id)
     if not speaker:
         raise HTTPException(status_code=404, detail=f"说话人 {speaker_id} 不存在")
 
+    # cascade: 先清 segments 引用
+    cascade_cleared = 0
+    affected_sessions = 0
+    if cascade and request is not None:
+        transcript_repo = request.app.state.transcript_repo
+        try:
+            cascade_cleared = transcript_repo.clear_speaker_id_from_segments(speaker_id)
+            # 统计受影响的 session 数 (segments.speaker_id 清空后, 哪些 session 还有过这个 speaker)
+            if cascade_cleared > 0:
+                affected_sessions = transcript_repo.count_sessions_with_speaker(speaker_id)
+        except Exception as e:
+            logger.warning(f"[DELETE-SPEAKER] cascade 清空失败 {speaker_id}: {e}")
+
+    # 再删 ChromaDB
     success = engine.delete_speaker(speaker_id)
     if not success:
         raise HTTPException(status_code=500, detail="删除失败")
 
-    return SpeakerDeleteResponse(message=f"已删除说话人 {speaker_id}")
+    msg = f"已删除说话人 {speaker_id}"
+    if cascade_cleared > 0:
+        msg += f", 已清空 {cascade_cleared} 个 segment 引用 (涉及 {affected_sessions} 个 session)"
+
+    return SpeakerDeleteResponse(
+        message=msg,
+        cascade_segments_cleared=cascade_cleared,
+        affected_sessions=affected_sessions,
+    )
 
 
 @router.post("/v1/speakers/cleanup", response_model=CleanupResponse)

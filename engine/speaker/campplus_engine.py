@@ -167,7 +167,14 @@ class CamPlusEngine(BaseSpeakerEngine):
 
         return None
 
-    def compare_and_identify(self, current_emb, client_id: str, audio_duration: float = 0, use_buffer: bool = True) -> str:
+    def compare_and_identify(
+        self,
+        current_emb,
+        client_id: str,
+        audio_duration: float = 0,
+        use_buffer: bool = True,
+        default_name: str | None = None,
+    ) -> str:
         """说话人匹配与识别 - 优化版
 
         Args:
@@ -326,29 +333,45 @@ class CamPlusEngine(BaseSpeakerEngine):
                 logger.debug(f"[NEW?] Dist={best_dist:.4f}")
 
         # 注册新说话人（但可能还在待确认状态）
-        new_id = f"Spk_{int(time.time_ns() % (1 << 31))}"
-        
+        # 整改: new_id 改用 uuid hex 8 字符, 短且唯一; 同时支持 default_name (从 filename 或 client_id 推)
+        import uuid as _uuid
+        new_id = f"Spk_{_uuid.uuid4().hex[:8]}"
+        # 默认名: 优先用 default_name, 否则剥 client_id 当 fallback
+        display_name = default_name or client_id.replace("test_client_", "").replace("_", " ").strip() or new_id
+
         if is_reliable:
             # 可靠样本：直接注册
             self.collection.add(
                 ids=[new_id],
                 embeddings=[emb_list],
-                metadatas=[{"session_id": client_id, "count": 1, "last_update": time.time(), "confirmed": True}]
+                metadatas=[{
+                    "session_id": client_id,
+                    "count": 1,
+                    "last_update": time.time(),
+                    "confirmed": True,
+                    "name": display_name,  # 整改: 写入默认显示名
+                }],
             )
-            logger.info(f"[NEW SPEAKER] {new_id} (reliable, {audio_duration:.1f}s)")
+            logger.info(f"[NEW SPEAKER] {new_id} name={display_name!r} (reliable, {audio_duration:.1f}s)")
         else:
             # 不可靠样本：放入待确认缓存
             self.pending_speakers[client_id].append((smoothed_emb, audio_duration, new_id, 1))
-            logger.info(f"[PENDING] {new_id} (unreliable, {audio_duration:.1f}s, need {self.PENDING_THRESHOLD} samples)")
-            
+            logger.info(f"[PENDING] {new_id} name={display_name!r} (unreliable, {audio_duration:.1f}s, need {self.PENDING_THRESHOLD} samples)")
+
             # 如果待确认缓存超过限制，强制注册最老的一个
             if len(self.pending_speakers[client_id]) > 5:
                 old_emb, _, old_id, old_count = self.pending_speakers[client_id].pop(0)
                 self.collection.add(
                     ids=[old_id],
                     embeddings=[old_emb.tolist()],
-                    metadatas=[{"session_id": client_id, "count": old_count, "last_update": time.time(), "confirmed": False}]
+                    metadatas=[{
+                        "session_id": client_id,
+                        "count": old_count,
+                        "last_update": time.time(),
+                        "confirmed": False,
+                        "name": display_name,
+                    }],
                 )
                 logger.info(f"[FORCE REGISTER] {old_id} (pending overflow)")
-        
+
         return new_id

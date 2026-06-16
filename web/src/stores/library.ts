@@ -70,7 +70,7 @@ export const useLibraryStore = defineStore('library', () => {
   const totalHours = computed(() => items.value.reduce((s, it) => s + (it.duration_sec || 0), 0) / 3600)
   const totalSpeakers = computed(() => {
     const set = new Set<string>()
-    items.value.forEach((it) => (it.speakers || []).forEach((s) => set.add(s)))
+    items.value.forEach((it) => (it.speakers || []).forEach((s) => set.add(s.id)))
     return set.size
   })
 

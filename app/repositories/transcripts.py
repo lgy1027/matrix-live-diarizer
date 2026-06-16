@@ -252,6 +252,27 @@ class TranscriptRepository:
             ).fetchone()
         return row[0] if row else 0
 
+    def count_sessions_with_speaker(self, speaker_id: str) -> int:
+        """统计引用了 speaker_id 的 session 数 (用于删除声纹时展示影响面)
+
+        返回 DISTINCT session_id 计数. 0 表示没文稿引用, 删除是安全的.
+        """
+        with self.db.connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(DISTINCT session_id) FROM segments WHERE speaker_id = ?",
+                (speaker_id,),
+            ).fetchone()
+        return row[0] if row else 0
+
+    def count_segments_with_speaker(self, speaker_id: str) -> int:
+        """统计引用了 speaker_id 的 segment 总数 (用于删声纹影响预览)"""
+        with self.db.connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM segments WHERE speaker_id = ?",
+                (speaker_id,),
+            ).fetchone()
+        return row[0] if row else 0
+
     def clear_speaker_id_from_segments(self, speaker_id: str) -> int:
         """把 segments 表里所有 speaker_id == X 的清空成 NULL
 

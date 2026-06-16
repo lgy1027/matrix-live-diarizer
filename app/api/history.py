@@ -44,6 +44,23 @@ def list_history(
     total, items = repo.get_enriched_sessions(
         source=norm_source, q=norm_q, limit=page_size, offset=offset
     )
+
+    # 整改: 把 speakers: [Spk_xxx, ...] 升级为 [{id, name}, ...] (查 ChromaDB 别名)
+    # 批量查避免 N+1
+    spk_engine = request.app.state.spk_engine
+    all_spk_ids: set[str] = set()
+    for it in items:
+        for sid in it.get("speakers") or []:
+            if sid:
+                all_spk_ids.add(sid)
+    spk_lookup: dict[str, str] = {}
+    for sid in all_spk_ids:
+        info = spk_engine.get_speaker(sid)
+        spk_lookup[sid] = (info.get("name") if info else None) or sid
+    for it in items:
+        it["speakers"] = [
+            {"id": sid, "name": spk_lookup.get(sid, sid)} for sid in (it.get("speakers") or [])
+        ]
     return HistoryListResponse(total=total, items=items)
 
 

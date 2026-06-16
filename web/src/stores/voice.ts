@@ -82,8 +82,9 @@ export const useVoiceStore = defineStore('voice', () => {
     await load()
   }
   async function remove(id: string) {
-    await deleteSpeaker(id)
+    const r = await deleteSpeaker(id, true)  // cascade=true, 删声纹时自动清 segments 引用
     await load()
+    return r
   }
 
   async function previewCleanup(maxCount = 5) {

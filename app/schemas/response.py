@@ -16,7 +16,10 @@ class SegmentResult(BaseModel):
 
 
 class UploadResponse(BaseModel):
-    """上传响应"""
+    """上传响应
+
+    整改: 新增 has_speech + warning 字段, 让用户知道上传是否真的识别出了语音.
+    """
     status: str
     filename: Optional[str] = None
     speaker: Optional[str] = None
@@ -26,6 +29,8 @@ class UploadResponse(BaseModel):
     segments: Optional[List[SegmentResult]] = None
     speakers: Optional[List[str]] = None
     session_id: Optional[str] = None
+    has_speech: bool = True
+    warning: Optional[str] = None
 
 
 class EngineInfo(BaseModel):
@@ -103,8 +108,25 @@ class SpeakerUpdateRequest(BaseModel):
 
 
 class SpeakerDeleteResponse(BaseModel):
-    """说话人删除响应"""
+    """说话人删除响应
+
+    整改: 默认 cascade_segments_cleared=True (与 POST /v1/speakers/cleanup cascade 一致),
+    删除声纹时自动清空 segments.speaker_id 引用, 避免孤立 Spk_xxx 显示.
+    """
     message: str
+    cascade_segments_cleared: int = 0
+    affected_sessions: int = 0
+
+
+class SpeakerImpactResponse(BaseModel):
+    """删声纹影响预览 (整改)
+
+    segments_count: 引用此声纹的 segment 数 (清空后这些 segment.speaker_id 变 NULL)
+    sessions_count: 引用此声纹的 session 数 (DISTINCT)
+    """
+    speaker_id: str
+    segments_count: int
+    sessions_count: int
 
 
 class EngineSwitchRequest(BaseModel):

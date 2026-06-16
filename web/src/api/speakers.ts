@@ -17,8 +17,20 @@ export async function patchSpeaker(id: string, name: string) {
   return call<{ message: string }>({ url: `/v1/speakers/${id}`, method: 'PATCH', data: { name } })
 }
 
-export async function deleteSpeaker(id: string) {
-  return call<{ message: string }>({ url: `/v1/speakers/${id}`, method: 'DELETE' })
+export async function deleteSpeaker(id: string, cascade = true) {
+  return call<{ message: string; cascade_segments_cleared: number; affected_sessions: number }>({
+    url: `/v1/speakers/${id}?cascade=${cascade}`,
+    method: 'DELETE',
+  })
+}
+
+export interface SpeakerImpact {
+  speaker_id: string
+  segments_count: number
+  sessions_count: number
+}
+export async function getSpeakerImpact(id: string) {
+  return call<SpeakerImpact>({ url: `/v1/speakers/${id}/impact`, method: 'GET' })
 }
 
 export interface CleanupResult {
@@ -77,6 +89,8 @@ export async function uploadAudio(
     segments?: Array<{ speaker: string; text: string; start_time: number; end_time: number; words?: { text: string; start: number; end: number }[] }>
     speakers?: string[]
     session_id?: string
+    has_speech?: boolean  // 整改: 是否真识别出语音
+    warning?: string      // 整改: 未识别语音时显示提示
   }>({
     url: `/v1/upload?${qs.toString()}`,
     method: 'POST',
