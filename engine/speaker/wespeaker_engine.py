@@ -192,6 +192,9 @@ class WespeakerEngine(BaseSpeakerEngine):
                     return best_id, float(1 - min_dist)
 
                 logger.debug(f"[EDGE?] Dist={min_dist:.4f} 待确认 (连续匹配 {same_speaker_count} 次)")
+        else:
+            # 空 DB / 无候选 → 新建 Spk 路径,后续 return 用 min_dist=None 兜底
+            min_dist = None
 
         # 注册新说话人
         new_id = f"Spk_{int(time.time_ns() % (1 << 31))}"
@@ -202,5 +205,5 @@ class WespeakerEngine(BaseSpeakerEngine):
         )
         logger.info(f"[NEW SPEAKER] {new_id} ({audio_duration:.1f}s)")
         # 新建 Spk 时如果有 best_dist,返 1-best_dist;无候选(空 DB)返 0.0
-        new_speaker_score = float(1 - min_dist) if results.get('distances') and len(results['distances'][0]) > 0 else 0.0
+        new_speaker_score = float(1 - min_dist) if min_dist is not None else 0.0
         return new_id, new_speaker_score

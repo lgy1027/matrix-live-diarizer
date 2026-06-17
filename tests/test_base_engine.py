@@ -95,33 +95,59 @@ class TestBaseEngineSharedMethods:
         assert 'speaker_id' in params
 
 
-def test_compare_and_identify_returns_tuple_with_score():
-    """回归测试:compare_and_identify 必须返回 (spk_id, score) tuple"""
+@pytest.mark.parametrize(
+    "engine_cls",
+    [
+        "CamPlusEngine",
+        "ERes2NetEngine",
+        "WespeakerEngine",
+    ],
+)
+def test_compare_and_identify_returns_tuple_with_score(engine_cls):
+    """回归测试:compare_and_identify 必须返回 (spk_id, score) tuple
+
+    3 个引擎都要覆盖 — 抽象签名非运行时强制,缺一个就有回归风险。
+    """
     from unittest.mock import MagicMock
     import numpy as np
     from engine.speaker.campplus_engine import CamPlusEngine
+    from engine.speaker.eres2net_engine import ERes2NetEngine
+    from engine.speaker.wespeaker_engine import WespeakerEngine
 
-    # 用 CamPlusEngine.__new__ 跳过 __new__ 真模型加载(同 test_speaker_threshold.py 模式)
-    engine = CamPlusEngine.__new__(CamPlusEngine)
-    engine.SIMILARITY_THRESHOLD = 0.65
-    engine._initialized = True
+    cls_map = {
+        "CamPlusEngine": CamPlusEngine,
+        "ERes2NetEngine": ERes2NetEngine,
+        "WespeakerEngine": WespeakerEngine,
+    }
+    target_cls = cls_map[engine_cls]
+
+    # 用 __new__ 跳过 __init__(避免真模型加载),手动挂载最小化 mock attrs
+    engine = target_cls.__new__(target_cls)
     engine.collection = MagicMock()
     # 模拟空 DB:query 返空 distances → 走"新建 Spk"路径(避免 deref best_meta MagicMock)
     engine.collection.query.return_value = {"distances": [[]], "ids": [[]], "metadatas": [[]]}
     engine.model = MagicMock()
     engine.chroma_client = MagicMock()
+    engine._initialized = True
+    # campplus / eres2net / wespeaker 共享这些 buffer 属性 — defaultdict 让新 client_id 自动建空 list
+    from collections import defaultdict
+    engine.emb_buffer = defaultdict(list)
+    engine.match_history = defaultdict(list)
+    engine.EMB_BUFFER_SIZE = 5
+    engine.HISTORY_SIZE = 3
     emb = np.zeros(192, dtype=np.float32)
-    client_id = "test_client_returns_tuple"
+    client_id = f"test_client_returns_tuple_{engine_cls}"
     try:
         result = engine.compare_and_identify(emb, client_id, audio_duration=1.0)
-        assert isinstance(result, tuple), f"应返回 tuple,实际 {type(result)}"
-        assert len(result) == 2, f"应 2 元素,实际 {len(result)}"
+        assert isinstance(result, tuple), f"{engine_cls}: 应返回 tuple,实际 {type(result)}"
+        assert len(result) == 2, f"{engine_cls}: 应 2 元素,实际 {len(result)}"
         spk_id, score = result
-        assert isinstance(spk_id, str)
-        assert isinstance(score, float)
-        assert 0.0 <= score <= 1.0
+        assert isinstance(spk_id, str), f"{engine_cls}: spk_id 应为 str,实际 {type(spk_id)}"
+        assert isinstance(score, float), f"{engine_cls}: score 应为 float,实际 {type(score)}"
+        assert 0.0 <= score <= 1.0, f"{engine_cls}: score 应在 [0,1],实际 {score}"
     finally:
-        engine.cleanup_client(client_id)
+        if hasattr(engine, "cleanup_client"):
+            engine.cleanup_client(client_id)
 
 
 if __name__ == "__main__":
