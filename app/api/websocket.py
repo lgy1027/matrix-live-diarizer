@@ -122,15 +122,32 @@ def should_emit_segment(
 class SeqCounter:
     """单调递增 seq 分配器,用于 transcribing/ASR 结果配对
 
-    每个 WS 连接维护一份,前端的占位消息(seq=N)和后续 ASR 结果(msg.seq=N)配对。
+    协议:
+    - next() 分配一个新 seq(在 SILENCE→SPEECH 时调用,推 transcribing 占位消息)
+    - consume_pending() 取出并清空最近一次 next() 分配的 seq(在 ASR 完成时调用,让 ASR msg 与 transcribing 配对)
+    - 两次 next() 之间未 consume_pending() 是允许的:旧 pending 会被覆盖(与 spec "同一时刻仅 1 个占位段" 对齐)
     """
 
     def __init__(self) -> None:
         self._n = 0
+        self._pending: int | None = None
 
     def next(self) -> int:
+        """分配并记住一个新 seq(用于 transcribing 占位)"""
         self._n += 1
+        self._pending = self._n
         return self._n
+
+    def consume_pending(self) -> int:
+        """返回最近一次 next() 分配的 seq;若没有 pending(老消息/异常路径)返 0
+
+        0 作为 sentinel 表示 "该消息没有 transcribing 配对" (前端可忽略 seq 字段或创建新段)
+        """
+        if self._pending is None:
+            return 0
+        v = self._pending
+        self._pending = None
+        return v
 
 
 def should_push_transcribing(prev_state: int, new_state: int) -> bool:
@@ -460,7 +477,7 @@ async def _process_speech_segment(
             try:
                 # ASR 结果带 seq,与前面推的 transcribing 占位(seq=N)配对
                 seq_counter = getattr(websocket, "_seq_counter", None)
-                seq = seq_counter.next() if seq_counter else 0
+                seq = seq_counter.consume_pending() if seq_counter else 0
                 msg = {
                     "speaker": spk_id,
                     "score": round(spk_score, 4),
