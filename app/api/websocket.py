@@ -119,6 +119,28 @@ def should_emit_segment(
     return False
 
 
+class SeqCounter:
+    """单调递增 seq 分配器,用于 transcribing/ASR 结果配对
+
+    每个 WS 连接维护一份,前端的占位消息(seq=N)和后续 ASR 结果(msg.seq=N)配对。
+    """
+
+    def __init__(self) -> None:
+        self._n = 0
+
+    def next(self) -> int:
+        self._n += 1
+        return self._n
+
+
+def should_push_transcribing(prev_state: int, new_state: int) -> bool:
+    """判断是否应推 transcribing 占位消息
+
+    仅在 SILENCE→SPEECH 状态切换时返回 True,即"用户开始说话"那一帧。
+    """
+    return prev_state == STATE_SILENCE and new_state == STATE_SPEECH
+
+
 def next_state(state: int, is_speech: bool) -> int:
     """状态机推进: SILENCE ↔ SPEECH
 
@@ -277,6 +299,15 @@ async def audio_processor(
                 speech_buffer = chunk.copy()
                 silence_frame_count = 0
                 logger.debug(f"[PROCESSOR] {client_id} 语音开始")
+                # 推 transcribing 占位消息(纯函数判定: 仅 SILENCE→SPEECH 触发)
+                if should_push_transcribing(STATE_SILENCE, state):
+                    if not hasattr(websocket, "_seq_counter"):
+                        websocket._seq_counter = SeqCounter()
+                    seq = websocket._seq_counter.next()
+                    try:
+                        await websocket.send_json({"type": "transcribing", "seq": seq})
+                    except Exception as e:
+                        logger.debug(f"[PROCESSOR] 推 transcribing 失败: {e}")
             else:
                 # 持续静音
                 silence_frame_count += 1
@@ -427,11 +458,15 @@ async def _process_speech_segment(
 
         if incr_text:
             try:
+                # ASR 结果带 seq,与前面推的 transcribing 占位(seq=N)配对
+                seq_counter = getattr(websocket, "_seq_counter", None)
+                seq = seq_counter.next() if seq_counter else 0
                 msg = {
                     "speaker": spk_id,
                     "score": round(spk_score, 4),
                     "text": incr_text,
                     "time": time.strftime("%H:%M:%S"),
+                    "seq": seq,
                 }
                 # 字级时间戳:在 incr_text 上做近似对齐(整体偏移到 segment 起始时间 0)
                 # 真实精确对齐需要 segment 累积时间偏移,留作 v0.3.x 增量
