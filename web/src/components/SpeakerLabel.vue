@@ -19,9 +19,9 @@ const tier = computed(() => {
 })
 
 const displayText = computed(() => {
-  if (tier.value === 'unknown') return '未知说话人'
   if (tier.value === 'low') return '未知说话人'
   if (tier.value === 'medium' || props.showQuestion) return `${props.speaker}?`
+  // high 或 unknown(score 缺失):保留原 speaker 名字,只换样式
   return props.speaker
 })
 </script>
