@@ -8,6 +8,8 @@ import { spkColor } from '../utils/spk'
 import { fmtClock, fmtRel } from '../utils/format'
 import { uploadAudio } from '../api/speakers'
 import SpeakerLabel from '../components/SpeakerLabel.vue'
+import SpeakerMenu from '../components/SpeakerMenu.vue'
+import type { LiveSegment } from '../stores/live'
 type UploadResp = Awaited<ReturnType<typeof uploadAudio>>
 
 const { t } = useI18n()
@@ -120,10 +122,15 @@ function onPickFile() {
   inp.click()
 }
 
-function onSpeakerClick(seg: any) {
-  // Task 6 会接 rename/merge 菜单;此处先 console.info 占位
-  console.info('[live] speaker clicked', seg.id, seg.speaker)
+function onSpeakerClick(seg: LiveSegment) {
+  menuSeg.value = seg
 }
+
+function closeSpeakerMenu() {
+  menuSeg.value = null
+}
+
+const menuSeg = ref<LiveSegment | null>(null)
 
 let rafId: number | null = null
 function tick() {
@@ -292,6 +299,7 @@ onMounted(loadRecent)
         </div>
       </aside>
     </div>
+    <SpeakerMenu :seg="menuSeg" :visible="menuSeg !== null" @close="closeSpeakerMenu" />
   </section>
 </template>
 

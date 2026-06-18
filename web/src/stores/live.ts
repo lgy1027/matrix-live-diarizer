@@ -194,7 +194,36 @@ export const useLiveStore = defineStore('live', () => {
     }
   }
 
+  // 说话人手动覆盖:session 内本地生效,刷新重置
+  // 不持久化到数据库,跟"实时显示"对齐
+  const speakerOverride = ref<Map<number, string>>(new Map())
+
+  function renameSegmentSpeaker(segId: number, newName: string) {
+    if (!newName) return
+    speakerOverride.value.set(segId, newName)
+    speakerOverride.value = new Map(speakerOverride.value)  // Vue 响应式触发
+  }
+
+  function revertSegmentRename(segId: number) {
+    speakerOverride.value.delete(segId)
+    speakerOverride.value = new Map(speakerOverride.value)
+  }
+
+  function mergeSegmentSpeaker(segId: number, targetSpeakerId: string) {
+    const seg = segments.value.find(s => s.id === segId)
+    if (!seg) return
+    // 直接修改 speaker,让 getDisplayName 派生出 target 的友好名
+    seg.speaker = targetSpeakerId
+    // 清掉 override(避免覆盖)
+    speakerOverride.value.delete(segId)
+    speakerOverride.value = new Map(speakerOverride.value)
+  }
+
   function getDisplayName(seg: LiveSegment): string {
+    // override 优先(用户手动改的名字)
+    const overridden = speakerOverride.value.get(seg.id)
+    if (overridden) return overridden
+
     if (!seg.speaker) return '未知说话人'
     if (seg.speaker === 'SYSTEM') return '系统'
     if (seg.speaker.startsWith('Spk_')) {
@@ -321,11 +350,15 @@ export const useLiveStore = defineStore('live', () => {
     segCount,
     spkCount,
     waveHist,
+    speakerOverride,
     startRec,
     stopRec,
     rename,
     clearTranscript,
     getDisplayName,
+    renameSegmentSpeaker,
+    revertSegmentRename,
+    mergeSegmentSpeaker,
     // 测试用:让 Playwright 能注入假 ASR 消息(无需真实麦克风)
     __testInject: (m: unknown) => onMessage(m as never),
   }
