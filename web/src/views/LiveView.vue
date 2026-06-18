@@ -193,13 +193,13 @@ onMounted(loadRecent)
             <span style="margin-left: 14px" v-else-if="live.wsState === 'reconnecting'">{{ t('live.reconnecting') || 'reconnecting…' }}</span>
           </div>
           <div style="margin-left: auto; display: flex; gap: 6px; align-items: center">
-            <button class="btn ghost" type="button" :title="t('view.live.renameBtn.title')" @click="rename">
+            <button v-if="live.rec" class="btn ghost" type="button" :title="t('view.live.renameBtn.title')" @click="rename">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" /></svg>
-              <span>{{ t('view.live.renameBtn') || 'Name' }}</span>
+              <span>{{ t('view.live.renameBtn') || '命名' }}</span>
             </button>
-            <button class="btn ghost" type="button" :title="t('view.live.clearBtn.title')" @click="clearTranscript">
+            <button v-if="live.rec || live.segments.length > 0" class="btn ghost" type="button" :title="t('view.live.clearBtn.title')" @click="clearTranscript">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
-              <span>{{ t('view.live.clearBtn') || 'Clear' }}</span>
+              <span>{{ t('view.live.clearBtn') || '清空' }}</span>
             </button>
             <!-- SPA v3: 删除 LiveView 顶栏的 "注册声纹" 按钮 (注册声纹是声纹库操作, 不该在实时页) -->
           </div>
@@ -238,10 +238,25 @@ onMounted(loadRecent)
               </div>
             </div>
           </div>
-          <div v-for="seg in live.segments" :key="seg.id" class="seg">
-            <span class="spk" :style="{ color: spkColor(seg.speaker) }">{{ live.getDisplayName(seg) }}</span>
-            <span class="text">{{ seg.text }}</span>
-            <span class="time">{{ seg.time }}</span>
+          <div v-for="seg in live.segments" :key="seg.id" class="seg" :class="`seg-${seg.status ?? 'normal'}`">
+            <template v-if="seg.status === 'transcribing'">
+              <span class="spk placeholder">·</span>
+              <span class="text placeholder-text">
+                <span class="placeholder-dot"></span>
+                {{ seg.displayed }}
+              </span>
+              <span class="time">{{ seg.time }}</span>
+            </template>
+            <template v-else-if="seg.status === 'stale' || seg.status === 'timeout'">
+              <span class="spk collapsed">·</span>
+              <span class="text collapsed-text">…</span>
+              <span class="time">{{ seg.time }}</span>
+            </template>
+            <template v-else>
+              <span class="spk" :style="{ color: spkColor(seg.speaker) }">{{ live.getDisplayName(seg) }}</span>
+              <span class="text">{{ seg.displayed }}<span v-if="seg.typewriterId" class="cursor">▍</span></span>
+              <span class="time">{{ seg.time }}</span>
+            </template>
           </div>
         </div>
         <div class="dropzone" @click="onPickFile">
@@ -409,6 +424,35 @@ onMounted(loadRecent)
   font-family: var(--mono);
   font-size: 10px;
   color: var(--text-3);
+}
+/* Task 4: VAD 转写中占位符 + 折叠 stale/timeout */
+.seg-transcribing .placeholder-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--amber, #f59e0b);
+  margin-right: 8px;
+  animation: placeholder-pulse 1s infinite ease-in-out;
+}
+.seg-transcribing .placeholder-text {
+  color: var(--muted, #888);
+  font-style: italic;
+}
+@keyframes placeholder-pulse {
+  0%, 100% { opacity: 0.3; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.2); }
+}
+.seg-stale .collapsed-text,
+.seg-timeout .collapsed-text {
+  color: var(--muted, #aaa);
+  opacity: 0.4;
+  font-style: italic;
+}
+.seg-stale .spk.collapsed,
+.seg-timeout .spk.collapsed {
+  color: var(--muted, #aaa);
+  opacity: 0.4;
 }
 
 .live-side { display: flex; flex-direction: column; gap: 24px; }
