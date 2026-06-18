@@ -7,6 +7,7 @@ import { useRouter } from 'vue-router'
 import { spkColor } from '../utils/spk'
 import { fmtClock, fmtRel } from '../utils/format'
 import { uploadAudio } from '../api/speakers'
+import SpeakerLabel from '../components/SpeakerLabel.vue'
 type UploadResp = Awaited<ReturnType<typeof uploadAudio>>
 
 const { t } = useI18n()
@@ -117,6 +118,11 @@ function onPickFile() {
   inp.accept = 'audio/wav,audio/mpeg,audio/mp4,audio/flac,.wav,.mp3,.m4a,.flac'
   inp.onchange = () => { if (inp.files?.[0]) onFile(inp.files[0]) }
   inp.click()
+}
+
+function onSpeakerClick(seg: any) {
+  // Task 6 会接 rename/merge 菜单;此处先 console.info 占位
+  console.info('[live] speaker clicked', seg.id, seg.speaker)
 }
 
 let rafId: number | null = null
@@ -253,7 +259,7 @@ onMounted(loadRecent)
               <span class="time">{{ seg.time }}</span>
             </template>
             <template v-else>
-              <span class="spk" :style="{ color: spkColor(seg.speaker) }">{{ live.getDisplayName(seg) }}</span>
+              <SpeakerLabel :speaker="live.getDisplayName(seg)" :score="seg.score" @click="onSpeakerClick(seg)" />
               <span class="text">{{ seg.displayed }}<span v-if="seg.typewriterId" class="cursor">▍</span></span>
               <span class="time">{{ seg.time }}</span>
             </template>

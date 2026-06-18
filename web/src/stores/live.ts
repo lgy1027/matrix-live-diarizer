@@ -16,6 +16,7 @@ export interface LiveSegment {
   words?: { text: string; start: number; end: number }[]
   status?: 'transcribing' | 'normal' | 'stale' | 'timeout'
   seq?: number            // 用于占位段 ↔ ASR 结果配对
+  score?: number          // 声纹识别置信度 0-1,来自后端 compare_and_identify
 }
 
 export const useLiveStore = defineStore('live', () => {
@@ -32,7 +33,6 @@ export const useLiveStore = defineStore('live', () => {
   const segments = ref<LiveSegment[]>([])
   const speakers = ref<Map<string, number>>(new Map())
   // 友好名:Spk_xxx → Speaker N (N 按会话内首次出现的顺序)
-  // 同会话内稳定:同一个 Spk_xxx 始终映射到同一个 N
   // 同会话内稳定:同一个 Spk_xxx 始终映射到同一个 N
   const sessionSpeakers = ref<Map<string, number>>(new Map())
   const recent = ref<{ id: string; title?: string; original_filename?: string; source: string; duration_sec: number; created_at: string }[]>([])
@@ -97,6 +97,7 @@ export const useLiveStore = defineStore('live', () => {
         placeholder.time = asr.time || placeholder.time
         placeholder.seq = undefined
         if (asr.words) placeholder.words = asr.words
+        if (typeof (asr as any).score === 'number') placeholder.score = (asr as any).score
         // 启动打字机
         const fullText = asr.text
         let i = 0
@@ -137,6 +138,7 @@ export const useLiveStore = defineStore('live', () => {
         // merge: 把增量字符追加到 last.text,清掉旧打字机链,新链从 displayed 继续
         last.text = (last.text || '') + asr.text
         if (asr.words) last.words = asr.words
+        if (typeof (asr as any).score === 'number') last.score = (asr as any).score
         if (last.typewriterId) {
           clearTimeout(last.typewriterId)
           last.typewriterId = undefined
@@ -151,6 +153,7 @@ export const useLiveStore = defineStore('live', () => {
           displayed: '',
           time: asr.time || new Date().toLocaleTimeString('zh-CN', { hour12: false }),
           words: asr.words,
+          score: typeof (asr as any).score === 'number' ? (asr as any).score : undefined,
         }
         segments.value.push(target)
       }
