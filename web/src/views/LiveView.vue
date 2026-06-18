@@ -239,7 +239,7 @@ onMounted(loadRecent)
             </div>
           </div>
           <div v-for="seg in live.segments" :key="seg.id" class="seg">
-            <span class="spk" :style="{ color: spkColor(seg.speaker) }">{{ seg.speaker }}</span>
+            <span class="spk" :style="{ color: spkColor(seg.speaker) }">{{ live.getDisplayName(seg) }}</span>
             <span class="text">{{ seg.text }}</span>
             <span class="time">{{ seg.time }}</span>
           </div>
