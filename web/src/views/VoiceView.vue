@@ -597,28 +597,71 @@ onMounted(() => {
 .menu-pop button.danger { color: var(--red); }
 .menu-pop button.danger:hover { background: rgba(255, 71, 87, 0.12); }
 
+/* 注册声纹入口:
+ *   桌面端: 隐藏 (顶部工具栏 btnEnroll 是主入口)
+ *   移动端 (≤768px): 改右下角浮动按钮 (FAB), 避免顶部工具栏按钮挤在小屏 tab bar 上方
+ */
 .vl-new-row {
-  display: grid;
-  grid-template-columns: 42px minmax(0, 1fr) 130px 90px 110px 60px;
-  gap: 14px;
-  align-items: center;
-  padding: 14px 18px;
-  border-top: 1px dashed var(--border-soft);
-  cursor: pointer;
-  transition: background 0.12s;
+  display: none;  /* 桌面端隐藏 — 顶栏 btnEnroll 已够用 */
 }
-.vl-new-row:hover { background: var(--ink-3); }
 .vl-new-icon {
   width: 22px;
   height: 22px;
   border-radius: 50%;
   display: grid;
   place-items: center;
-  border: 1.5px dashed var(--text-3);
-  color: var(--text-3);
 }
-.vl-new-row:hover .vl-new-icon { border-color: var(--amber); border-style: solid; color: var(--amber); }
 .vl-new-icon svg { width: 12px; height: 12px; }
-.vl-new-text { font-family: 'Outfit', sans-serif; font-size: 12px; color: var(--text-2); letter-spacing: 0.02em; }
-.vl-new-row:hover .vl-new-text { color: var(--text); }
+.vl-new-text { font-family: 'Outfit', sans-serif; letter-spacing: 0.02em; }
+
+/* 移动端 (≤768px) FAB 样式 — 仿 .rec-fab 的位置范式 */
+@media (max-width:768px){
+  /* 顶部 #btnEnroll 隐藏 — 移动端右下角 FAB 是主入口,避免重复 */
+  #btnEnroll { display: none !important; }
+  .vl-new-row {
+    display: inline-flex;            /* 覆盖 desktop 的 none */
+    align-items: center;
+    gap: 8px;
+    position: fixed;
+    right: 16px;
+    bottom: 72px;                    /* 56px 底部 nav + 16px gap */
+    height: 48px;
+    padding: 0 18px 0 14px;
+    border-radius: 24px;             /* 胶囊形 */
+    background: var(--amber);
+    color: var(--ink);
+    box-shadow: 0 6px 16px rgba(255,107,53,.35), 0 2px 4px rgba(0,0,0,.4);
+    z-index: 40;                     /* nav z-index=50, FAB 低于 nav 但高于内容 */
+    cursor: pointer;
+    transition: transform .12s, box-shadow .12s;
+  }
+  .vl-new-row:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 20px rgba(255,107,53,.45), 0 3px 6px rgba(0,0,0,.45);
+    background: var(--amber);        /* 桌面 hover 改背景色, FAB 保持主色 */
+  }
+  .vl-new-row:active { transform: translateY(0); }
+  .vl-new-icon {
+    width: 24px;
+    height: 24px;
+    background: rgba(10,9,8,.15);
+  }
+  .vl-new-icon svg { width: 14px; height: 14px; stroke-width: 2.4; }
+  .vl-new-text { font-size: 13px; color: var(--ink); font-weight: 500; }
+}
+
+/* 极窄屏 (≤480px) 进一步压缩 */
+@media (max-width:480px){
+  .vl-new-row {
+    right: 12px;
+    bottom: 68px;                    /* 56px nav + 12px gap */
+    height: 44px;
+    padding: 0 14px 0 12px;
+    gap: 6px;
+    font-size: 11px;
+  }
+  .vl-new-icon { width: 20px; height: 20px; }
+  .vl-new-icon svg { width: 12px; height: 12px; }
+  .vl-new-text { font-size: 12px; }
+}
 </style>
