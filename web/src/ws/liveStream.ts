@@ -9,8 +9,9 @@
 //   close(4401) = 鉴权失败
 
 export type AsrMessage =
-  | { speaker: string; text: string; time?: string; words?: { text: string; start: number; end: number }[] }
+  | { speaker: string; text: string; time?: string; words?: { text: string; start: number; end: number }[]; score?: number; seq?: number }
   | { type: 'renamed'; title: string }
+  | { type: 'transcribing'; seq: number }
   | { speaker: 'SYSTEM'; text: string; time?: never; words?: never }
 
 export type WsState = 'idle' | 'connecting' | 'live' | 'reconnecting' | 'auth-failed'

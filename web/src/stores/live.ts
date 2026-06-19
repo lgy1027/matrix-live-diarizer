@@ -87,6 +87,20 @@ export const useLiveStore = defineStore('live', () => {
     // ASR 片段
     if ('text' in m && 'speaker' in m && m.speaker !== 'SYSTEM') {
       const asr = m as Extract<AsrMessage, { speaker: string; text: string }>
+      // 关键: 给 Spk_xxx 分配 Speaker N 编号(无论后续走 placeholder 替换还是 new segment 路径)
+      // bug-fix: 之前只 placeholder 路径更新 sessionSpeakers,导致连续说话(无停顿、无 placeholder)
+      // 时新建段走 new segment 路径,Speaker N 不分配,getDisplayName 查不到返回'未知说话人'
+      if (asr.speaker && asr.speaker.startsWith('Spk_')) {
+        if (!sessionSpeakers.value.has(asr.speaker)) {
+          sessionSpeakers.value.set(asr.speaker, sessionSpeakers.value.size + 1)
+          sessionSpeakers.value = new Map(sessionSpeakers.value)
+        }
+      }
+      if (asr.speaker) {
+        const cur = speakers.value.get(asr.speaker) || 0
+        speakers.value.set(asr.speaker, cur + 1)
+        speakers.value = new Map(speakers.value)
+      }
       // 如果有匹配 seq 的占位段,用 ASR 结果替换它(而不是创建新段)
       const placeholder = segments.value.find(s => s.status === 'transcribing' && s.seq === (asr as any).seq)
       if (placeholder) {
@@ -112,18 +126,7 @@ export const useLiveStore = defineStore('live', () => {
           placeholder.typewriterId = window.setTimeout(tick, 50)
         }
         tick()
-        // 更新 speakers Map(已有的逻辑)
-        if (asr.speaker && asr.speaker.startsWith('Spk_')) {
-          if (!sessionSpeakers.value.has(asr.speaker)) {
-            sessionSpeakers.value.set(asr.speaker, sessionSpeakers.value.size + 1)
-            sessionSpeakers.value = new Map(sessionSpeakers.value)
-          }
-        }
-        if (asr.speaker) {
-          const cur = speakers.value.get(asr.speaker) || 0
-          speakers.value.set(asr.speaker, cur + 1)
-          speakers.value = new Map(speakers.value)
-        }
+        // speakers Map 更新已在方法顶部统一处理(避免重复逻辑)
         return
       }
       // 服务端已经做过 get_incremental_text(),这里 asr.text 是增量(不是完整文本)
