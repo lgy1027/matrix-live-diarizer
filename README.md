@@ -111,11 +111,34 @@ open web/index.html               # macOS
 
 详见 **[docs/SECURITY.md](docs/SECURITY.md)**。
 
+## 🎯 能力矩阵 — 说话人识别（重要！）
+
+本项目 **说话人识别能力受架构限制**，不同场景准确度差异很大，请按需选择:
+
+| 场景 | 准确度 | 推荐模式 | 说明 |
+|---|---|---|---|
+| **单人独白**（网课/播客/直播字幕） | **95%+** | 实时 (WebSocket) | CamPlus 单人 embedding 稳定,推荐主场景 |
+| **2-3 人会议**（安静环境/每人说话 ≥ 2s） | **60-80%** | 实时 (WebSocket) | 短段 cosine 波动大,需手动 enroll 提高准确度 |
+| **3-10 人会议**（单麦克风 + 多人重叠） | **40-60%** best-effort | 实时 仅作参考 | 单麦克风物理限制,**不建议生产级依赖** |
+| **3-10 人会议**（多麦克风 enroll） | **85%+** | 实时 + 强制 enroll | 每人独立麦 + 主动注册声纹 |
+| **3-10 人会议**（**离线高准确度**） | **80%+ DER** | 上传文件 + `?diarization=pyannote` | 集成 pyannote 3.1,业界 SOTA |
+
+**核心限制**：
+- 单麦克风无法做声源分离（beamforming 需要硬件麦克风阵列）
+- 实时模式 ASR 必须 0.5-5s 出结果,没有长上下文可聚类
+- Qwen3-ASR 假设"一段一人",多人重叠直接丢失
+
+**推荐用法**：
+- 想做**多人精确区分**：用多麦克风 OR 上传录音跑离线 pyannote
+- 想做**实时字幕**：单人独白/主播用实时模式效果好;多人会议用实时模式做参考性字幕
+- 详见 **[docs/SPEAKER_DIARIZATION.md](docs/SPEAKER_DIARIZATION.md)**
+
 ## 📚 详细文档
 
 | 文档 | 内容 |
 |------|------|
 | **[docs/USAGE.md](docs/USAGE.md)** | Web 界面详细使用 + 高级场景 + 故障排查 |
+| **[docs/SPEAKER_DIARIZATION.md](docs/SPEAKER_DIARIZATION.md)** | 说话人识别能力边界 + 实时 vs 离线模式选择 |
 | **[docs/API.md](docs/API.md)** | 所有 API 端点（WebSocket/上传/说话人/引擎）+ 环境变量 |
 | **[docs/LLM_SETUP.md](docs/LLM_SETUP.md)** | LLM 配置：本地 Ollama / 公网 OpenAI / 局域网 vLLM |
 | **[docs/PRIVACY.md](docs/PRIVACY.md)** | 隐私保证：默认本地 + 可选远程 + 4 道护栏 |

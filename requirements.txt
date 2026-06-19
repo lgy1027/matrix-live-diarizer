@@ -49,3 +49,11 @@ cffi
 
 # 摘要 (TextRank 兜底) — LLM 不可用时本地提取
 summa==1.2.0
+
+# 离线高准确度说话人识别 (pyannote 3.1)
+# 用于: 上传文件 ?diarization=pyannote (Diarization Error Rate ~18%)
+# 需要:
+#   1. brew install ffmpeg (macOS) 或 apt install ffmpeg (Linux)
+#   2. HF_TOKEN 环境变量 + https://huggingface.co/pyannote/segmentation-3.0 接受用户条款
+# 详细: docs/SPEAKER_DIARIZATION.md
+pyannote.audio>=3.1.0

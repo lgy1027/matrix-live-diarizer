@@ -165,12 +165,21 @@ async def process_audio_chunk_asr_only(
 @router.post("/v1/upload", response_model=UploadResponse)
 async def upload_audio(
     file: UploadFile = File(...),
-    enable_diarization: bool = Query(True, description="启用说话人识别")
+    enable_diarization: bool = Query(True, description="启用说话人识别"),
+    diarization: str = Query(
+        "camplus",
+        description='说话人识别后端: "camplus" (实时,默认) 或 "pyannote" (离线高准确度,需 HF_TOKEN)',
+    ),
 ):
-    """上传音频文件，支持长音频分段处理
-    
-    enable_diarization=true: 识别说话人（会议场景）
-    enable_diarization=false: 仅转写（单人演讲）
+    """上传音频文件,支持长音频分段处理
+
+    enable_diarization=true: 识别说话人
+    enable_diarization=false: 仅转写
+
+    diarization=camplus: 默认,实时流式算法(CamPlus + 滑动窗),适合单人独白/网课
+    diarization=pyannote: 离线 SOTA(pyannote 3.1,DER ~18%),适合多人会议
+                       需要 HF_TOKEN 环境变量 + 接受 https://huggingface.co/pyannote/segmentation-3.0 用户条款
+                       失败时自动 fallback 到 camplus
     """
     start_time_total = time.time()
     
@@ -389,6 +398,46 @@ async def upload_audio(
         elapsed = time.time() - start_time_total
         speaker_info = f", {len(all_speakers)} 说话人" if enable_diarization else ""
         logger.info(f"[UPLOAD] 完成{speaker_info}, {elapsed:.2f}s")
+
+        # 可选: pyannote 离线高准确度后处理
+        # 用户指定 diarization=pyannote 且 enable_diarization=true 时,
+        # 用 pyannote 3.1 重打分 segments 的 speaker 字段(覆盖 CamPlus 结果)
+        diarization_source = "camplus"
+        if enable_diarization and diarization == "pyannote":
+            try:
+                from app.services.pyannote_diarization import (
+                    get_pyannote_diarizer, align_speakers_to_segments,
+                )
+                pyannote = get_pyannote_diarizer()
+                if pyannote.enabled:
+                    logger.info(f"[UPLOAD] pyannote 离线重打分 (耗时 2-5s)...")
+                    pyannote_segs = pyannote.diarize(file_path)
+                    if pyannote_segs:
+                        # 把 ASR segments 转 dict 喂给 align_speakers_to_segments
+                        seg_dicts = [
+                            {
+                                "start": seg.start_time,
+                                "end": seg.end_time,
+                                "text": seg.text,
+                                "speaker": seg.speaker,
+                            }
+                            for seg in segments
+                        ]
+                        aligned = align_speakers_to_segments(pyannote_segs, seg_dicts)
+                        # 写回 segments
+                        for seg, aln in zip(segments, aligned):
+                            seg.speaker = aln["speaker"]
+                        # 重算 all_speakers
+                        all_speakers = {s.speaker for s in segments if s.speaker}
+                        speaker_info = f", {len(all_speakers)} 说话人 (pyannote)"
+                        diarization_source = "pyannote"
+                        logger.info(f"[UPLOAD] pyannote 完成: {len(all_speakers)} 个不同说话人")
+                    else:
+                        logger.warning(f"[UPLOAD] pyannote 返回空,保留 CamPlus 结果")
+                else:
+                    logger.warning(f"[UPLOAD] pyannote 不可用 (缺 HF_TOKEN?),fallback 到 CamPlus")
+            except Exception as e:
+                logger.warning(f"[UPLOAD] pyannote 后处理失败,fallback 到 CamPlus: {e}")
 
         # 自动存档（长音频批量）
         if transcript_repo and config.storage.history_enabled:
