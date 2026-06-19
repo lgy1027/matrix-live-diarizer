@@ -6,10 +6,25 @@ import logging
 import threading
 import time
 import scipy.signal as signal
-from modelscope import snapshot_download
+from modelscope import snapshot_download as _ms_snapshot_download
 from qwen_asr import Qwen3ASRModel
+# bug-fix: ModelScope CDN 经常慢(实测 8MB/s,1.75GB 需 4 分钟),容易触发 90s 超时。
+# fallback 策略: ModelScope 失败 → HF 本地缓存 (前提: 已下完, ~/.cache/huggingface/hub/)
+from huggingface_hub import snapshot_download as _hf_snapshot_download
+HF_LOCAL_FILES_ONLY = True
 # Qwen3ForcedAligner 是可选依赖(给字级时间戳用),只在 _load_with_fallback 内 lazy import
 # 这样测试 mock qwen_asr 简单 module 时(无 __path__)不会在 import 阶段就失败
+
+
+def snapshot_download(repo_id: str, **kwargs):
+    """下载 model,优先 ModelScope,失败 fallback HF 本地缓存"""
+    try:
+        return _ms_snapshot_download(repo_id, **kwargs)
+    except Exception as e:
+        logger = __import__('logging').getLogger("ASR_Engine")
+        logger.warning(f"[ASR] ModelScope 下载失败 ({type(e).__name__}),fallback HF 本地缓存")
+        # HF fallback 必须 local_files_only=True,避免网络问题
+        return _hf_snapshot_download(repo_id, local_files_only=HF_LOCAL_FILES_ONLY)
 
 logger = logging.getLogger("ASR_Engine")
 
