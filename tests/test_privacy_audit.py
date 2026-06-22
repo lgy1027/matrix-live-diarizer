@@ -24,7 +24,7 @@ FORBIDDEN_SDK_PATTERNS = [
 def _scan_python(path: Path) -> list[str]:
     if not path.exists():
         return []
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     violations = []
     for m in PUBLIC_HOST_RE.finditer(text):
         violations.append(f"{path}: 公网 URL: {m.group(0)}")
@@ -51,8 +51,11 @@ def test_engine_directory_no_public_calls():
 def test_web_directory_no_telemetry():
     violations = []
     for p in (REPO / "web").rglob("*"):
+        rel_parts = p.relative_to(REPO / "web").parts
+        if rel_parts and rel_parts[0] in {"node_modules", "dist", ".vite"}:
+            continue
         if p.is_file() and p.suffix in (".html", ".js", ".css"):
-            text = p.read_text()
+            text = p.read_text(encoding="utf-8")
             for pat in FORBIDDEN_SDK_PATTERNS:
                 for m in pat.finditer(text):
                     violations.append(f"{p}: 禁止 SDK: {m.group(0)}")

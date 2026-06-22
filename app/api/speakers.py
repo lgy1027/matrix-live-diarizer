@@ -139,12 +139,13 @@ async def delete_speaker(
     cascade_cleared = 0
     affected_sessions = 0
     if cascade and request is not None:
-        transcript_repo = request.app.state.transcript_repo
+        transcript_repo = getattr(request.app.state, "transcript_repo", None)
         try:
-            cascade_cleared = transcript_repo.clear_speaker_id_from_segments(speaker_id)
-            # 统计受影响的 session 数 (segments.speaker_id 清空后, 哪些 session 还有过这个 speaker)
-            if cascade_cleared > 0:
-                affected_sessions = transcript_repo.count_sessions_with_speaker(speaker_id)
+            if transcript_repo is not None:
+                cascade_cleared = transcript_repo.clear_speaker_id_from_segments(speaker_id)
+                # 统计受影响的 session 数 (segments.speaker_id 清空后, 哪些 session 还有过这个 speaker)
+                if cascade_cleared > 0:
+                    affected_sessions = transcript_repo.count_sessions_with_speaker(speaker_id)
         except Exception as e:
             logger.warning(f"[DELETE-SPEAKER] cascade 清空失败 {speaker_id}: {e}")
 
@@ -440,15 +441,14 @@ async def enroll_speaker(
     if ext not in ALLOWED:
         raise HTTPException(status_code=400, detail=f"不支持的文件类型: {ext}")
 
+    content = await file.read()
+    if len(content) == 0:
+        raise HTTPException(status_code=400, detail="文件为空")
+    if len(content) > 500 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="文件超过 500MB")
+
     # 临时保存(用完即删)
     with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
-        content = await file.read()
-        if len(content) == 0:
-            os.unlink(tmp.name)
-            raise HTTPException(status_code=400, detail="文件为空")
-        if len(content) > 500 * 1024 * 1024:
-            os.unlink(tmp.name)
-            raise HTTPException(status_code=400, detail="文件超过 500MB")
         tmp.write(content)
         tmp_path = tmp.name
 

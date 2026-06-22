@@ -32,7 +32,8 @@ jobs:
           pip install 'fastapi' 'uvicorn>=0.23.0' 'python-multipart>=0.0.6' \
                       'transformers>=4.30.0' 'chromadb' 'pydantic>=2.0.0' \
                       'python-dotenv>=1.0.0' 'pytest' 'pytest-asyncio' 'pytest-timeout' 'httpx' \
-                      'soundfile' 'summa==1.2.0' \
+                      'numpy' 'soundfile' 'tinycss2' 'summa==1.2.0' \
+                      'PyJWT>=2.8.0' 'werkzeug>=3.0.0' \
                       'setuptools<81' 'addict' 'simplejson' 'sortedcontainers' 'cffi'
 
       - name: Run tests
@@ -49,9 +50,7 @@ jobs:
         run: |
           pytest tests/test_privacy_audit.py -v
 
-  # 前端 JS 语法 + i18n 覆盖 — 防止 v0.2.1 重构 i18n.js 那种
-  # 缺 ) 错逃过 CI
-  js-check:
+  frontend-check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -59,29 +58,17 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - name: Syntax check all JS
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: web
         run: |
-          for f in web/js/*.js; do
-            echo "checking $f"
-            node --check "$f"
-          done
-      - name: i18n coverage check
+          npm ci
+      - name: Typecheck frontend
+        working-directory: web
         run: |
-          python3 <<'PY'
-          import re
-          from pathlib import Path
-          idx = Path("web/index.html").read_text()
-          # 找所有 data-i18n-* key
-          keys = set()
-          for m in re.finditer(r'data-i18n(?:-(\w+))?="([^"]+)"', idx):
-              keys.add(m.group(2))
-          keys.discard("0,0")  # 误报
-          i18n = Path("web/js/i18n.js").read_text()
-          m = re.search(r'const STRINGS = \{(.+?)\n\};', i18n, re.DOTALL)
-          defined = set(re.findall(r"'([^']+)':\s*'", m.group(1))) if m else set()
-          missing = keys - defined
-          if missing:
-              print(f"❌ 缺失 i18n keys: {sorted(missing)}")
-              exit(1)
-          print(f"✅ 所有 {len(keys)} 个 i18n key 已覆盖")
-          PY
+          npm run typecheck
+      - name: Build frontend
+        working-directory: web
+        run: |
+          npm run build

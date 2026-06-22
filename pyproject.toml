@@ -1,0 +1,4 @@
+[tool.pytest.ini_options]
+markers = [
+    "timeout(seconds): fail a test if it runs longer than the given number of seconds",
+]

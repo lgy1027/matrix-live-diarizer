@@ -10,11 +10,8 @@
 - audio_processor 内部不再有硬编码 STATE_SILENCE / SILENCE_THRESHOLD_FRAMES
 - 状态机逻辑可单测,不再依赖完整 WebSocket 流程
 """
-import sys
 import numpy as np
 from unittest.mock import MagicMock
-
-sys.path.insert(0, "/Users/lgy/python/github.com/lgy1027/matrix-live-diarizer")
 
 from app.api.websocket import (
     STATE_SILENCE,
@@ -38,12 +35,12 @@ def test_classify_frame_empty_returns_false():
 
 
 def test_classify_frame_quiet_audio_silence():
-    """安静音频(RMS < 0.015)→ False(不走 VAD)"""
+    """安静音频(RMS <= 当前能量门限)→ False(不走 VAD)"""
     quiet = np.zeros(320, dtype=np.float32)  # 静音帧
     assert classify_frame(quiet, None) is False
-    # 0.01 振幅的 sine, RMS ≈ 0.007
+    # 0.003 振幅的 sine, RMS ≈ 0.002
     t = np.arange(320) / 16000
-    quiet_sine = (0.01 * np.sin(2 * np.pi * 440 * t)).astype(np.float32)
+    quiet_sine = (0.003 * np.sin(2 * np.pi * 440 * t)).astype(np.float32)
     assert classify_frame(quiet_sine, None) is False
 
 
@@ -55,13 +52,13 @@ def test_classify_frame_loud_audio_no_vad_engine_returns_true():
 
 
 def test_classify_frame_loud_audio_vad_says_speech():
-    """大声 + VAD 说不是静音 → True"""
+    """大声 + ASR 引擎存在 → 当前短帧策略仅靠能量判语音"""
     t = np.arange(320) / 16000
     loud = (0.5 * np.sin(2 * np.pi * 440 * t)).astype(np.float32)
     fake_asr = MagicMock()
     fake_asr.is_silent.return_value = False  # VAD: 不是静音
     assert classify_frame(loud, fake_asr) is True
-    fake_asr.is_silent.assert_called_once_with(loud, use_vad=True)
+    fake_asr.is_silent.assert_called_once_with(loud, use_vad=False)
 
 
 def test_classify_frame_loud_audio_vad_says_silence():
@@ -149,8 +146,8 @@ def test_next_state_speech_stays_speech_on_silence():
 # ========== 集成场景测试 ==========
 
 def test_state_machine_full_speech_burst():
-    """完整流程:静音 → 语音 × 5 帧 → 静音 × 3 帧 → 触发识别"""
-    # 模拟: SILENCE → 5 帧 speech → 3 帧 silence → 触发
+    """完整流程:静音 → 语音 × 5 帧 → 静音达到阈值 → 触发识别"""
+    # 模拟: SILENCE → 5 帧 speech → silence_threshold 帧 silence → 触发
     # 这里用 next_state + should_emit_segment 组合模拟
     state = STATE_SILENCE
     silence_count = 0
@@ -163,8 +160,8 @@ def test_state_machine_full_speech_burst():
         emit = should_emit_segment(state, silence_count, 100, 16000, 5.0)
         emit_events.append(emit)
 
-    # 3 帧静音(从第 1 帧起 silence_count +1,到第 3 帧触发)
-    for i in range(3):
+    # 静音帧达到阈值时触发
+    for _ in range(SILENCE_THRESHOLD_FRAMES):
         # 实际:asr 拿到 silence 帧,会先累积到 speech_buffer,再 silence_count += 1
         silence_count += 1
         emit = should_emit_segment(state, silence_count, 100, 16000, 5.0)
@@ -172,12 +169,9 @@ def test_state_machine_full_speech_burst():
 
     # 5 帧语音中:不触发
     assert all(e is False for e in emit_events[:5]), "语音中不应触发"
-    # 第 6 帧(静音 #1):不触发
     assert emit_events[5] is False
-    # 第 7 帧(静音 #2):不触发
-    assert emit_events[6] is False
-    # 第 8 帧(静音 #3):触发
-    assert emit_events[7] is True, f"第 3 帧静音应触发,实际 emit={emit_events[7]}"
+    assert all(e is False for e in emit_events[5:-1]), "未达到静音阈值不应触发"
+    assert emit_events[-1] is True, f"达到第 {SILENCE_THRESHOLD_FRAMES} 帧静音应触发"
 
 
 def test_state_machine_force_emit_on_long_speech():

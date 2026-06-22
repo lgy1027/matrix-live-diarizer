@@ -178,7 +178,7 @@ async def upload_audio(
 
     diarization=camplus: 默认,实时流式算法(CamPlus + 滑动窗),适合单人独白/网课
     diarization=pyannote: 离线 SOTA(pyannote 3.1,DER ~18%),适合多人会议
-                       需要 HF_TOKEN 环境变量 + 接受 https://huggingface.co/pyannote/segmentation-3.0 用户条款
+                       需要 HF_TOKEN 环境变量 + 接受 pyannote/segmentation-3.0 用户条款
                        失败时自动 fallback 到 camplus
     """
     start_time_total = time.time()

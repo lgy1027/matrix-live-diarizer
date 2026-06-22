@@ -172,20 +172,6 @@ class StorageConfig:
 
 
 @dataclass
-class LLMConfig:
-    """LLM 插件配置（默认仅本机，allow_public=True 时可走公网 OpenAI 兼容接口）"""
-    enabled: bool = False
-    endpoint: str = "http://127.0.0.1:11434/v1"
-    model: str = "qwen2.5:1.5b"
-    api_key: Optional[str] = None           # Bearer token，公网 OpenAI 兼容接口需要
-    timeout_sec: int = 60
-    max_input_tokens: int = 8000
-    mock: bool = False
-    allowed_hosts: tuple[str, ...] = ("127.0.0.1", "::1", "localhost")
-    allow_public: bool = False              # 显式开公网（默认安全 = 仅本机）
-
-
-@dataclass
 class CORSConfig:
     """CORS 配置 — 本地部署默认全开,LAN 部署需收紧
 
@@ -269,7 +255,6 @@ class AuthConfig:
 
     @classmethod
     def from_env(cls) -> "AuthConfig":
-        import os as _os
         return cls(
             jwt_secret=get_env_str("JWT_SECRET", "") or None,
             token_ttl_hours=get_env_int("TOKEN_TTL_HOURS", 24),

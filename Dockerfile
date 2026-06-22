@@ -22,6 +22,17 @@ RUN pip install --no-cache-dir \
 COPY requirements.txt .
 RUN pip wheel --no-cache-dir --wheel-dir /wheels -r requirements.txt
 
+# ---------- Stage 2: frontend ----------
+FROM node:20-alpine AS frontend-builder
+
+WORKDIR /web
+
+COPY web/package*.json ./
+RUN npm ci
+
+COPY web/ ./
+RUN npm run build
+
 # ---------- Stage 2: runtime ----------
 FROM python:3.12-slim AS runtime
 
@@ -39,15 +50,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # 装预编译的 wheels(从 builder 拷过来)
+COPY requirements.txt /app/requirements.txt
 COPY --from=builder /wheels /wheels
 RUN pip install --no-cache-dir --find-links /wheels \
         torch torchvision torchaudio \
         --index-url https://download.pytorch.org/whl/cpu \
-    && pip install --no-cache-dir --find-links /wheels -r /app/requirements.txt 2>/dev/null || true \
+    && pip install --no-cache-dir --find-links /wheels -r /app/requirements.txt \
     && rm -rf /wheels /root/.cache
 
 # 拷应用代码
 COPY --chown=matrix:matrix . /app
+COPY --from=frontend-builder --chown=matrix:matrix /web/dist /app/web/dist
 RUN chmod +x /app/docker/entrypoint.sh 2>/dev/null || true
 
 USER matrix

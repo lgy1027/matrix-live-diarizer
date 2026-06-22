@@ -3,7 +3,6 @@
 简单的内存速率限制实现，适用于单进程部署。
 """
 import ipaddress
-import socket
 import time
 from collections import defaultdict
 from typing import Dict, List, Tuple

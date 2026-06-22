@@ -1,6 +1,10 @@
 """速率限制集成测试 - TDD"""
 import pytest
 from unittest.mock import Mock, patch
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 class TestRateLimitIntegration:
@@ -8,32 +12,18 @@ class TestRateLimitIntegration:
 
     def test_rate_limit_middleware_registered(self):
         """测试速率限制中间件已注册"""
-        import os
-        
         # 检查 app/__init__.py（中间件在这里注册）
-        source_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "app", "__init__.py"
-        )
-        
-        with open(source_path, 'r') as f:
-            source = f.read()
+        source_path = REPO_ROOT / "app" / "__init__.py"
+        source = source_path.read_text(encoding="utf-8")
         
         # 检查是否导入了 RateLimitMiddleware
         assert 'RateLimitMiddleware' in source, "app/__init__.py 应导入 RateLimitMiddleware"
 
     def test_rate_limit_config_used(self):
         """测试速率限制配置被使用"""
-        import os
-        
         # 检查 app/__init__.py（中间件在这里注册）
-        source_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "app", "__init__.py"
-        )
-        
-        with open(source_path, 'r') as f:
-            source = f.read()
+        source_path = REPO_ROOT / "app" / "__init__.py"
+        source = source_path.read_text(encoding="utf-8")
         
         # 检查是否使用了速率限制配置
         assert 'rate_limit' in source.lower() or 'requests_per_minute' in source, \

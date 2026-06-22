@@ -8,7 +8,7 @@
 401 返 JSON: {detail: "..."}
 """
 import logging
-from fastapi import Request
+from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 

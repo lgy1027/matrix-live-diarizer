@@ -3,7 +3,10 @@ import pytest
 import logging
 from unittest.mock import Mock, patch
 import io
-import os
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 class TestLoggingStandard:
@@ -11,13 +14,8 @@ class TestLoggingStandard:
 
     def test_engines_import_logging_module(self):
         """测试引擎导入日志模块"""
-        source_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "engine", "speaker", "campplus_engine.py"
-        )
-        
-        with open(source_path, 'r') as f:
-            source = f.read()
+        source_path = REPO_ROOT / "engine" / "speaker" / "campplus_engine.py"
+        source = source_path.read_text(encoding="utf-8")
         
         # 检查是否导入了 logging 模块
         # 渐进式重构：允许现有 print，但要求有日志基础设施

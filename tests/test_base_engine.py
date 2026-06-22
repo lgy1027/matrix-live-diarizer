@@ -2,7 +2,10 @@
 import pytest
 from abc import ABC, abstractmethod
 import numpy as np
-import os
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 class TestSpeakerEngineBaseClass:
@@ -36,35 +39,23 @@ class TestSpeakerEngineBaseClass:
     def test_campplus_inherits_base(self):
         """测试 CamPlus 引擎继承基类"""
         # 检查源码中是否有继承基类的代码
-        source_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "engine", "speaker", "campplus_engine.py"
-        )
-        with open(source_path, 'r') as f:
-            source = f.read()
+        source_path = REPO_ROOT / "engine" / "speaker" / "campplus_engine.py"
+        source = source_path.read_text(encoding="utf-8")
         # 检查类定义是否继承 BaseSpeakerEngine
         assert 'class CamPlusEngine(BaseSpeakerEngine)' in source, \
             "CamPlusEngine 应继承 BaseSpeakerEngine"
 
     def test_eres2net_inherits_base(self):
         """测试 ERes2Net 引擎继承基类"""
-        source_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "engine", "speaker", "eres2net_engine.py"
-        )
-        with open(source_path, 'r') as f:
-            source = f.read()
+        source_path = REPO_ROOT / "engine" / "speaker" / "eres2net_engine.py"
+        source = source_path.read_text(encoding="utf-8")
         assert 'class ERes2NetEngine(BaseSpeakerEngine)' in source, \
             "ERes2NetEngine 应继承 BaseSpeakerEngine"
 
     def test_wespeaker_inherits_base(self):
         """测试 Wespeaker 引擎继承基类"""
-        source_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "engine", "speaker", "wespeaker_engine.py"
-        )
-        with open(source_path, 'r') as f:
-            source = f.read()
+        source_path = REPO_ROOT / "engine" / "speaker" / "wespeaker_engine.py"
+        source = source_path.read_text(encoding="utf-8")
         assert 'class WespeakerEngine(BaseSpeakerEngine)' in source, \
             "WespeakerEngine 应继承 BaseSpeakerEngine"
 

@@ -53,8 +53,7 @@ docker compose up -d
 docker compose logs -f
 
 # 3. 浏览器打开前端
-open web/index.html               # macOS
-# Linux/Windows:双击 web/index.html
+# 默认地址: http://127.0.0.1:8000/
 ```
 
 **特性:**
@@ -73,17 +72,31 @@ git clone https://github.com/lgy1027/matrix-live-diarizer.git
 cd matrix-live-diarizer
 pip install -r requirements.txt
 
-# 2. 启动(首次需联网下载模型 ~1.8GB,完了可断网)
+# 2. 构建前端(Vue/Vite)
+cd web
+npm ci
+npm run build
+cd ..
+
+# 3. 启动后端(首次需联网下载模型 ~1.8GB,完了可断网)
 ASR_DEVICE=cpu python main.py     # MPS 死锁时用 CPU
 # 或:python main.py                # M 系列 Mac 默认 MPS
 
-# 3. 浏览器打开前端
-open web/index.html               # macOS
-# Linux/Windows:双击 web/index.html
+# 4. 浏览器打开前端
+# http://127.0.0.1:8000/
 ```
 
 启动后看到 `Uvicorn running on http://0.0.0.0:8000` 即成功。
-前端是纯静态文件,用 `file://` 打开会自动连 `ws://127.0.0.1:8000`。
+生产模式下 FastAPI 会托管 `web/dist` 中的 Vue SPA。
+
+前端开发模式:
+
+```bash
+cd web
+npm ci
+npm run dev
+# 打开 http://127.0.0.1:5173/
+```
 
 ## ✨ 它能做什么
 
@@ -145,7 +158,7 @@ open web/index.html               # macOS
 
 ## 📱 移动端使用
 
-打开 `web/index.html` 在手机/平板浏览器即可:
+同一局域网内访问后端托管的前端地址即可:
 - **< 768px** 自动改底部 tab bar(实时/历史/说话人/设置),不再挤 56px 左侧栏
 - **< 480px** 极窄屏额外压缩字体和 stat 卡片
 - 录音、说话人识别、SRT 导出等所有功能在移动端可用
@@ -179,7 +192,9 @@ matrix-live-diarizer/
 │   ├── API.md             # API 参考
 │   ├── LLM_SETUP.md       # LLM 配置
 │   └── PRIVACY.md         # 隐私保证
-└── web/index.html         # Web SPA(实时/历史/声纹/设置)
+└── web/                   # Vue/Vite 前端
+    ├── src/               # SPA 源码(实时/历史/声纹/设置)
+    └── dist/              # npm run build 后生成,由 FastAPI 托管
 ```
 
 ## 📦 模型来源
@@ -215,7 +230,7 @@ python scripts/seed_demo_data.py --force
 python scripts/seed_demo_data.py --no-audio
 ```
 
-完成后打开 `web/history.html` 看到 2 条"示例: ..."会话。
+完成后打开 `http://127.0.0.1:8000/library` 看到 2 条"示例: ..."会话。
 **注意**: 示例是公开讲座和朗读片段,不是会议录音 — 用来体验转写+说话人识别功能。
 
 ## ❓ 常见问题
