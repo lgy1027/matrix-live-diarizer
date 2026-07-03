@@ -3,26 +3,21 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      platforms:
-        - linux/amd64
-        - linux/arm64
-    image: lgy1027/matrix-live-diarizer:0.2.1
+    image: matrix-live-diarizer:local
     container_name: matrix
     restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
     ports:
-      - "8000:8000"
+      - "${PORT:-8000}:${PORT:-8000}"
     volumes:
       - matrix-data:/app/data
       - matrix-speakers:/app/engine/speaker/speaker_db
       - matrix-uploads:/app/uploads
       - matrix-models:/home/matrix/.cache/modelscope
-    environment:
-      # 默认安全:不开 LLM,不开公网
-      LLM_ENABLED: "false"
-      ASR_DEVICE: "auto"
-      # 想跑 LLM 取消下面注释
-      # LLM_ENABLED: "true"
-      # LLM_ENDPOINT: "http://host.docker.internal:11434/v1"
+      - matrix-hf-cache:/home/matrix/.cache/huggingface
+      - matrix-torch-cache:/home/matrix/.cache/torch
     extra_hosts:
       # Mac/Windows 访问宿主机的 Ollama
       - "host.docker.internal:host-gateway"
@@ -32,3 +27,5 @@ volumes:
   matrix-speakers:
   matrix-uploads:
   matrix-models:
+  matrix-hf-cache:
+  matrix-torch-cache:

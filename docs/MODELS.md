@@ -4,9 +4,9 @@
 
 ---
 
-## 当前在用
+## 当前可用
 
-### ASR: Qwen3-ASR-0.6B
+### ASR: Qwen3-ASR-0.6B（默认）
 - **来源**: ModelScope `Qwen/Qwen3-ASR-0.6B`
 - **大小**: 1.8GB
 - **设备**: MPS / CUDA / CPU(默认 auto,mps 优先,90s 超时回退)
@@ -31,6 +31,16 @@
 - **切换**: `SPEAKER_ENGINE=campplus|eres2net|wespeaker` 运行时可切
 - **embedding_dim**: CamPlus/ERes2Net=192,Wespeaker=256(切引擎不兼容老数据)
 
+### ASR: SenseVoice / Paraformer / Paraformer Streaming
+- **来源**: ModelScope / FunASR
+- **依赖**: `funasr>=1.2.0`
+- **切换**: 设置页或 `PUT /v1/asr/engine`
+- **行为**: 新 ASR 下载/加载完成前继续使用旧 ASR;加载失败不会影响当前引擎
+- **适用**:
+  - SenseVoice-Small: 多语种上传转写,模型更轻
+  - Paraformer: 中文会议/访谈离线转写
+  - Paraformer Streaming: 低延迟实时字幕
+
 ### VAD: Silero VAD
 - **来源**: torch.hub `snakers4/silero-vad`
 - **大小**: < 2MB
@@ -41,7 +51,7 @@
 
 ## 调研过但未采用
 
-### SenseVoice-Small
+### SenseVoice-Small 评估记录
 - **大小**: ~250MB(对比 Qwen3-ASR-0.6B 的 1.8GB)
 - **来源**: ModelScope `iic/SenseVoiceSmall`
 - **能力**: ASR + 语种识别 + 情感识别 + 声音事件检测(AED),多任务
@@ -51,7 +61,7 @@
   - **中文方言仅普通话 + 粤语**:`labels` 字段 50+ 语言是指"语种",不是"方言"。粤语/闽南语/上海话等不支持
   - **中文表现弱于 Qwen3-ASR-0.6B**:在小规模对比测试中,Qwen3-ASR 在普通话 / 英文上的 WER 低 2-3%
   - **声学事件 + 情感不是本项目目标**:多任务反而拖慢主任务
-- **结论**: 适合"批量处理短音频 + 多语种"场景(如客服质检),不适合本项目"实时流式 + 中文为主"
+- **结论**: 已作为可选 ASR 集成,适合"批量处理短音频 + 多语种"场景;默认仍保留 Qwen3-ASR。
 
 ### ZipEnhancer (speech_zipenhancer_ans_multiloss_16k_base)
 - **大小**: 2.04M 参数(约 8MB,极小)
@@ -76,7 +86,7 @@
   4. 加 PESQ 量化指标,让用户看降噪前后质量差
 
 ### 其他小 ASR 候选
-- **Paraformer-small** (FunASR): 220MB,中文为主,流式支持(Paraformer-streaming)。值得后续评估。
+- **Paraformer-small / Paraformer Streaming** (FunASR): 已作为可选 ASR 集成。
 - **Whisper-tiny**: 75MB,英文强,中文弱,延迟高。不推荐。
 - **Whisper-base**: 150MB,中文一般,延迟高。不推荐。
 - **WenetSpeech** 系列: 工业级,通常 1GB+,与本项目"小"原则不符。
@@ -86,9 +96,9 @@
 ## 选型原则
 
 1. **< 2GB 模型优先**: 1.8GB 的 Qwen3-ASR-0.6B 是上限(MPS 容易 OOM)
-2. **中文为第一优先级**: 项目主要服务中文场景(README/CLAUDE.md/i18n 都是简体中文)
-3. **流式友好**: WebSocket 实时流,模型必须支持 chunk-by-chunk 推理
-4. **可热切换**: 引擎维度(CamPlus/ERes2Net)已支持运行时切换,ASR 维度未来可加
+2. **中文为第一优先级**: 项目主要服务中文场景(README/i18n 都是简体中文)
+3. **流式友好**: WebSocket 实时流优先选择低延迟模型;离线上传可使用非流式模型
+4. **可热切换**: ASR 与声纹引擎均支持运行时切换
 5. **离线 / 国产化**: ModelScope 镜像 + 阿里生态(Qwen/CamPlus/ERes2Net)优先
 
 ---

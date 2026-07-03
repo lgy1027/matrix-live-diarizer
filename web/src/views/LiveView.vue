@@ -7,6 +7,7 @@ import { useRouter } from 'vue-router'
 import { spkColor } from '../utils/spk'
 import { fmtClock, fmtRel } from '../utils/format'
 import { uploadAudio } from '../api/speakers'
+import { getModels, type ModelsInfo } from '../api/engines'
 import SpeakerLabel from '../components/SpeakerLabel.vue'
 import SpeakerMenu from '../components/SpeakerMenu.vue'
 import type { LiveSegment } from '../stores/live'
@@ -19,6 +20,7 @@ const router = useRouter()
 
 const waveCanvas = ref<HTMLCanvasElement | null>(null)
 const dropActive = ref(false)
+const models = ref<ModelsInfo | null>(null)
 
 let dragCounter = 0
 
@@ -165,6 +167,15 @@ async function loadRecent() {
   } catch { /* noop */ }
 }
 onMounted(loadRecent)
+
+async function loadModels() {
+  try {
+    models.value = await getModels()
+  } catch {
+    models.value = null
+  }
+}
+onMounted(loadModels)
 </script>
 
 <template>
@@ -179,9 +190,9 @@ onMounted(loadRecent)
             <span><span>{{ t('view.live.meta.started') }}</span> <b>{{ fmtTime(live.recTimer) }}</b></span>
           </template>
           <span class="sep">·</span>
-          <span><span>{{ t('view.live.meta.asr') }}</span> <b>Qwen3-ASR</b></span>
+          <span><span>{{ t('view.live.meta.asr') }}</span> <b>{{ models?.asr?.name || 'ASR' }}</b></span>
           <span class="sep">·</span>
-          <span><span>{{ t('view.live.meta.speaker') }}</span> <b>—</b></span>
+          <span><span>{{ t('view.live.meta.speaker') }}</span> <b>{{ models?.speakers?.[models.current]?.name || models?.current || '—' }}</b></span>
         </div>
         <div class="wave-wrap" :class="{ 'drop-active': dropActive }">
           <canvas ref="waveCanvas" />

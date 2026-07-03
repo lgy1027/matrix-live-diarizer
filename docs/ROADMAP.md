@@ -23,8 +23,8 @@
 | 音频格式 | 7 种（wav/mp3/m4a/flac/ogg/aac/wma） |
 | 导出格式 | 4 种（SRT/VTT/MD/JSON）|
 | 语言 | zh + en |
-| ASR 模型 | 1 个（Qwen3-ASR-0.6B，不可热切）|
-| 声纹模型 | 3 个可选（CamPlus/ERes2NetV2/Wespeaker） |
+| ASR 模型 | Qwen3-ASR / SenseVoice / Paraformer / Paraformer Streaming，可热切 |
+| 声纹模型 | 3 个可选（CamPlus/ERes2NetV2/Wespeaker），可热切 |
 | 数据库 | SQLite 单库 |
 | 用户/认证 | 无（单用户）|
 | 移动端 | 未做（桌面 56px nav + 1480px max-width）|
@@ -280,7 +280,7 @@ ws.onclose = () => {
 
 - [ ] `CONTRIBUTING.md`（开发约定 / 测试要求 / 提 PR 流程）
 - [ ] `CHANGELOG.md`（语义化版本，从 v0.3 开始）
-- [ ] `docs/ARCHITECTURE.md`（CLAUDE.md 现有内容正式化）
+- [ ] `docs/ARCHITECTURE.md`（将现有架构说明正式化）
 - [ ] `docs/MODELS.md`（ASR / 声纹模型选型指南，参考 4.6）
 - [ ] README 顶部加架构图 + 截图 GIF
 - [ ] FastAPI `/docs` 打开作为 API 参考
@@ -308,7 +308,7 @@ ws.onclose = () => {
 
 ### 4.4 Alembic 数据库迁移
 
-当前 schema 估计是 `CREATE TABLE IF NOT EXISTS` 模式（CLAUDE.md 没提迁移机制），**没有版本管理**。改 schema 时老库会崩。
+当前 schema 仍以 `CREATE TABLE IF NOT EXISTS` 为主，**没有版本管理**。改 schema 时老库会崩。
 
 **估时**：2 天
 
@@ -322,14 +322,9 @@ ws.onclose = () => {
 
 ### 4.6 ASR 模型可热切
 
-**痛点**：当前 ASR 引擎是单例，只能启动时定。用户想试不同 ASR（Qwen3-ASR vs SenseVoice-Small）要重启。
+**状态**：已完成。
 
-**实现**（参考已有声纹引擎切换的代码 `engine/speaker/speaker_factory.py`）：
-- `ASREngineManager` 单例 + `switch_engine(asr_type)` 方法
-- 支持 Qwen3-ASR-0.6B / 1.7B / SenseVoice-Small（如果用户选 #1.6）
-- WebSocket session 级锁（不同 session 可用不同 ASR）
-
-**估时**：1 周
+当前通过 `ASREngineManager` 支持 Qwen3-ASR / SenseVoice / Paraformer / Paraformer Streaming 动态切换。新模型加载成功前旧 ASR 保持可用,加载失败不会影响当前服务。设置页已经提供确认弹窗和依赖缺失提示。
 
 ---
 

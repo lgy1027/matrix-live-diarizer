@@ -242,6 +242,55 @@ curl 'http://127.0.0.1:8000/v1/search?q=OpenAI&limit=20'
 
 ## 8. 环境变量参考
 
+## 8. 引擎与运行时设置
+
+### ASR 引擎列表
+
+```http
+GET /v1/asr/engines
+```
+
+返回当前 ASR、候选 ASR、加载状态和依赖可用性。支持:
+
+- `qwen3`
+- `sensevoice`
+- `paraformer`
+- `paraformer_streaming`
+
+### 动态切换 ASR
+
+```http
+PUT /v1/asr/engine
+Content-Type: application/json
+
+{"engine_type":"sensevoice"}
+```
+
+切换时旧 ASR 会继续可用,新模型下载/加载成功后才替换当前引擎。若缺少 `funasr` 等依赖,接口返回错误且不会影响当前 ASR。
+
+### 声纹引擎
+
+```http
+GET /v1/engines
+PUT /v1/engine
+Content-Type: application/json
+
+{"engine_type":"eres2net"}
+```
+
+支持 `campplus` / `eres2net` / `wespeaker`。切换后会刷新后端当前声纹引擎。
+
+### LLM 设置
+
+```http
+GET /v1/llm/settings
+PUT /v1/llm/settings
+```
+
+设置页会通过这些接口保存 provider / endpoint / model / API Key / mock / allow_public。保存后写入本地 SQLite settings,优先级高于 `.env` 中的 LLM 默认值,无需重启。
+
+## 9. 环境变量参考
+
 ### 服务器
 
 | 参数 | 默认值 | 环境变量 | 说明 |
@@ -277,10 +326,11 @@ curl 'http://127.0.0.1:8000/v1/search?q=OpenAI&limit=20'
 | requests_per_minute | `60` | `RATE_LIMIT_REQUESTS_PER_MINUTE` | 每分钟上限 |
 | requests_per_hour | `1000` | `RATE_LIMIT_REQUESTS_PER_HOUR` | 每小时上限 |
 
-### 声纹引擎
+### ASR 与声纹引擎
 
 | 参数 | 默认值 | 环境变量 | 说明 |
 |------|--------|----------|------|
+| asr_engine | `qwen3` | `ASR_ENGINE` | 启动时默认 ASR: qwen3 / sensevoice / paraformer / paraformer_streaming |
 | speaker_engine | `campplus` | `SPEAKER_ENGINE` | 启动时默认引擎 |
 | asr_device | `auto` | `ASR_DEVICE` | auto / cpu / mps / cuda |
 | asr_load_timeout_sec | `90` | `ASR_LOAD_TIMEOUT_SEC` | 模型加载超时（防 MPS 死锁）|

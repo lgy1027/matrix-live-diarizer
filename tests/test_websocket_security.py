@@ -4,8 +4,6 @@
 - 允许字符: [a-zA-Z0-9_]{1,64}
 - 防止日志注入(换行符剥离)
 - 非法字符替换为 _
-
-对应 CLAUDE.md 的安全约束
 """
 import sys
 sys.path.insert(0, "/Users/lgy/python/github.com/lgy1027/matrix-live-diarizer")

@@ -169,7 +169,7 @@ curl -X POST "http://127.0.0.1:8000/v1/upload?enable_diarization=false" \
 
 ### 6.1 多人会议（会议场景）
 
-- 会议时长建议 ≤ 1 小时（CLAUDE.md 限制）
+- 会议时长建议 ≤ 1 小时（上传处理上限）
 - 上传时 `enable_diarization=true`（默认）
 - 选 **CamPlus** 引擎（实时优先）
 - 结束后用 Library 详情页生成 LLM 摘要
@@ -184,7 +184,7 @@ curl -X POST "http://127.0.0.1:8000/v1/upload?enable_diarization=false" \
 
 详见 [LLM_SETUP.md](LLM_SETUP.md)。推荐：
 - 本地：Ollama + qwen2.5:1.5b（3GB 内存）
-- 远程：LiteLLM 反代 + OpenAI/Claude（隐私护栏已开公网）
+- 远程：LiteLLM 反代 + OpenAI-compatible provider（隐私护栏已开公网）
 
 ### 6.4 容器化部署
 

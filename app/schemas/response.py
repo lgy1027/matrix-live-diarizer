@@ -1,5 +1,5 @@
 """响应数据模型"""
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Any
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -56,6 +56,7 @@ class ModelsResponse(BaseModel):
     """模型信息"""
     current: str
     asr: ASRInfo
+    asr_engines: Optional[Dict[str, Any]] = None
     speakers: Dict[str, EngineInfo]
 
 

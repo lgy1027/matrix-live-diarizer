@@ -31,14 +31,17 @@ def test_dockerfile_builds_vue_frontend():
 
 
 def test_dockerfile_installs_requirements_after_copy():
-    """运行时安装 requirements 前必须先复制 requirements.txt"""
+    """运行时安装 requirements 前必须先复制并生成 Docker 专用依赖清单"""
     content = DOCKERFILE.read_text(encoding="utf-8")
     copy_pos = content.find("COPY requirements.txt /app/requirements.txt")
-    install_pos = content.find("pip install --no-cache-dir --find-links /wheels -r /app/requirements.txt")
+    filter_pos = content.find("/app/requirements.docker.txt")
+    install_pos = content.find("pip install --find-links /wheels -r /app/requirements.docker.txt")
     assert copy_pos != -1, "runtime stage 应先 COPY requirements.txt"
-    assert install_pos != -1, "runtime stage 应安装 requirements.txt"
+    assert filter_pos != -1, "runtime stage 应生成 requirements.docker.txt"
+    assert install_pos != -1, "runtime stage 应安装 Docker 专用 requirements"
     assert copy_pos < install_pos, "不能在 requirements.txt 不存在时执行 pip install -r"
     assert "pip install --no-cache-dir --find-links /wheels -r /app/requirements.txt 2>/dev/null || true" not in content
+    assert "torch|torchvision|torchaudio" in content, "Docker 应过滤 torch 三件套,避免重复解析 CUDA 依赖"
 
 
 def test_dockerfile_uses_non_root_user():
@@ -83,13 +86,23 @@ def test_compose_has_named_volumes():
 
 def test_compose_exposes_port_8000():
     content = COMPOSE.read_text(encoding="utf-8")
-    assert "8000:8000" in content
+    assert "${PORT:-8000}:${PORT:-8000}" in content
 
 
-def test_compose_supports_multi_platform():
+def test_docs_explain_multi_platform_buildx():
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    readme_en = (REPO_ROOT / "README.en.md").read_text(encoding="utf-8")
+    combined = f"{readme}\n{readme_en}"
+    assert "linux/amd64,linux/arm64" in combined
+    assert "docker buildx build" in combined
+
+
+def test_compose_avoids_default_multi_platform_build():
+    """普通 docker compose up 不应默认触发 buildx 多架构构建"""
     content = COMPOSE.read_text(encoding="utf-8")
-    assert "linux/amd64" in content
-    assert "linux/arm64" in content
+    assert "platforms:" not in content
+    assert "linux/amd64" not in content
+    assert "linux/arm64" not in content
 
 
 def test_entrypoint_exists_and_executable():

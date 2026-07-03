@@ -5,11 +5,13 @@
 **本地优先的会议语音 AI · 默认 0 字节外传**
 
 3-10 人小会议 / 个人实时字幕。转写 + 说话人识别 + 摘要纪要，跑在你自己的机器上。
-**音频和转写永远不上云**，LLM 可选本机 Ollama 或局域网 vLLM。
+**音频和转写默认不上云**，ASR / 声纹 / LLM 都可以在设置页按需切换。
 
 [![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![ModelScope](https://img.shields.io/badge/ModelScope-Qwen3--ASR-orange.svg)](https://modelscope.cn/models/Qwen/Qwen3-ASR-0.6B)
+
+**中文** | [English](README.en.md)
 
 </div>
 
@@ -18,7 +20,7 @@
 ## 30 秒价值主张
 
 > 你的会议录音 → 自动转写 + 说话人识别 + 摘要纪要。
-> **默认 0 字节外传**。需要时，你可以接 Ollama / 局域网 vLLM。
+> **默认 0 字节外传**。需要时，你可以接 Ollama / LM Studio / 局域网 vLLM / OpenAI-compatible endpoint。
 
 ## 为什么用 Matrix，不用飞书妙记 / 通义听悟？
 
@@ -41,28 +43,56 @@
 
 ## 🐳 Docker 快速开始(推荐)
 
-无需装 PyTorch,5 分钟跑通。
+无需在宿主机安装 PyTorch。Docker 镜像默认使用 **CPU 版 PyTorch**,模型和数据都挂载到 Docker volume,删除容器不丢。
 
 ```bash
-# 1. 克隆 + 启动
+# 1. 克隆
 git clone https://github.com/lgy1027/matrix-live-diarizer.git
 cd matrix-live-diarizer
+
+# 2. 可选:使用 .env 覆盖默认配置
+# 不复制也能启动;复制后可修改 ASR_ENGINE / LLM_ENDPOINT / PORT 等
+cp .env.example .env
+
+# 如果容器需要访问宿主机 Ollama,不要用 127.0.0.1,改成:
+# LLM_ENABLED=true
+# LLM_ENDPOINT=http://host.docker.internal:11434/v1
+
+# 3. 构建并启动
 docker compose up -d
 
-# 2. 看日志(首次启动会下载 ASR 模型 ~1.8GB,5-20 分钟)
+# 4. 看日志(首次启动会下载 ASR / VAD / 声纹模型,5-20 分钟)
 docker compose logs -f
 
-# 3. 浏览器打开前端
+# 5. 浏览器打开前端
 # 默认地址: http://127.0.0.1:8000/
+# 如果 .env 里改了 PORT=8888,则打开 http://127.0.0.1:8888/
 ```
 
 **特性:**
-- 镜像 ~800MB,模型按需下载(不进镜像,避免 ImagePullBackOff)
-- 数据持久化在 docker volume,删容器不丢
-- 支持 linux/amd64 + linux/arm64(M1/M2 Mac 也能跑)
+- 模型按需下载,不打进镜像
+- 持久化卷包含 SQLite 数据、上传文件、说话人库、ModelScope / HuggingFace / Torch 缓存
+- 本地 `docker compose up -d` 按当前机器架构构建,支持 linux/amd64 与 linux/arm64
+- `docker-compose.yml` 会可选读取 `.env`;`PORT` 会同时控制容器监听端口和宿主机映射端口
 - 健康检查 + 非 root 用户运行
 
-> 需要换架构加速构建?`docker buildx create --use` 配远程构建。
+常用命令:
+
+```bash
+# 重建镜像
+docker compose build --pull
+
+# 停止服务但保留模型/数据
+docker compose down
+
+# 连 volume 一起删除(会清空模型缓存和历史数据)
+docker compose down -v
+```
+
+> 需要发布多架构镜像时再使用 buildx,例如:
+> `docker buildx build --platform linux/amd64,linux/arm64 -t your-name/matrix-live-diarizer:latest --push .`
+>
+> Docker 默认镜像是 CPU 版。需要 NVIDIA GPU 时,建议基于 CUDA PyTorch 镜像单独构建 GPU 版,并在 compose 中增加 `gpus: all`。
 
 ## 🚀 5 分钟跑通(从源码)
 
@@ -92,23 +122,50 @@ ASR_DEVICE=cpu python main.py     # MPS 死锁时用 CPU
 前端开发模式:
 
 ```bash
+# 终端 1:后端
+python main.py
+
+# 终端 2:前端
 cd web
 npm ci
 npm run dev
 # 打开 http://127.0.0.1:5173/
 ```
 
+如果后端不是 8000 端口,在 `web/.env.local` 里配置:
+
+```bash
+VITE_BACKEND_URL=http://127.0.0.1:8888
+# 可选。不写会由 VITE_BACKEND_URL 自动推导
+# VITE_BACKEND_WS=ws://127.0.0.1:8888
+```
+
 ## ✨ 它能做什么
 
 - 🎤 **实时转写** — 浏览器录音，WebSocket 流式，说话即出文字
 - 📁 **离线处理** — 上传录音文件，自动分段 + 说话人识别，导出 SRT / VTT / MD / JSON
+- 🧠 **多 ASR 引擎** — Qwen3-ASR / SenseVoice / Paraformer / Paraformer Streaming，可在设置页动态切换
 - 👥 **说话人识别** — 手动注册声纹，会议里自动标"张三说的"
-- 🤖 **可选 LLM** — 摘要 / 行动项 / 会议纪要；默认关，启用时支持 Ollama / 局域网 vLLM / OpenAI 兼容 endpoint
+- 🔁 **声纹引擎切换** — CamPlus / ERes2NetV2 / Wespeaker，设置页确认后热切换
+- 🤖 **可选 LLM** — 摘要 / 行动项 / 会议纪要；设置页支持 Ollama / LM Studio / LocalAI / vLLM / OpenAI-compatible provider
 - 🛡️ **离线兜底** — LLM 未配时自动用 TextRank 提取本地摘要,不出错也不空白
 - 📚 **历史会话** — 所有转写本地存库（SQLite），随时回看
 - 🔐 **JWT 鉴权** — 默认 `admin/admin`, 首次登录强制改密; 全部 `/v1/*` 需 Bearer token (roadmap 安全项)
 - 🛡️ **安全默认** — DNS rebinding 防御 + 仅本机改 LLM 配置 + prompt 注入隔离
 - 📱 **移动端响应式** — < 768px 自动改底部 tab bar,手机/平板可用(roadmap #1.5)
+
+## ⚙️ 设置页支持
+
+当前设置页不是只读展示,已经支持以下运行时配置:
+
+| 配置 | 页面能力 | 行为 |
+|------|----------|------|
+| ASR 引擎 | 动态切换 | 新模型未下载时后端会先下载/加载;完成前继续使用旧 ASR |
+| 声纹引擎 | 确认弹窗后切换 | 切换 CamPlus / ERes2NetV2 / Wespeaker |
+| Local LLM | 修改 provider / endpoint / model / API Key | 页面保存后写入本地 SQLite settings,无需重启 |
+| 历史存储 | 状态展示 | 由 `STORAGE_HISTORY_ENABLED` 环境变量控制 |
+
+`.env` 仍然是默认配置来源;只要页面保存过 LLM 设置,页面配置会覆盖 `.env` 中的 LLM 默认值。
 
 ## 🔐 鉴权 (Roadmap 安全项)
 
@@ -164,6 +221,19 @@ npm run dev
 - 录音、说话人识别、SRT 导出等所有功能在移动端可用
 - 注意: Web 端录音需 HTTPS 或 `localhost`/`file://` — 局域网手机访问后端需配置 CORS(`ALLOWED_ORIGINS` env,详见 `docs/USAGE.md`)
 
+## 🧠 ASR 引擎选择
+
+| 引擎 | 模型 | 依赖 | 推荐场景 |
+|------|------|------|----------|
+| **Qwen3-ASR** | `Qwen/Qwen3-ASR-0.6B` | `qwen-asr` | 默认高质量中文/多语言转写 |
+| **SenseVoice-Small** | `iic/SenseVoiceSmall` | `funasr` | 更轻快的多语种上传转写 |
+| **Paraformer** | `paraformer-zh` | `funasr` | 中文会议/访谈离线转写 |
+| **Paraformer Streaming** | `paraformer-zh-streaming` | `funasr` | 低延迟实时字幕 |
+
+设置页可以动态切换 ASR。若目标模型或依赖尚未就绪,后端会返回明确提示;模型下载/加载完成前旧 ASR 会继续工作。
+
+> Windows + Python 3.13 下 `funasr` 可能因为 `editdistance` wheel 缺失安装失败。建议使用 Python 3.10-3.12 或 Docker 环境启用 FunASR 系列引擎。
+
 ## 🎯 声纹引擎对比
 
 | 引擎 | EER (VoxCeleb) | EER (CNCeleb) | 参数量 | 速度 | 适用场景 |
@@ -171,6 +241,8 @@ npm run dev
 | **CamPlus** | 0.65% | 6.78% | 7.2M | ⚡ 快 | 实时场景 (默认) |
 | **ERes2NetV2** | 0.61% | 6.14% | 17.8M | 🚗 中 | 高精度需求 |
 | **Wespeaker** | 1.05% | 6.92% | 6.34M | ⚡ 快 | 经典稳定 |
+
+声纹引擎也可在设置页热切换。切换前会显示确认弹窗,避免识别过程中误切。
 
 ## 🏗️ 项目结构
 
@@ -184,9 +256,10 @@ matrix-live-diarizer/
 │   ├── middleware/        # 速率限制
 │   └── config.py          # 配置 dataclass
 ├── engine/                # 推理引擎层
-│   ├── asr_engine.py      # Qwen3-ASR + Silero VAD
-│   └── speaker/           # 3 种声纹引擎 + factory
-├── tests/                 # 239 个测试(包含 smoke test)
+│   ├── asr_engine.py      # Qwen3-ASR 兼容层 + Silero VAD
+│   ├── asr/               # ASR 工厂 + FunASR 引擎 + 动态切换管理器
+│   └── speaker/           # 3 种声纹引擎 + factory + 动态切换管理器
+├── tests/                 # 单元测试 / API 测试 / smoke test
 ├── docs/                  # 详细文档
 │   ├── USAGE.md           # 使用指南
 │   ├── API.md             # API 参考
@@ -201,18 +274,19 @@ matrix-live-diarizer/
 
 | 模块 | 模型 | 来源 |
 |------|------|------|
-| ASR | [Qwen3-ASR-0.6B](https://modelscope.cn/models/Qwen/Qwen3-ASR-0.6B) | ModelScope |
+| ASR | Qwen3-ASR / SenseVoice / Paraformer | ModelScope |
 | Speaker | CamPlus / ERes2NetV2 / Wespeaker | ModelScope |
 | VAD | [Silero VAD](https://github.com/snakers4/silero-vad) | torch.hub |
 
-首次启动自动下载,完成后**永久断网可用**(LLM 关闭时)。
+首次使用某个模型时自动下载,完成后缓存到本机或 Docker volume。LLM 关闭且模型已缓存时,核心转写能力可离线使用。
 
 ## ⚠️ 注意事项
 
 - **单进程运行** — Mac MPS 必须 `WORKERS=1`,避免内存溢出
 - **采样率 16kHz** — 浏览器自动重采样,API 客户端需注意
 - **文件上传** — 500MB 上限,1 小时时长上限
-- **首次启动** — 需联网下载模型约 1.8GB
+- **首次启动** — 需联网下载默认 ASR / VAD / 声纹模型
+- **动态切换** — ASR / 声纹切换会加载新模型,首次切换耗时取决于网络和磁盘缓存
 
 ## 🎬 试用示例数据
 
@@ -243,15 +317,24 @@ A: macOS MPS 加载 Qwen3-ASR 偶发死锁。已加 90s 超时回退 CPU。
 A: Voice Library 点 **Select** → 多选 → **Delete N**。
    或 API:`POST /v1/speakers/cleanup`(`docs/API.md` 第 3 节)。
 
-**Q3: 想用 GPT-4 / Claude 质量但保持隐私?**
-A: 本地起 [LiteLLM](https://github.com/BerriAI/litellm) 反代,
-   Matrix 通过 `http://127.0.0.1:4000` 访问(无需 `LLM_ALLOW_PUBLIC`)。
+**Q3: 想用公网高质量大模型但保持隐私?**
+A: 推荐本地起 [LiteLLM](https://github.com/BerriAI/litellm) 反代,
+   然后在设置页选择 `Custom`,填 `http://127.0.0.1:4000/v1`。
+   也可以在 `.env` 中写 `LLM_ENDPOINT`,但页面保存后的 LLM 配置优先生效。
    详见 [`docs/LLM_SETUP.md`](docs/LLM_SETUP.md)。
 
 **Q4: 数据会发到云端吗?**
 A: 默认**不会**。LLM 公网 endpoint 需**显式**设 `LLM_ALLOW_PUBLIC=true` 才放行,
    且只发转写文本到指定 endpoint,不包含音频和声纹向量。
    详见 [`docs/PRIVACY.md`](docs/PRIVACY.md)。
+
+**Q5: 前端开发服务怎么连不同后端端口?**
+A: 在 `web/.env.local` 配置 `VITE_BACKEND_URL=http://127.0.0.1:8888`。
+   WebSocket 地址默认会自动从这个 URL 推导,通常不用单独配 `VITE_BACKEND_WS`。
+
+**Q6: Docker 里为什么访问不了宿主机 Ollama?**
+A: 容器内的 `127.0.0.1` 是容器自己。请使用
+   `LLM_ENDPOINT=http://host.docker.internal:11434/v1`,compose 已内置 `extra_hosts`。
 
 更多问题见 [docs/USAGE.md 故障排查](docs/USAGE.md#故障排查速查)。
 

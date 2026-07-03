@@ -40,6 +40,15 @@ MAX_FILE_SIZE: int = 500 * 1024 * 1024  # 500MB
 _UPLOAD_CHUNK_SIZE: int = 1024 * 1024   # 1MB chunks,可被测试 mock
 
 
+def _current_asr_display_name() -> str:
+    """返回当前 ASR 展示名,用于用户可见提示."""
+    try:
+        from engine.asr import get_asr_engine_info
+        return str(get_asr_engine_info().get("name") or "ASR")
+    except Exception:
+        return "ASR"
+
+
 def init_engines(asr, spk, lock, base_dir: str, repo=None):
     """初始化引擎实例
 
@@ -326,7 +335,7 @@ async def upload_audio(
             _has_speech = bool((text or "").strip())
             _warning = None
             if not _has_speech:
-                _warning = f"未识别到语音内容。文件时长 {duration:.1f}s, 但 ASR (Qwen3-ASR) 未输出文本。常见原因: 纯静音/纯音乐/合成音频/录音质量差。"
+                _warning = f"未识别到语音内容。文件时长 {duration:.1f}s, 但 ASR ({_current_asr_display_name()}) 未输出文本。常见原因: 纯静音/纯音乐/合成音频/录音质量差。"
 
             return UploadResponse(
                 status="success",
@@ -466,7 +475,7 @@ async def upload_audio(
         has_speech = bool(merged_text.strip() or (segments and any(s.text.strip() for s in segments)))
         warning = None
         if not has_speech:
-            warning = f"未识别到语音内容。文件时长 {duration:.1f}s, 但 ASR (Qwen3-ASR) 未输出文本。常见原因: 纯静音/纯音乐/合成音频/录音质量差。"
+            warning = f"未识别到语音内容。文件时长 {duration:.1f}s, 但 ASR ({_current_asr_display_name()}) 未输出文本。常见原因: 纯静音/纯音乐/合成音频/录音质量差。"
 
         return UploadResponse(
             status="success",

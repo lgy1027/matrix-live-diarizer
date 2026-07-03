@@ -96,6 +96,8 @@ class AudioConfig:
     upload_overlap_duration: float = 1.0
     # ASR 设备：auto | cpu | mps | cuda
     # auto 优先 mps，加载超时后回退 cpu
+    # ASR 引擎：qwen3 | sensevoice | paraformer | paraformer_streaming
+    asr_engine: str = "qwen3"
     asr_device: str = "auto"
     asr_load_timeout_sec: int = 90      # 单设备加载超时（秒）
     # ASR 字级时间戳：开启后额外加载 Qwen3-ForcedAligner-0.6B (~600MB),
@@ -123,6 +125,7 @@ class AudioConfig:
             upload_max_duration=get_env_int("UPLOAD_MAX_DURATION", 3600),
             upload_chunk_duration=get_env_int("UPLOAD_CHUNK_DURATION", 30),
             upload_overlap_duration=get_env_float("UPLOAD_OVERLAP_DURATION", 1.0),
+            asr_engine=get_env_str("ASR_ENGINE", "qwen3").lower(),
             asr_device=get_env_str("ASR_DEVICE", "auto").lower(),
             asr_load_timeout_sec=get_env_int("ASR_LOAD_TIMEOUT_SEC", 90),
             asr_word_timestamps=get_env_bool("ASR_WORD_TIMESTAMPS", False),

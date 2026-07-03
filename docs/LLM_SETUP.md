@@ -75,7 +75,7 @@ LLM_API_KEY=sk-xxx
 
 ### 配置示例：LiteLLM 反代（推荐！本地包公网）
 
-如果你想用 GPT-4 / Claude 的质量又不想让转写文本真出本机,
+如果你想使用公网高质量大模型又不想让转写文本直接离开本机,
 可以用 [LiteLLM](https://github.com/BerriAI/litellm) 在本机起反代:
 
 ```bash

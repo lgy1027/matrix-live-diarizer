@@ -67,7 +67,7 @@ STATE_SILENCE = 0
 STATE_SPEECH = 1
 SILENCE_THRESHOLD_FRAMES = 8  # bug-fix: 3 帧 (384ms) 太短,自然换气就切碎。
                                           # 8 帧 ≈ 1024ms 允许 1 秒停顿不切(用户感受:响应延迟略增,但完整)
-                                          # CLAUDE.md 说 .env 有 VAD_MIN_SILENCE_DURATION 但代码硬编码 3,配置漂移。
+                                          # 保持模块级常量,便于 WebSocket 状态机测试直接覆盖。
 LOUD_RMS_THRESHOLD = 0.005    # bug-fix: 0.015 偏高,某些帧瞬时 RMS 跌到这个值就被判静音 → buffer 不累积。原 0.015。
 
 

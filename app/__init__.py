@@ -92,13 +92,16 @@ def create_app() -> FastAPI:
 
 def _init_engines(app: FastAPI):
     """初始化推理引擎"""
-    from engine.asr_engine import ASREngine
+    from engine.asr import get_asr_manager
     from engine.speaker import get_speaker_engine, get_engine_info
 
-    asr_engine = ASREngine()
+    asr_manager = get_asr_manager()
+    asr_engine = asr_manager.get_engine()
     spk_engine = get_speaker_engine()
 
+    asr_info = asr_manager.get_engine_info()
     engine_info = get_engine_info()
+    logger.info(f"ASR 引擎: {asr_info['name']}, 模型: {asr_info['model']}")
     logger.info(f"声纹引擎: {engine_info['name']}, 模型: {engine_info['model']}")
 
     inference_lock = asyncio.Lock()
@@ -130,6 +133,7 @@ def _init_engines(app: FastAPI):
     init_health_check(asr_engine, spk_engine)
 
     app.state.asr_engine = asr_engine
+    app.state.asr_manager = asr_manager
     app.state.spk_engine = spk_engine
     app.state.inference_lock = inference_lock
     app.state.config = config  # SPA 重构: 让 health.py 读 storage 配置
