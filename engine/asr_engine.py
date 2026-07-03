@@ -6,8 +6,25 @@ import logging
 import threading
 import time
 import scipy.signal as signal
-from modelscope import snapshot_download
+from modelscope import snapshot_download as _ms_snapshot_download
 from qwen_asr import Qwen3ASRModel
+# bug-fix: ModelScope CDN 经常慢(实测 8MB/s,1.75GB 需 4 分钟),容易触发 90s 超时。
+# fallback 策略: ModelScope 失败 → HF 本地缓存 (前提: 已下完, ~/.cache/huggingface/hub/)
+from huggingface_hub import snapshot_download as _hf_snapshot_download
+HF_LOCAL_FILES_ONLY = True
+# Qwen3ForcedAligner 是可选依赖(给字级时间戳用),只在 _load_with_fallback 内 lazy import
+# 这样测试 mock qwen_asr 简单 module 时(无 __path__)不会在 import 阶段就失败
+
+
+def snapshot_download(repo_id: str, **kwargs):
+    """下载 model,优先 ModelScope,失败 fallback HF 本地缓存"""
+    try:
+        return _ms_snapshot_download(repo_id, **kwargs)
+    except Exception as e:
+        logger = __import__('logging').getLogger("ASR_Engine")
+        logger.warning(f"[ASR] ModelScope 下载失败 ({type(e).__name__}),fallback HF 本地缓存")
+        # HF fallback 必须 local_files_only=True,避免网络问题
+        return _hf_snapshot_download(repo_id, local_files_only=HF_LOCAL_FILES_ONLY)
 
 logger = logging.getLogger("ASR_Engine")
 
@@ -89,8 +106,18 @@ class ASREngine:
                 try:
                     model_dir = snapshot_download("Qwen/Qwen3-ASR-0.6B")
                     dtype = torch.bfloat16 if device in ("cuda", "mps") else torch.float32
+                    # 可选加载 forced aligner (Qwen3-ForcedAligner-0.6B, ~600MB)
+                    # ⚠️ qwen_asr 的 Qwen3ASRModel.from_pretrained 把 forced_aligner 当 str(repo id) 处理
+                    # (Qwen3ASRModel.from_pretrained 内会再调 snapshot_download / Qwen3ForcedAligner.from_pretrained)
+                    # 所以只传 repo id 字符串,不要 pre-load 后再传对象
+                    # (否则会触发 "Repo id must use alphanumeric chars" 错误)
+                    forced_aligner_id = None
+                    if self.config.asr_word_timestamps:
+                        logger.info("[ASR] 加载 forced aligner (Qwen3-ForcedAligner-0.6B)")
+                        forced_aligner_id = "Qwen/Qwen3-ForcedAligner-0.6B"
                     result["asr_model"] = Qwen3ASRModel.from_pretrained(
-                        model_dir, dtype=dtype, device_map=device
+                        model_dir, dtype=dtype, device_map=device,
+                        forced_aligner=forced_aligner_id,
                     )
                     result["ok"] = True
                 except Exception as e:
@@ -339,45 +366,63 @@ class ASREngine:
         }
 
     async def run_asr(self, audio_data, use_preprocessing=True):
-        """语音转写（优化版）"""
+        """语音转写
+
+        Returns:
+            dict: {"text": str, "words": [{"text", "start", "end"}] or None}
+            - text 始终返回(经幻觉过滤)
+            - words 在 ASR_WORD_TIMESTAMPS=true 且 forced aligner 加载时返回,
+              否则为 None
+        """
         if audio_data is None or len(audio_data) < 1600:
-            return ""
+            return {"text": "", "words": None}
 
         # 音频质量评估
         quality = self.evaluate_audio_quality(audio_data)
         if quality["score"] < 30:
             logger.warning(f"[ASR] 音频质量较差: {quality}")
-            return ""
+            return {"text": "", "words": None}
 
         # 预处理
         if use_preprocessing:
             audio_data = self.preprocess_audio(audio_data)
-        
+
         # VAD 检测是否有语音
         if self.is_silent(audio_data, use_vad=True):
             logger.debug("[ASR] VAD 检测为静音，跳过")
-            return ""
+            return {"text": "", "words": None}
 
         try:
             loop = asyncio.get_event_loop()
+            # 字级时间戳需要 forced aligner 初始化(已在 _load_with_fallback 完成)
+            want_words = bool(self.config.asr_word_timestamps and self.asr_model.forced_aligner)
             res = await loop.run_in_executor(
-                None, 
-                lambda: self.asr_model.transcribe(audio=(audio_data, 16000))
+                None,
+                lambda: self.asr_model.transcribe(
+                    audio=(audio_data, 16000),
+                    return_time_stamps=want_words,
+                )
             )
-            
-            if not res: 
-                return ""
-            
+
+            if not res:
+                return {"text": "", "words": None}
+
             text = res[0].text.strip()
-            
             # 过滤幻觉词
             text = self.filter_hallucinations(text)
-                
-            return text
+
+            words = None
+            if want_words and res[0].time_stamps:
+                words = [
+                    {"text": it.text, "start": float(it.start_time), "end": float(it.end_time)}
+                    for it in res[0].time_stamps
+                ]
+
+            return {"text": text, "words": words}
 
         except Exception as e:
             logger.error(f"[ASR] 推理异常: {e}")
-            return ""
+            return {"text": "", "words": None}
 
     def __del__(self):
         if hasattr(self, 'asr_model'):

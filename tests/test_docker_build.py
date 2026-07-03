@@ -27,7 +27,7 @@ def test_dockerfile_exists():
 
 def test_dockerfile_has_at_least_2_stages():
     """多 stage 减少最终镜像大小"""
-    content = DOCKERFILE.read_text()
+    content = DOCKERFILE.read_text(encoding="utf-8")
     froms = re.findall(r"^FROM\s", content, re.MULTILINE)
     assert len(froms) >= 2, f"需要多 stage 构建,目前 {len(froms)}"
 
@@ -37,7 +37,7 @@ def test_dockerfile_size_estimate():
 
     实际验证需 docker buildx 构建。本测试固定估算值 < 1GB 的设计目标。
     """
-    content = DOCKERFILE.read_text()
+    content = DOCKERFILE.read_text(encoding="utf-8")
     # 标记: 用了 torch CPU index(避免 CUDA 拉满)
     assert "download.pytorch.org/whl/cpu" in content, "PyTorch 必须用 CPU index"
     # 标记: 用了 python:3.12-slim(避免 full 镜像 800MB+)

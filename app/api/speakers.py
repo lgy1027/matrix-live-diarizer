@@ -10,6 +10,7 @@ from app.schemas.response import (
     SpeakerResponse,
     SpeakerUpdateRequest,
     SpeakerDeleteResponse,
+    SpeakerImpactResponse,
     EngineSwitchRequest,
     EngineSwitchResponse,
     EnginesListResponse,
@@ -73,6 +74,31 @@ async def get_speaker(speaker_id: str = SPEAKER_ID_PATH):
     return SpeakerResponse(speaker=speaker)
 
 
+@router.get("/v1/speakers/{speaker_id}/impact", response_model=SpeakerImpactResponse)
+async def get_speaker_impact(
+    speaker_id: str = SPEAKER_ID_PATH,
+    request: Request = None,
+):
+    """预览删除声纹的影响 (segments 数 / sessions 数)
+
+    整改: 前端删声纹前调用此接口, 弹 confirm 显示"将清空 N 个 segment 引用,
+    涉及 M 个 session", 避免盲目删声纹导致历史文稿归属丢失.
+    """
+    engine = get_speaker_engine()
+    speaker = engine.get_speaker(speaker_id)
+    if not speaker:
+        raise HTTPException(status_code=404, detail=f"说话人 {speaker_id} 不存在")
+
+    transcript_repo = request.app.state.transcript_repo
+    segments_count = transcript_repo.count_segments_with_speaker(speaker_id)
+    sessions_count = transcript_repo.count_sessions_with_speaker(speaker_id)
+    return SpeakerImpactResponse(
+        speaker_id=speaker_id,
+        segments_count=segments_count,
+        sessions_count=sessions_count,
+    )
+
+
 @router.patch("/v1/speakers/{speaker_id}", response_model=SpeakerResponse)
 async def rename_speaker(
     speaker_id: str = SPEAKER_ID_PATH,
@@ -93,18 +119,50 @@ async def rename_speaker(
 
 
 @router.delete("/v1/speakers/{speaker_id}", response_model=SpeakerDeleteResponse)
-async def delete_speaker(speaker_id: str = SPEAKER_ID_PATH):
-    """删除说话人"""
+async def delete_speaker(
+    speaker_id: str = SPEAKER_ID_PATH,
+    cascade: bool = True,
+    request: Request = None,
+):
+    """删除说话人
+
+    整改: 默认 cascade=True, 删除声纹前先清空 segments.speaker_id 引用
+    (与 POST /v1/speakers/cleanup cascade 行为一致), 避免孤立 Spk_xxx 引用.
+    cascade=false 时只删 ChromaDB, segments 引用保留 (允许用户主动保留历史归属).
+    """
     engine = get_speaker_engine()
     speaker = engine.get_speaker(speaker_id)
     if not speaker:
         raise HTTPException(status_code=404, detail=f"说话人 {speaker_id} 不存在")
 
+    # cascade: 先清 segments 引用
+    cascade_cleared = 0
+    affected_sessions = 0
+    if cascade and request is not None:
+        transcript_repo = getattr(request.app.state, "transcript_repo", None)
+        try:
+            if transcript_repo is not None:
+                cascade_cleared = transcript_repo.clear_speaker_id_from_segments(speaker_id)
+                # 统计受影响的 session 数 (segments.speaker_id 清空后, 哪些 session 还有过这个 speaker)
+                if cascade_cleared > 0:
+                    affected_sessions = transcript_repo.count_sessions_with_speaker(speaker_id)
+        except Exception as e:
+            logger.warning(f"[DELETE-SPEAKER] cascade 清空失败 {speaker_id}: {e}")
+
+    # 再删 ChromaDB
     success = engine.delete_speaker(speaker_id)
     if not success:
         raise HTTPException(status_code=500, detail="删除失败")
 
-    return SpeakerDeleteResponse(message=f"已删除说话人 {speaker_id}")
+    msg = f"已删除说话人 {speaker_id}"
+    if cascade_cleared > 0:
+        msg += f", 已清空 {cascade_cleared} 个 segment 引用 (涉及 {affected_sessions} 个 session)"
+
+    return SpeakerDeleteResponse(
+        message=msg,
+        cascade_segments_cleared=cascade_cleared,
+        affected_sessions=affected_sessions,
+    )
 
 
 @router.post("/v1/speakers/cleanup", response_model=CleanupResponse)
@@ -173,6 +231,138 @@ async def cleanup_speakers(body: CleanupRequest, request: Request):
         total_before=total_before,
         total_after=total_after,
         cascade_segments_cleared=cascade_segments_cleared,
+    )
+
+
+# ========== 说话人合并 / 拆分 API ==========
+
+class MergeSpeakersRequest(BaseModel):
+    """合并多个 source 声纹到 target"""
+    target_id: str = Field(
+        ...,
+        pattern=r"^Spk_[a-zA-Z0-9_]{1,50}$",
+        description="保留的声纹 ID(目标)",
+        examples=["Spk_001"],
+    )
+    source_ids: list[str] = Field(
+        ...,
+        min_length=1,
+        max_length=20,
+        description="要并入 target 的 source ID 列表(1-20 个)",
+        examples=[["Spk_007", "Spk_013"]],
+    )
+
+
+class MergeSpeakersResponse(BaseModel):
+    target_id: str
+    merged_source_ids: list[str]
+    segments_updated: int
+    new_count: int
+
+
+@router.post("/v1/speakers/merge", response_model=MergeSpeakersResponse)
+async def merge_speakers(body: MergeSpeakersRequest, request: Request):
+    """合并声纹:把 source 全部并入 target
+
+    场景: CamPlus 同一物理人在音频条件变化时被识别成多个 ID
+    (Spk_001 / Spk_007 / Spk_013),用户确认后一键合并。
+
+    流程:
+    1. 引擎层: 加权平均 embedding → target,删 source 的 ChromaDB 记录
+    2. SQLite: UPDATE segments SET speaker_id=target WHERE speaker_id IN sources
+    3. 返回新 metadata
+
+    ⚠️ 不可逆: source 在 ChromaDB 里被物理删除,embedding 不可恢复
+    """
+    engine = get_speaker_engine()
+    repo = request.app.state.transcript_repo
+
+    # 1. 引擎层合并
+    result = engine.merge_speakers(body.target_id, body.source_ids)
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("error", "合并失败"))
+
+    # 2. SQLite 改 segments
+    segments_updated = 0
+    for sid in result["merged_source_ids"]:
+        try:
+            n = repo.reassign_speaker(sid, body.target_id)
+            segments_updated += n
+        except Exception as e:
+            logger.warning(f"[MERGE] reassign {sid} → {body.target_id} 失败: {e}")
+
+    return MergeSpeakersResponse(
+        target_id=body.target_id,
+        merged_source_ids=result["merged_source_ids"],
+        segments_updated=segments_updated,
+        new_count=result["new_count"],
+    )
+
+
+class SplitSpeakerRequest(BaseModel):
+    """拆分:把指定 segments 的 speaker_id 改成新值(或清空)"""
+    speaker_id: str = Field(
+        ...,
+        pattern=r"^Spk_[a-zA-Z0-9_]{1,50}$",
+        description="原声纹 ID(被拆分的)",
+    )
+    segment_ids: list[int] = Field(
+        ...,
+        min_length=1,
+        max_length=500,
+        description="要拆出去的 segment ID 列表(1-500 个)",
+    )
+    new_speaker_id: Optional[str] = Field(
+        None,
+        pattern=r"^Spk_[a-zA-Z0-9_]{1,50}$",
+        description="新归属的声纹 ID(可选,None = 标记为未识别)",
+    )
+
+
+class SplitSpeakerResponse(BaseModel):
+    segments_updated: int
+    new_speaker_id: Optional[str]
+
+
+@router.post("/v1/speakers/split", response_model=SplitSpeakerResponse)
+async def split_speaker(body: SplitSpeakerRequest, request: Request):
+    """拆分声纹:把选中的 segments 从 speaker_id 改到 new_speaker_id(或 null)
+
+    场景: 用户发现某 segment 归错人了(比如一段环境音被识别成 Spk_001),
+    把它标记为未识别(null),等下次再处理。
+
+    限制: split 不创建新 ChromaDB 记录(因为没有原音频 embedding)。
+    选 new_speaker_id 必须对应一个已存在的声纹。
+    """
+    repo = request.app.state.transcript_repo
+    engine = get_speaker_engine()
+
+    # Bug-09: 之前 speaker_id 不存在时静默 200 + 0 updated,改为 404 显式报错
+    if not engine.get_speaker(body.speaker_id):
+        raise HTTPException(
+            status_code=404,
+            detail=f"speaker_id {body.speaker_id} 不存在",
+        )
+
+    # 验证 new_speaker_id 存在(如果给了)
+    if body.new_speaker_id is not None:
+        if not engine.get_speaker(body.new_speaker_id):
+            raise HTTPException(
+                status_code=404,
+                detail=f"new_speaker_id {body.new_speaker_id} 不存在",
+            )
+
+    # 清空这些 segment 的 speaker_id(仅限原 speaker_id 匹配的)
+    updated = repo.clear_segments_speaker(body.segment_ids, speaker_id=body.speaker_id)
+
+    # 如果指定了新 speaker,重新指派
+    if body.new_speaker_id is not None:
+        for sid in body.segment_ids:
+            repo.update_segment_speaker(sid, body.new_speaker_id)
+
+    return SplitSpeakerResponse(
+        segments_updated=updated,
+        new_speaker_id=body.new_speaker_id,
     )
 
 
@@ -251,15 +441,14 @@ async def enroll_speaker(
     if ext not in ALLOWED:
         raise HTTPException(status_code=400, detail=f"不支持的文件类型: {ext}")
 
+    content = await file.read()
+    if len(content) == 0:
+        raise HTTPException(status_code=400, detail="文件为空")
+    if len(content) > 500 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="文件超过 500MB")
+
     # 临时保存(用完即删)
     with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
-        content = await file.read()
-        if len(content) == 0:
-            os.unlink(tmp.name)
-            raise HTTPException(status_code=400, detail="文件为空")
-        if len(content) > 500 * 1024 * 1024:
-            os.unlink(tmp.name)
-            raise HTTPException(status_code=400, detail="文件超过 500MB")
         tmp.write(content)
         tmp_path = tmp.name
 

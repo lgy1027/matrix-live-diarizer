@@ -96,8 +96,13 @@ class AudioConfig:
     upload_overlap_duration: float = 1.0
     # ASR 设备：auto | cpu | mps | cuda
     # auto 优先 mps，加载超时后回退 cpu
+    # ASR 引擎：qwen3 | sensevoice | paraformer | paraformer_streaming
+    asr_engine: str = "qwen3"
     asr_device: str = "auto"
     asr_load_timeout_sec: int = 90      # 单设备加载超时（秒）
+    # ASR 字级时间戳：开启后额外加载 Qwen3-ForcedAligner-0.6B (~600MB),
+    # 用于返回每字的 start/end 时间。关闭则只返回 segment 文本。
+    asr_word_timestamps: bool = False
 
     @classmethod
     def from_env(cls) -> "AudioConfig":
@@ -120,8 +125,10 @@ class AudioConfig:
             upload_max_duration=get_env_int("UPLOAD_MAX_DURATION", 3600),
             upload_chunk_duration=get_env_int("UPLOAD_CHUNK_DURATION", 30),
             upload_overlap_duration=get_env_float("UPLOAD_OVERLAP_DURATION", 1.0),
+            asr_engine=get_env_str("ASR_ENGINE", "qwen3").lower(),
             asr_device=get_env_str("ASR_DEVICE", "auto").lower(),
             asr_load_timeout_sec=get_env_int("ASR_LOAD_TIMEOUT_SEC", 90),
+            asr_word_timestamps=get_env_bool("ASR_WORD_TIMESTAMPS", False),
         )
 
 
@@ -165,20 +172,6 @@ class StorageConfig:
             db_path=get_env_str("STORAGE_DB_PATH", "./data/matrix.db"),
             history_enabled=get_env_bool("STORAGE_HISTORY_ENABLED", True),
         )
-
-
-@dataclass
-class LLMConfig:
-    """LLM 插件配置（默认仅本机，allow_public=True 时可走公网 OpenAI 兼容接口）"""
-    enabled: bool = False
-    endpoint: str = "http://127.0.0.1:11434/v1"
-    model: str = "qwen2.5:1.5b"
-    api_key: Optional[str] = None           # Bearer token，公网 OpenAI 兼容接口需要
-    timeout_sec: int = 60
-    max_input_tokens: int = 8000
-    mock: bool = False
-    allowed_hosts: tuple[str, ...] = ("127.0.0.1", "::1", "localhost")
-    allow_public: bool = False              # 显式开公网（默认安全 = 仅本机）
 
 
 @dataclass
@@ -249,6 +242,30 @@ class HistoryConfig:
 
 
 @dataclass
+class AuthConfig:
+    """JWT 鉴权配置(Roadmap 安全项)
+
+    jwt_secret: HMAC-SHA256 签名密钥
+        ⚠️ 生产部署务必设 JWT_SECRET 环境变量!
+        缺失时启动会警告(用随机密钥,token 跨重启失效,但本地 OK)
+    token_ttl_hours: token 有效期(小时);过期需重新登录
+    skip_default_admin: True 时不自动创建 admin/admin(留空让用户自建)
+        默认 False (首次启动自动建)
+    """
+    jwt_secret: Optional[str] = None
+    token_ttl_hours: int = 24
+    skip_default_admin: bool = False
+
+    @classmethod
+    def from_env(cls) -> "AuthConfig":
+        return cls(
+            jwt_secret=get_env_str("JWT_SECRET", "") or None,
+            token_ttl_hours=get_env_int("TOKEN_TTL_HOURS", 24),
+            skip_default_admin=get_env_bool("SKIP_DEFAULT_ADMIN", False),
+        )
+
+
+@dataclass
 class AppConfig:
     """应用配置"""
     server: ServerConfig = field(default_factory=ServerConfig)
@@ -259,6 +276,7 @@ class AppConfig:
     llm: LLMConfig = field(default_factory=LLMConfig)
     history: HistoryConfig = field(default_factory=HistoryConfig)
     cors: CORSConfig = field(default_factory=CORSConfig)
+    auth: AuthConfig = field(default_factory=AuthConfig)
 
     @classmethod
     def load(cls) -> "AppConfig":
@@ -271,6 +289,7 @@ class AppConfig:
             llm=LLMConfig.from_env(),
             history=HistoryConfig.from_env(),
             cors=CORSConfig.from_env(),
+            auth=AuthConfig.from_env(),
         )
 
 

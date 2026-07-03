@@ -17,6 +17,9 @@ class TranscribedSegment:
     text: str
     speaker_id: Optional[str] = None
     confidence: float = 1.0
+    # 字级时间戳(Roadmap #1.2): words: [{text, start, end}]
+    # ASR_WORD_TIMESTAMPS=true 时填充
+    words: Optional[list] = None
 
 
 @dataclass
@@ -56,7 +59,8 @@ async def transcribe_file(
     # 简化: 一次性跑整段(短音频无需分段,后续可扩展)
     # 必须 await — run_asr 是 async,否则 coroutine 透传到下游 SQLite binding
     raw = asr_engine.run_asr(audio)
-    text = (await raw) if hasattr(raw, "__await__") else (raw or "")
+    asr_result = (await raw) if hasattr(raw, "__await__") else raw
+    text = asr_result.get("text", "") if isinstance(asr_result, dict) else (asr_result or "")
 
     # 声纹: extract_feat 返回 (embedding, duration_sec) tuple。
     # 真实引擎(campplus / eres2net / wespeaker)都遵守此签名。
@@ -75,11 +79,14 @@ async def transcribe_file(
 
     # speaker_id 留空: 说话人识别是另一回事(基于 embedding 在 ChromaDB 里搜最近邻),
     # 由调用方(上传 API / seed 脚本)用 spk_engine.identify() 自行识别。
+    # 提取字级时间戳(Bug-66: 之前 upload 长路径 seg_words 未定义)
+    seg_words = asr_result.get("words") if isinstance(asr_result, dict) else None
     seg = TranscribedSegment(
         start_time=0.0,
         end_time=duration,
         text=text,
         speaker_id=None,
+        words=seg_words,
     )
     return TranscriptionResult(
         session_id=session_id,

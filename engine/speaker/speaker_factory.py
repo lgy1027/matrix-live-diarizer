@@ -244,9 +244,18 @@ def get_all_engines() -> dict:
     """获取所有引擎信息"""
     manager = SpeakerEngineManager()
     info = manager.get_all_engines_info()
+    try:
+        from engine.asr import get_all_asr_engines, get_asr_engine_info
+        asr_current = get_asr_engine_info()
+        asr_engines = get_all_asr_engines()
+    except Exception:
+        # 兼容旧测试/旧环境: ASR 工厂不可用时仍返回旧字段
+        asr_current = ASR_CONFIG
+        asr_engines = {"current": "qwen3", "engines": {"qwen3": ASR_CONFIG}}
     return {
         "current": info["current"],
-        "asr": ASR_CONFIG,
+        "asr": asr_current,
+        "asr_engines": asr_engines,
         "speakers": info["engines"]
     }
 

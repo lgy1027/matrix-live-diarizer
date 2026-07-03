@@ -195,8 +195,101 @@ curl http://127.0.0.1:8000/ready
 | `/v1/history` | GET | 转写历史列表（分页 + 搜索）|
 | `/v1/sessions/{id}` | GET | 会话详情 |
 | `/v1/exports/{id}?format=srt\|vtt\|md\|json` | GET | 4 种格式导出 |
+| `/v1/search?q=...&session_id=...&speaker_id=...&limit=50` | GET | 全文搜索（v0.4+,Roadmap #2.2）|
+
+### `/v1/search` 全文搜索（v0.4+）
+
+搜所有 segment.text 内的关键词,返回带高亮 snippet 的命中列表。
+
+**Query 参数**:
+- `q` (必填,1-200 字符):搜索关键词
+- `session_id` (可选):限定会话
+- `speaker_id` (可选):限定说话人
+- `limit` (可选,默认 50,1-200):返回数量
+
+**响应**:
+```json
+{
+  "query": "今天我们",
+  "total": 5,
+  "session_id": null,
+  "speaker_id": null,
+  "hits": [
+    {
+      "segment_id": 42,
+      "session_id": "abc-123",
+      "session_title": "周会-1",
+      "session_filename": "weekly.wav",
+      "speaker_id": "Spk_001",
+      "text": "今天我们讨论语音识别...",
+      "snippet": "今天[match]我们[/match]讨论语音识别",
+      "start_time": 0.0,
+      "end_time": 5.2,
+      "jump_url": "/web/detail.html?id=abc-123&seg=42"
+    }
+  ]
+}
+```
+
+**中文支持**:FTS5 trigram 分词。3+ 字命中率高,2 字走 LIKE 兜底(2 字中文 substring 也能搜)。
+
+**示例**:
+```bash
+curl 'http://127.0.0.1:8000/v1/search?q=今天我们'
+curl 'http://127.0.0.1:8000/v1/search?q=语音识别&session_id=abc-123'
+curl 'http://127.0.0.1:8000/v1/search?q=OpenAI&limit=20'
+```
 
 ## 8. 环境变量参考
+
+## 8. 引擎与运行时设置
+
+### ASR 引擎列表
+
+```http
+GET /v1/asr/engines
+```
+
+返回当前 ASR、候选 ASR、加载状态和依赖可用性。支持:
+
+- `qwen3`
+- `sensevoice`
+- `paraformer`
+- `paraformer_streaming`
+
+### 动态切换 ASR
+
+```http
+PUT /v1/asr/engine
+Content-Type: application/json
+
+{"engine_type":"sensevoice"}
+```
+
+切换时旧 ASR 会继续可用,新模型下载/加载成功后才替换当前引擎。若缺少 `funasr` 等依赖,接口返回错误且不会影响当前 ASR。
+
+### 声纹引擎
+
+```http
+GET /v1/engines
+PUT /v1/engine
+Content-Type: application/json
+
+{"engine_type":"eres2net"}
+```
+
+支持 `campplus` / `eres2net` / `wespeaker`。切换后会刷新后端当前声纹引擎。
+
+### LLM 设置
+
+```http
+GET /v1/llm/settings
+PUT /v1/llm/settings
+```
+
+设置页会通过这些接口保存 provider / endpoint / model / API Key / mock / allow_public。保存后写入本地 SQLite settings,优先级高于 `.env` 中的 LLM 默认值,无需重启。
+
+## 9. 环境变量参考
 
 ### 服务器
 
@@ -233,10 +326,11 @@ curl http://127.0.0.1:8000/ready
 | requests_per_minute | `60` | `RATE_LIMIT_REQUESTS_PER_MINUTE` | 每分钟上限 |
 | requests_per_hour | `1000` | `RATE_LIMIT_REQUESTS_PER_HOUR` | 每小时上限 |
 
-### 声纹引擎
+### ASR 与声纹引擎
 
 | 参数 | 默认值 | 环境变量 | 说明 |
 |------|--------|----------|------|
+| asr_engine | `qwen3` | `ASR_ENGINE` | 启动时默认 ASR: qwen3 / sensevoice / paraformer / paraformer_streaming |
 | speaker_engine | `campplus` | `SPEAKER_ENGINE` | 启动时默认引擎 |
 | asr_device | `auto` | `ASR_DEVICE` | auto / cpu / mps / cuda |
 | asr_load_timeout_sec | `90` | `ASR_LOAD_TIMEOUT_SEC` | 模型加载超时（防 MPS 死锁）|

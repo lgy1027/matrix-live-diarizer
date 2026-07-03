@@ -13,6 +13,7 @@ from app.api import api_router
 from app.api.websocket import init_engines as init_ws_engines
 from app.api.upload import init_engines as init_upload_engines
 from app.middleware.rate_limit import RateLimitMiddleware
+from app.middleware.auth import AuthMiddleware
 
 tf_logging.set_verbosity_error()
 
@@ -48,28 +49,59 @@ def create_app() -> FastAPI:
         allow_methods=list(config.cors.allow_methods),
         allow_headers=list(config.cors.allow_headers),
     )
-    
+
+    # 鉴权中间件 (Roadmap 安全项)
+    # 全部 /v1/* 需 Bearer token, 白名单路径除外
+    app.add_middleware(AuthMiddleware)
+
     _init_engines(app)
     app.include_router(api_router)
 
-    # 挂载 web/ 静态目录（多页前端：index/history/detail/settings）
+    # v0.3+: SPA 接管 /, web/dist/index.html 是 Vue 入口
+    # 旧的 web/login.html, web/index.html, web/css/studio.css 全部删除 (Vue 全管)
     web_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web")
-    if os.path.isdir(web_dir):
-        app.mount("/web", StaticFiles(directory=web_dir, html=True), name="web")
-        logger.info(f"🌐 静态文件已挂载: /web → {web_dir}")
+    dist_dir = os.path.join(web_dir, "dist")
+    dist_index = os.path.join(dist_dir, "index.html")
+    dist_assets = os.path.join(dist_dir, "assets")
+    if os.path.isfile(dist_index):
+        from fastapi.responses import FileResponse
+
+        # Vue build 产物 /assets/* 走独立 mount, 不被 SPA catch-all 兜
+        if os.path.isdir(dist_assets):
+            app.mount("/assets", StaticFiles(directory=dist_assets), name="spa-assets")
+            logger.info(f"🟢 Vue 静态资源已挂载: /assets → {dist_assets}")
+
+        @app.get("/", include_in_schema=False)
+        async def spa_index() -> FileResponse:
+            return FileResponse(dist_index)
+
+        @app.get("/{full_path:path}", include_in_schema=False)
+        async def spa_catch_all(full_path: str) -> FileResponse:
+            # /v1/* /health /ready /ws 走路由, 已由 API 注册; 这里只兜底 SPA
+            if full_path.startswith(("v1/", "health", "ready", "ws", "docs", "openapi.json")):
+                from fastapi import HTTPException
+                raise HTTPException(status_code=404, detail="Not Found")
+            return FileResponse(dist_index)
+
+        logger.info(f"🟢 SPA 已挂载: / → {dist_index}")
+    else:
+        logger.warning(f"⚠️  Vue dist 产物未找到: {dist_index} — SPA 接管 / 失败")
 
     return app
 
 
 def _init_engines(app: FastAPI):
     """初始化推理引擎"""
-    from engine.asr_engine import ASREngine
+    from engine.asr import get_asr_manager
     from engine.speaker import get_speaker_engine, get_engine_info
 
-    asr_engine = ASREngine()
+    asr_manager = get_asr_manager()
+    asr_engine = asr_manager.get_engine()
     spk_engine = get_speaker_engine()
 
+    asr_info = asr_manager.get_engine_info()
     engine_info = get_engine_info()
+    logger.info(f"ASR 引擎: {asr_info['name']}, 模型: {asr_info['model']}")
     logger.info(f"声纹引擎: {engine_info['name']}, 模型: {engine_info['model']}")
 
     inference_lock = asyncio.Lock()
@@ -91,14 +123,20 @@ def _init_engines(app: FastAPI):
     app.state.transcript_repo = transcript_repo
     app.state.settings_repo = settings_repo
 
+    # 鉴权服务 (Roadmap 安全项)
+    from app.services.auth import AuthService
+    app.state.auth_service = AuthService(db)
+
     current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     init_ws_engines(asr_engine, spk_engine, inference_lock)
     init_upload_engines(asr_engine, spk_engine, inference_lock, current_dir, transcript_repo)
     init_health_check(asr_engine, spk_engine)
 
     app.state.asr_engine = asr_engine
+    app.state.asr_manager = asr_manager
     app.state.spk_engine = spk_engine
     app.state.inference_lock = inference_lock
+    app.state.config = config  # SPA 重构: 让 health.py 读 storage 配置
 
     logger.info(f"💾 数据库已初始化: {config.storage.db_path}")
     logger.info("🔒 完全离线模式:所有数据仅在本机处理")

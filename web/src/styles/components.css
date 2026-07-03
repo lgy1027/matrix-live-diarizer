@@ -1,0 +1,130 @@
+/* 通用控件类 (从旧 web/index.html 内联抽出) */
+.h-display {
+  font-family: var(--serif);
+  font-variation-settings: 'SOFT' 50, 'WONK' 1, 'opsz' 96;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+.h-display em {
+  font-style: italic;
+  font-variation-settings: 'SOFT' 100, 'WONK' 1, 'opsz' 144;
+  color: var(--amber);
+}
+
+/* === 跨页主标题 === 整改 1: 统一 Live / Settings / Library / Voice 4 个 chrome 页面的 h1 */
+/* 响应式 36-48px, serif, 琥珀色 italic em 重音 (与 .h-display em 一致) */
+.page-title {
+  font-family: var(--serif);
+  font-variation-settings: 'SOFT' 50, 'WONK' 1, 'opsz' 144;
+  font-size: clamp(36px, 4vw, 48px);
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  margin: 0 0 12px;
+}
+.page-title em {
+  font-style: italic;
+  color: var(--amber);
+  font-variation-settings: 'SOFT' 100, 'WONK' 1, 'opsz' 144;
+}
+/* 配套副标题 (h1 下方的小写 mono 行, Settings / Library / Voice 共用) */
+.page-sub {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-3);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin: 0 0 24px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+}
+.h-mono {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.amber { color: var(--amber); }
+.teal { color: var(--teal); }
+.gold { color: var(--gold); }
+.red { color: var(--red); }
+.green { color: var(--green); }
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  background: var(--ink-3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  letter-spacing: 0.02em;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  cursor: pointer;
+}
+.btn:hover { background: var(--ink-4); border-color: var(--text-3); }
+.btn.primary { background: var(--amber); color: var(--ink); border-color: var(--amber); font-weight: 600; }
+.btn.primary:hover { background: #ff8255; }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--text-2); }
+.btn.ghost:hover { color: var(--text); background: var(--ink-3); }
+.btn.danger { background: var(--red); color: #fff; border-color: var(--red); font-weight: 600; }
+.btn.danger:hover { background: #e63e4a; border-color: #e63e4a; }
+.btn.sm { padding: 5px 10px; font-size: 11px; }
+.btn[disabled] { opacity: 0.4; cursor: not-allowed; }
+.btn svg { width: 14px; height: 14px; }
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-2);
+  background: var(--ink-3);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+.tag.amber { color: var(--amber); background: var(--amber-soft); border-color: rgba(255, 107, 53, 0.3); }
+.tag.teal { color: var(--teal); background: var(--teal-soft); border-color: rgba(78, 205, 196, 0.3); }
+.tag.gold { color: var(--gold); background: var(--gold-soft); border-color: rgba(212, 165, 116, 0.3); }
+.tag.green { color: var(--green); border-color: rgba(107, 203, 119, 0.3); }
+.field {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--ink-3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 13px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.field:focus {
+  border-color: var(--amber);
+  box-shadow: 0 0 0 3px var(--amber-soft);
+  outline: none;
+}
+.empty {
+  padding: 60px 24px;
+  text-align: center;
+  color: var(--text-3);
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+.empty em {
+  display: block;
+  font-style: italic;
+  font-family: var(--serif);
+  font-size: 18px;
+  color: var(--text-2);
+  margin-bottom: 6px;
+  letter-spacing: 0;
+  text-transform: none;
+}

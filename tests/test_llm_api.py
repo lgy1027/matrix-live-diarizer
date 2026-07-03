@@ -131,6 +131,51 @@ def test_status_includes_fallback_field(monkeypatch):
     assert data["fallback"] == "extractive-textrank"
 
 
+def test_get_llm_settings_uses_env_defaults(monkeypatch):
+    client, config = _make_client(monkeypatch)
+    monkeypatch.setattr(config.llm, "enabled", False)
+    monkeypatch.setattr(config.llm, "endpoint", "http://127.0.0.1:11434/v1")
+    monkeypatch.setattr(config.llm, "model", "qwen2.5:1.5b")
+
+    resp = client.get("/v1/llm/settings")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["config_source"] == "env"
+    assert data["endpoint"] == "http://127.0.0.1:11434/v1"
+    assert data["model"] == "qwen2.5:1.5b"
+
+
+def test_put_llm_settings_overrides_status(monkeypatch):
+    client, _config = _make_client(monkeypatch)
+    payload = {
+        "provider": "lmstudio",
+        "enabled": True,
+        "endpoint": "http://127.0.0.1:1234/v1",
+        "model": "local-model",
+        "api_key": "",
+        "allow_public": False,
+        "timeout_sec": 12,
+        "max_input_tokens": 4096,
+        "mock": True,
+    }
+
+    resp = client.put("/v1/llm/settings", json=payload)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["config_source"] == "settings"
+    assert data["provider"] == "lmstudio"
+    assert data["enabled"] is True
+    assert data["endpoint"] == "http://127.0.0.1:1234/v1"
+    assert data["model"] == "local-model"
+
+    status = client.get("/v1/llm/status").json()
+    assert status["enabled"] is True
+    assert status["available"] is True
+    assert status["mock"] is True
+    assert status["config_source"] == "settings"
+    assert status["endpoint"] == "http://127.0.0.1:1234/v1"
+
+
 def test_summarize_includes_source_field_when_llm(monkeypatch):
     """LLM mock 模式下 source=llm"""
     client, config = _make_client(monkeypatch)

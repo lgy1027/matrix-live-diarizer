@@ -14,8 +14,11 @@ _STOP_WORDS = {
 
 
 def _tokenize(text: str) -> list[str]:
-    """分词：中文滑动 bigram（2 字窗口） + 英文/数字单词。
-    bigram 策略让单字停用词（的/了/是）天然不会成词。
+    """分词:英文/数字按词切,中文按单字切(过滤停用词)。
+
+    Bug-08 修复:之前用 2 字滑动窗口(bigram)导致"也不容易" 被切成
+    ["也不", "不容", "容易"] 这种无意义二元组。改用按字切,统计有意义
+    的单字热词。
     """
     tokens: list[str] = []
     # 1) 英文/数字单词
@@ -24,32 +27,25 @@ def _tokenize(text: str) -> list[str]:
         if tok.lower() in {"the", "a", "an", "is", "are", "was", "of", "to", "and", "in"}:
             continue
         tokens.append(tok)
-    # 2) 中文 bigram 滑动窗口
-    for match in re.finditer(r"[一-鿿]+", text):
-        chunk = match.group(0)
-        if len(chunk) == 1:
-            tok = chunk
-            if tok in _STOP_WORDS:
+    # 2) 中文按单字切(过滤停用词)
+    for char in text:
+        if "一" <= char <= "鿿":
+            if char in _STOP_WORDS:
                 continue
-            tokens.append(tok)
-        else:
-            for i in range(len(chunk) - 1):
-                tokens.append(chunk[i : i + 2])
+            tokens.append(char)
     return tokens
 
 
 def _word_count(text: str) -> int:
-    """字数统计：中文 bigram 数 + 英文单词数。
-    "你好 world" → 1 + 1 = 2
-    "今天天气"   → 3 (今,天天,天气)
+    """字数统计:中文单字数 + 英文单词数(均不计停用词)。
+
+    "你好 world" → 2 + 1 = 3
+    "今天的天气" → 3 (天、的 过、天气 = 实际 3 字非停用)
     """
     count = len(re.findall(r"[A-Za-z0-9]+", text))
-    for match in re.finditer(r"[一-鿿]+", text):
-        chunk = match.group(0)
-        if len(chunk) == 1:
+    for char in text:
+        if "一" <= char <= "鿿" and char not in _STOP_WORDS:
             count += 1
-        else:
-            count += len(chunk) - 1
     return count
 
 

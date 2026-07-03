@@ -87,7 +87,7 @@ def _make_engine_with_collection():
             return (np.zeros(192, dtype=np.float32), 1.0)
 
         def compare_and_identify(self, current_emb, client_id, audio_duration=0):
-            return "Unknown"
+            return "Unknown", 0.0
 
         @property
         def _model_name(self):

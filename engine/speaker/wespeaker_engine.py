@@ -110,21 +110,24 @@ class WespeakerEngine(BaseSpeakerEngine):
         adjustment = min(0.05, count * 0.005)
         return base_low + adjustment, base_high + adjustment
 
-    def compare_and_identify(self, current_emb, client_id: str, audio_duration: float = 0) -> str:
+    def compare_and_identify(self, current_emb, client_id: str, audio_duration: float = 0) -> tuple[str, float]:
         """说话人匹配与识别
-        
+
         Args:
             current_emb: 当前声纹特征
             client_id: 客户端ID
             audio_duration: 音频时长（秒）
+
+        Returns:
+            tuple[str, float]: (说话人ID, 置信度 0.0-1.0)
         """
-        if current_emb is None: 
-            return "Unknown"
-        
+        if current_emb is None:
+            return "Unknown", 0.0
+
         # 判断是否为可靠样本
         is_reliable = audio_duration >= 1.5
         MIN_SAMPLES_FOR_EDGE = 2
-        
+
         smoothed_emb = self.get_smoothed_embedding(current_emb, client_id)
         emb_list = smoothed_emb.tolist()
 
@@ -139,57 +142,60 @@ class WespeakerEngine(BaseSpeakerEngine):
             best_id = results['ids'][0][0]
             metadata = results['metadatas'][0][0]
             count = metadata.get("count", 1)
-            
+
             low_threshold, high_threshold = self._get_dynamic_threshold(count, is_reliable)
-            
+
             logger.debug(f"[MATCH] Dist={min_dist:.4f}, Low={low_threshold:.2f}, High={high_threshold:.2f}, Best={best_id}, Count={count}")
-            
+
             # 高置信度匹配
             if min_dist < low_threshold:
                 old_mean = np.array(
                     self.collection.get(ids=[best_id], include=['embeddings'])['embeddings'][0]
                 )
-                
+
                 weight = min(0.12, 0.8 / (count + 1))
                 new_mean = (old_mean * (1 - weight)) + (smoothed_emb * weight)
                 new_mean = new_mean / (np.linalg.norm(new_mean) + 1e-6)
-                
+
                 self.collection.update(
                     ids=[best_id],
                     embeddings=[new_mean.tolist()],
                     metadatas=[{"session_id": client_id, "count": count + 1, "last_update": time.time()}]
                 )
                 logger.info(f"[MATCHED] {best_id} (sim: {1-min_dist:.0%})")
-                return best_id
-            
+                return best_id, float(1 - min_dist)
+
             # 边缘匹配
             if min_dist < high_threshold:
                 self.match_history[client_id].append((best_id, min_dist))
                 if len(self.match_history[client_id]) > self.HISTORY_SIZE:
                     self.match_history[client_id].pop(0)
-                
+
                 recent_matches = [m[0] for m in self.match_history[client_id]]
                 same_speaker_count = recent_matches.count(best_id)
-                
+
                 if same_speaker_count >= 2 or count >= MIN_SAMPLES_FOR_EDGE:
                     old_mean = np.array(
                         self.collection.get(ids=[best_id], include=['embeddings'])['embeddings'][0]
                     )
-                    
+
                     weight = min(0.08, 0.5 / (count + 1))
                     new_mean = (old_mean * (1 - weight)) + (smoothed_emb * weight)
                     new_mean = new_mean / (np.linalg.norm(new_mean) + 1e-6)
-                    
+
                     self.collection.update(
                         ids=[best_id],
                         embeddings=[new_mean.tolist()],
                         metadatas=[{"session_id": client_id, "count": count + 1, "last_update": time.time()}]
                     )
                     logger.info(f"[EDGE OK] {best_id} (连续确认 {same_speaker_count} 次)")
-                    return best_id
-                
+                    return best_id, float(1 - min_dist)
+
                 logger.debug(f"[EDGE?] Dist={min_dist:.4f} 待确认 (连续匹配 {same_speaker_count} 次)")
-        
+        else:
+            # 空 DB / 无候选 → 新建 Spk 路径,后续 return 用 min_dist=None 兜底
+            min_dist = None
+
         # 注册新说话人
         new_id = f"Spk_{int(time.time_ns() % (1 << 31))}"
         self.collection.add(
@@ -198,4 +204,6 @@ class WespeakerEngine(BaseSpeakerEngine):
             metadatas=[{"session_id": client_id, "count": 1, "last_update": time.time()}]
         )
         logger.info(f"[NEW SPEAKER] {new_id} ({audio_duration:.1f}s)")
-        return new_id
+        # 新建 Spk 时如果有 best_dist,返 1-best_dist;无候选(空 DB)返 0.0
+        new_speaker_score = float(1 - min_dist) if min_dist is not None else 0.0
+        return new_id, new_speaker_score

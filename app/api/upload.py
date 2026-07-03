@@ -9,6 +9,16 @@ import numpy as np
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, Query
 
+# Bug-03: 显式 import 音频解码可能抛的异常,避免泄漏内部错误到用户
+try:
+    from soundfile import LibsndfileError
+except ImportError:  # soundfile 未装(理论上有 librosa 就有 soundfile,但兜底)
+    LibsndfileError = Exception
+try:
+    from audioread.exceptions import NoBackendError
+except ImportError:
+    NoBackendError = Exception
+
 from app.config import config
 from app.constants import FILE_UPLOAD_SESSION
 from app.schemas import UploadResponse, ModelsResponse, SegmentResult
@@ -28,6 +38,15 @@ transcript_repo = None
 ALLOWED_EXTENSIONS: Set[str] = {'.wav', '.mp3', '.m4a', '.flac', '.ogg', '.aac', '.wma'}
 MAX_FILE_SIZE: int = 500 * 1024 * 1024  # 500MB
 _UPLOAD_CHUNK_SIZE: int = 1024 * 1024   # 1MB chunks,可被测试 mock
+
+
+def _current_asr_display_name() -> str:
+    """返回当前 ASR 展示名,用于用户可见提示."""
+    try:
+        from engine.asr import get_asr_engine_info
+        return str(get_asr_engine_info().get("name") or "ASR")
+    except Exception:
+        return "ASR"
 
 
 def init_engines(asr, spk, lock, base_dir: str, repo=None):
@@ -103,7 +122,9 @@ async def process_audio_chunk_with_diarization(
     """分段处理：ASR + 说话人识别"""
     audio_duration = end_time - start_time
     
-    text = await asr_engine.run_asr(chunk, use_preprocessing=True)
+    asr_result = await asr_engine.run_asr(chunk, use_preprocessing=True)
+    text = asr_result.get("text", "") if isinstance(asr_result, dict) else (asr_result or "")
+    seg_words = asr_result.get("words") if isinstance(asr_result, dict) else None
     emb_result = await asyncio.get_event_loop().run_in_executor(
         None, get_speaker_engine().extract_feat, chunk
     )
@@ -114,13 +135,20 @@ async def process_audio_chunk_with_diarization(
     else:
         embedding = emb_result
     
-    spk_id = get_speaker_engine().compare_and_identify(embedding, FILE_UPLOAD_SESSION, audio_duration, use_buffer=False)
+    spk_id, _spk_score = get_speaker_engine().compare_and_identify(
+        embedding,
+        FILE_UPLOAD_SESSION,
+        audio_duration,
+        use_buffer=False,
+        default_name=os.path.splitext(original_filename)[0] if original_filename else None,  # 整改: 从文件名推默认显示名
+    )
     
     return SegmentResult(
         speaker=spk_id,
         text=text or "",
         start_time=start_time,
-        end_time=end_time
+        end_time=end_time,
+        words=seg_words,
     )
 
 
@@ -130,25 +158,37 @@ async def process_audio_chunk_asr_only(
     end_time: float
 ) -> SegmentResult:
     """分段处理：仅 ASR"""
-    text = await asr_engine.run_asr(chunk, use_preprocessing=True)
-    
+    asr_result = await asr_engine.run_asr(chunk, use_preprocessing=True)
+    text = asr_result.get("text", "") if isinstance(asr_result, dict) else (asr_result or "")
+    seg_words = asr_result.get("words") if isinstance(asr_result, dict) else None
+
     return SegmentResult(
         speaker="SPEAKER",
         text=text or "",
         start_time=start_time,
-        end_time=end_time
+        end_time=end_time,
+        words=seg_words,
     )
 
 
 @router.post("/v1/upload", response_model=UploadResponse)
 async def upload_audio(
     file: UploadFile = File(...),
-    enable_diarization: bool = Query(True, description="启用说话人识别")
+    enable_diarization: bool = Query(True, description="启用说话人识别"),
+    diarization: str = Query(
+        "camplus",
+        description='说话人识别后端: "camplus" (实时,默认) 或 "pyannote" (离线高准确度,需 HF_TOKEN)',
+    ),
 ):
-    """上传音频文件，支持长音频分段处理
-    
-    enable_diarization=true: 识别说话人（会议场景）
-    enable_diarization=false: 仅转写（单人演讲）
+    """上传音频文件,支持长音频分段处理
+
+    enable_diarization=true: 识别说话人
+    enable_diarization=false: 仅转写
+
+    diarization=camplus: 默认,实时流式算法(CamPlus + 滑动窗),适合单人独白/网课
+    diarization=pyannote: 离线 SOTA(pyannote 3.1,DER ~18%),适合多人会议
+                       需要 HF_TOKEN 环境变量 + 接受 pyannote/segmentation-3.0 用户条款
+                       失败时自动 fallback 到 camplus
     """
     start_time_total = time.time()
     
@@ -191,7 +231,16 @@ async def upload_audio(
             raise HTTPException(status_code=400, detail="文件为空")
 
         import librosa
-        audio, _ = librosa.load(file_path, sr=config.audio.sample_rate)
+        try:
+            audio, _ = librosa.load(file_path, sr=config.audio.sample_rate)
+        except (LibsndfileError, NoBackendError, FileNotFoundError, EOFError, OSError) as e:
+            # Bug-03: 损坏文件之前会泄露内部异常名 + 返 500,改为 400 + 友好消息
+            # 覆盖 librosa 走 soundfile/audioread 两个后端的格式错误
+            logger.warning(f"[UPLOAD] 音频解码失败: {type(e).__name__}: {e}")
+            raise HTTPException(
+                status_code=400,
+                detail="音频文件无法解码,请检查格式是否正确(支持 WAV / MP3 / FLAC / M4A / OGG)",
+            )
         if len(audio) == 0:
             raise HTTPException(status_code=400, detail="音频解码后无有效采样,请检查文件是否损坏")
         duration = len(audio) / config.audio.sample_rate
@@ -222,13 +271,37 @@ async def upload_audio(
                     if transcribe_result.segments:
                         seg0 = transcribe_result.segments[0]
                         text = seg0.text
-                        spk_id = seg0.speaker_id
+                        seg_words = seg0.words
+                        # 整改: transcribe_file 不做声纹识别 (speaker_id 留空),
+                        # 短路径得自己调一次 compare_and_identify, 用 filename 当默认名
+                        try:
+                            import librosa
+                            _audio, _ = librosa.load(file_path, sr=config.audio.sample_rate)
+                            _emb = get_speaker_engine().extract_feat(_audio)
+                            if isinstance(_emb, tuple):
+                                _emb_vec = _emb[0]
+                            else:
+                                _emb_vec = _emb
+                            spk_id, _spk_score = get_speaker_engine().compare_and_identify(
+                                _emb_vec,
+                                FILE_UPLOAD_SESSION,
+                                duration,
+                                use_buffer=False,
+                                default_name=os.path.splitext(file.filename)[0] if file.filename else None,
+                            )
+                        except Exception as _e:
+                            logger.warning(f"[UPLOAD] 短路径声纹识别失败: {_e}")
+                            spk_id = None
                     else:
                         text = ""
                         spk_id = None
+                        seg_words = None
                 else:
                     # 简单 ASR 路径(不调声纹引擎,保持原行为)
-                    text = await asr_engine.run_asr(audio, use_preprocessing=True)
+                    asr_result = await asr_engine.run_asr(audio, use_preprocessing=True)
+                    text = asr_result.get("text", "") if isinstance(asr_result, dict) else (asr_result or "")
+                    # 字级时间戳:从 ASR 返 dict 中取 words,稍后写库
+                    seg_words = asr_result.get("words") if isinstance(asr_result, dict) else None
                     spk_id = "SPEAKER"
 
             logger.info(f"[UPLOAD] 完成, {time.time() - start_time_total:.2f}s")
@@ -241,6 +314,9 @@ async def upload_audio(
                     original_filename=file.filename,
                     duration_sec=duration,
                 )
+                # 字级时间戳:把 words 序列化为 words_json 存到 DB
+                import json as _json
+                words_json = _json.dumps(seg_words, ensure_ascii=False) if seg_words else None
                 # 短音频：单 segment
                 transcript_repo.insert_segment(
                     sid,
@@ -249,10 +325,17 @@ async def upload_audio(
                     start_time=0.0,
                     end_time=duration,
                     speaker_id=spk_id if enable_diarization else None,
+                    words_json=words_json,
                 )
                 session_id = sid
             else:
                 session_id = None
+
+            # 整改: 短音频路径也加 has_speech + warning, 避免短文件漏检
+            _has_speech = bool((text or "").strip())
+            _warning = None
+            if not _has_speech:
+                _warning = f"未识别到语音内容。文件时长 {duration:.1f}s, 但 ASR ({_current_asr_display_name()}) 未输出文本。常见原因: 纯静音/纯音乐/合成音频/录音质量差。"
 
             return UploadResponse(
                 status="success",
@@ -261,6 +344,8 @@ async def upload_audio(
                 text=text or "",
                 duration=duration,
                 session_id=session_id,
+                has_speech=_has_speech,
+                warning=_warning,
             )
         
         # 长音频分段处理
@@ -323,6 +408,46 @@ async def upload_audio(
         speaker_info = f", {len(all_speakers)} 说话人" if enable_diarization else ""
         logger.info(f"[UPLOAD] 完成{speaker_info}, {elapsed:.2f}s")
 
+        # 可选: pyannote 离线高准确度后处理
+        # 用户指定 diarization=pyannote 且 enable_diarization=true 时,
+        # 用 pyannote 3.1 重打分 segments 的 speaker 字段(覆盖 CamPlus 结果)
+        diarization_source = "camplus"
+        if enable_diarization and diarization == "pyannote":
+            try:
+                from app.services.pyannote_diarization import (
+                    get_pyannote_diarizer, align_speakers_to_segments,
+                )
+                pyannote = get_pyannote_diarizer()
+                if pyannote.enabled:
+                    logger.info(f"[UPLOAD] pyannote 离线重打分 (耗时 2-5s)...")
+                    pyannote_segs = pyannote.diarize(file_path)
+                    if pyannote_segs:
+                        # 把 ASR segments 转 dict 喂给 align_speakers_to_segments
+                        seg_dicts = [
+                            {
+                                "start": seg.start_time,
+                                "end": seg.end_time,
+                                "text": seg.text,
+                                "speaker": seg.speaker,
+                            }
+                            for seg in segments
+                        ]
+                        aligned = align_speakers_to_segments(pyannote_segs, seg_dicts)
+                        # 写回 segments
+                        for seg, aln in zip(segments, aligned):
+                            seg.speaker = aln["speaker"]
+                        # 重算 all_speakers
+                        all_speakers = {s.speaker for s in segments if s.speaker}
+                        speaker_info = f", {len(all_speakers)} 说话人 (pyannote)"
+                        diarization_source = "pyannote"
+                        logger.info(f"[UPLOAD] pyannote 完成: {len(all_speakers)} 个不同说话人")
+                    else:
+                        logger.warning(f"[UPLOAD] pyannote 返回空,保留 CamPlus 结果")
+                else:
+                    logger.warning(f"[UPLOAD] pyannote 不可用 (缺 HF_TOKEN?),fallback 到 CamPlus")
+            except Exception as e:
+                logger.warning(f"[UPLOAD] pyannote 后处理失败,fallback 到 CamPlus: {e}")
+
         # 自动存档（长音频批量）
         if transcript_repo and config.storage.history_enabled:
             sid = transcript_repo.create_session(
@@ -346,6 +471,12 @@ async def upload_audio(
         else:
             session_id = None
 
+        # 整改: 检测是否有语音内容, 没语音时显式标 has_speech=False + warning
+        has_speech = bool(merged_text.strip() or (segments and any(s.text.strip() for s in segments)))
+        warning = None
+        if not has_speech:
+            warning = f"未识别到语音内容。文件时长 {duration:.1f}s, 但 ASR ({_current_asr_display_name()}) 未输出文本。常见原因: 纯静音/纯音乐/合成音频/录音质量差。"
+
         return UploadResponse(
             status="success",
             filename=file.filename,
@@ -354,6 +485,8 @@ async def upload_audio(
             segments=segments,
             speakers=sorted(list(all_speakers)) if enable_diarization else None,
             session_id=session_id,
+            has_speech=has_speech,
+            warning=warning,
         )
         
     except HTTPException:

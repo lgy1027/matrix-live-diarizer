@@ -16,3 +16,5 @@ tests/
 .env
 .env.local
 node_modules/
+web/node_modules/
+web/dist/

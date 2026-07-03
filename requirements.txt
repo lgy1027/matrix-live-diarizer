@@ -9,7 +9,7 @@ python-multipart>=0.0.6
 torch>=2.0.0
 torchvision
 torchaudio
-transformers>=4.30.0
+transformers>=4.30.0,<5
 
 # transformers 间接依赖(隐式,不写会报 import error)
 huggingface-hub
@@ -23,6 +23,12 @@ pyyaml
 modelscope>=1.10.0
 qwen-asr>=0.0.6
 
+# 新增 ASR 引擎依赖:
+#   ASR_ENGINE=sensevoice / paraformer / paraformer_streaming
+# 注意: FunASR 当前在 Windows/Python 3.13 会因 editdistance 无预编译 wheel 而安装失败。
+#       请使用 Python 3.10-3.12 环境安装本依赖后启用这些 ASR。
+funasr>=1.2.0; python_version >= "3.10" and python_version < "3.13"
+
 # 声纹向量库
 chromadb>=0.4.0
 
@@ -34,6 +40,10 @@ scipy>=1.10.0
 
 # 数据模型
 pydantic>=2.0.0
+
+# 鉴权
+PyJWT>=2.8.0
+werkzeug>=3.0.0
 
 # 配置管理
 python-dotenv>=1.0.0
@@ -49,3 +59,11 @@ cffi
 
 # 摘要 (TextRank 兜底) — LLM 不可用时本地提取
 summa==1.2.0
+
+# 离线高准确度说话人识别 (pyannote 3.1)
+# 用于: 上传文件 ?diarization=pyannote (Diarization Error Rate ~18%)
+# 需要:
+#   1. brew install ffmpeg (macOS) 或 apt install ffmpeg (Linux)
+#   2. HF_TOKEN 环境变量 + https://huggingface.co/pyannote/segmentation-3.0 接受用户条款
+# 详细: docs/SPEAKER_DIARIZATION.md
+pyannote.audio>=3.1.0
