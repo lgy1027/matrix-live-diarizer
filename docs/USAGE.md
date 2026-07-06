@@ -43,7 +43,7 @@
 
 #### 2. Speaker 友好名
 
-后端返回的 `Spk_a3f9e2` 这种内部 ID 在前端显示为 `Speaker 1`、`Speaker 2`、`Speaker 3`，按本会话首次出现顺序分配。同一个声音在本会话内始终映射到同一个编号，刷新页面重置。
+后端返回的 `Spk_a3f9e2` 这种系统 ID 在前端显示为 `Speaker 1`、`Speaker 2`、`Speaker 3`，按当前会话首次出现顺序分配。同一个声音在当前会话内始终映射到同一个编号，刷新页面重置。
 
 #### 3. 置信度可视化
 
@@ -61,10 +61,10 @@
 
 点 segment 左侧说话人标签 → 弹菜单：
 
-- **改成本次新名字**：输入框 → 输入（如 `Alice`）→ 本 session 内该段及同 ID 联动显示新名字（刷新页面重置）
+- **改成当前会话名字**：输入框 → 输入（如 `Alice`）→ 当前会话内该段及同 ID 联动显示新名字（刷新页面重置）
 - **合并到已有 Speaker 1/2/3**：把当前段合并到 session 内已出现的某说话人
 - **保存为新声纹**：把当前段声音注册到声纹库（后续自动识别）— 走 enroll 流程
-- **恢复原始 ID**：撤销本次改名
+- **恢复原始 ID**：撤销当前会话改名
 
 > 提示：虚线标签（置信度中等）优先核实；改名仅 session 内生效，要永久生效请用「保存为新声纹」。
 
@@ -187,7 +187,7 @@ curl -X POST "http://127.0.0.1:8000/v1/upload?enable_diarization=false" \
 
 详见 [LLM_SETUP.md](LLM_SETUP.md)。推荐：
 - 本地：Ollama + qwen2.5:1.5b（3GB 内存）
-- 远程：LiteLLM 反代 + OpenAI-compatible provider（隐私护栏已开公网）
+- 远程：OpenAI-compatible provider（需用户显式配置 endpoint、API key 和公网访问开关）
 
 ### 6.4 容器化部署
 
@@ -240,8 +240,8 @@ tar -czf speaker_db-$(date +%Y%m%d).tar.gz engine/speaker/speaker_db/
 | 现象 | 原因 | 解决 |
 |------|------|------|
 | 启动卡 4+ 分钟 0% CPU | macOS MPS 加载死锁 | `ASR_DEVICE=cpu python main.py` |
-| 上传无反应 | 浏览器 `change` 事件 | 已在 v0.2.1 修复，重启服务 |
-| 同文件多次识别为不同人 | buffer 污染 | 已在 v0.2 修复 `use_buffer=False` |
+| 上传无反应 | 浏览器文件选择事件未触发 | 刷新页面后重新选择文件 |
+| 同文件多次识别为不同人 | 样本过短、噪声大或声纹库样本不足 | 使用更清晰的 5-30 秒样本注册声纹 |
 | 实时连接断开 | mic 权限 / 网络 | 检查浏览器控制台 |
 | LLM 显示不可用 | Ollama 未起 / endpoint 错 | `curl $LLM_ENDPOINT/models` |
 | 浏览器 `WebSocket error` | 后端没启 / 端口错 | 看 README 启动日志 |

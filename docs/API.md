@@ -233,7 +233,7 @@ curl http://127.0.0.1:8000/ready
 | `/v1/history` | GET | 转写历史列表（分页 + 搜索）|
 | `/v1/sessions/{id}` | GET | 会话详情 |
 | `/v1/exports/{id}?format=srt\|vtt\|md\|json` | GET | 4 种格式导出 |
-| `/v1/search?q=...&session_id=...&speaker_id=...&limit=50` | GET | 全文搜索（v0.4+,Roadmap #2.2）|
+| `/v1/search?q=...&session_id=...&speaker_id=...&limit=50` | GET | 全文搜索 |
 
 ### `/v1/search` 全文搜索（v0.4+）
 

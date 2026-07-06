@@ -1,10 +1,9 @@
-# Matrix Live Diarizer — v0.3 路线图
+# Matrix Live Diarizer 路线图
 
-> 状态：草案 · 最近更新 2026-06-11
+> 状态：持续更新
 > 维护者：lgy1027
-> 关联：v0.1（实时转写）→ v0.2（持久化 + 导出 + LLM）→ **v0.3（本路线图）**
 
-本文件汇总项目可增强 / 新增的功能点，按优先级分 4 档。每条都说清楚：
+本文件汇总项目计划增强和新增的功能点，按优先级分 4 档。每条关注：
 
 - **做什么**
 - **为什么（用户痛点 / 商业价值）**
@@ -14,20 +13,20 @@
 
 ---
 
-## 项目现状快照（2026-06-11）
+## 项目现状快照
 
 | 维度 | 现状 |
 |---|---|
-| 测试 | 38 个 test_*.py，**无 WebSocket 实时状态机测试** |
-| REST 端点 | 18 个，1 个 WebSocket |
+| 测试 | 覆盖后端 API、WebSocket 状态机、导出、上传、鉴权和前端关键行为 |
+| REST 端点 | 覆盖鉴权、上传、历史、导出、声纹、LLM 和设置 |
 | 音频格式 | 7 种（wav/mp3/m4a/flac/ogg/aac/wma） |
 | 导出格式 | 4 种（SRT/VTT/MD/JSON）|
 | 语言 | zh + en |
 | ASR 模型 | Qwen3-ASR / SenseVoice / Paraformer / Paraformer Streaming，可热切 |
 | 声纹模型 | 3 个可选（CamPlus/ERes2NetV2/Wespeaker），可热切 |
 | 数据库 | SQLite 单库 |
-| 用户/认证 | 无（单用户）|
-| 移动端 | 未做（桌面 56px nav + 1480px max-width）|
+| 用户/认证 | 本地优先的轻量账号和 JWT 鉴权 |
+| 移动端 | 基础响应式布局 |
 
 ---
 
@@ -150,16 +149,15 @@ this.reconnectTimer = setTimeout(() => this.openSocket(), delay)
 
 ---
 
-### 2.2 说话人全文搜索  ✅ (本 commit 完成)
+### 2.2 说话人全文搜索
 
 **痛点**：库里有 100 个会话、50 个说话人，找"3 周前张老师说过 X 的地方"要逐个翻 detail 页。`library.search` UI 占位但没接上。
 
-**实现**：
-- SQLite FTS5 虚表 + triggers 同步 segments.text ✅
-- `GET /v1/search?q=...&session_id=...&speaker_id=...&limit=50` ✅
-- 前端 history 标签页 search 框接上 ✅
-- 命中显示 segment + snippet 高亮(`[match]X[/match]`) + 跳转链接 ✅
-- 16 个 FTS5 单测覆盖中英文搜 / 触发器同步 / 过滤 / snippet / 边界
+**实现方向**：
+- SQLite FTS5 虚表同步 `segments.text`
+- `GET /v1/search?q=...&session_id=...&speaker_id=...&limit=50`
+- 前端历史页搜索框接入
+- 命中显示 segment、snippet 高亮和跳转链接
 
 **关键实现细节**:
 - FTS5 用 **contentless 模式**(`content=''`):索引存,但 content 仍由 segments.text 提供
@@ -167,7 +165,7 @@ this.reconnectTimer = setTimeout(() => this.openSocket(), delay)
 - 分词用 **trigram**:3 字符三元组,中文 3+ 字命中率高,2 字走 LIKE 兜底
 - snippet 自造(contentless 不支持 `snippet()` 函数):在 text 上找 q 位置 + 前后 8 字符
 
-**影响**：从"档案柜"变"搜索引擎"，**长期价值高**。✅
+**影响**：从"档案柜"变"搜索引擎"，长期价值高。
 
 **未来增强**(可作为 v0.5 候选):
 - 中文分词:接 jieba 提升 2 字搜的命中率
@@ -292,7 +290,6 @@ this.reconnectTimer = setTimeout(() => this.openSocket(), delay)
 - [ ] `ruff check` + `black --check` + `mypy app/`
 - [ ] 测试覆盖率 badge
 - [ ] Dependabot（`/.github/dependabot.yml`）
-- [ ] Pre-commit hook
 - [ ] Docker 镜像构建并 push 到 ghcr.io
 
 **估时**：2 天
@@ -358,10 +355,7 @@ this.reconnectTimer = setTimeout(() => this.openSocket(), delay)
 
 | 版本 | 时间 | 范围 |
 |---|---|---|
-| **v0.2.1** (patch) | 1-2 周 | #1.1 ~ #1.5（5 个快速赢）|
-| **v0.3.0** (minor) | 1-2 月 | #1.x + #2.1 / #2.2（实时翻译 + 全文搜索）|
-| **v0.4.0** (minor) | 2-3 月 | #2.3 ~ #2.5（loopback / 团队库 / PWA）|
-| **v0.5.0** (minor) | 3-4 月 | #3.1（多用户）|
-| **v1.0.0** | 6 月+ | #3.2 / #3.3（会议集成 / 自定义微调）|
-
-每次 minor 版本前开个 spec / plan 文档（参考 `docs/superpowers/specs/` 现有规范），code review 后合 main。
+| **v0.3.x** (patch) | 持续 | 稳定性、文档、模型能力说明、上传/实时细节修复 |
+| **v0.4.0** (minor) | 后续 | 实时翻译、全文搜索增强、系统音频采集 |
+| **v0.5.0** (minor) | 后续 | 团队声纹库、PWA、多用户数据隔离 |
+| **v1.0.0** | 长期 | 会议集成、自定义 ASR 优化、生产级部署能力 |
