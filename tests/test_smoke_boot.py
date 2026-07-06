@@ -135,9 +135,9 @@ def test_llm_status_endpoint(server_url):
 
 
 @pytest.mark.timeout(120)
-def test_static_web_mounted(server_url):
-    """/web/index.html 应返回 200 (静态文件 mount)"""
-    r = httpx.get(f"{server_url}/web/index.html", timeout=5)
+def test_spa_homepage_mounted(server_url):
+    """/ 应返回 Vue SPA 首页"""
+    r = httpx.get(f"{server_url}/", timeout=5)
     assert r.status_code == 200
     assert "html" in r.text.lower(), "返回的不是 HTML"
 

@@ -4,14 +4,20 @@
 
 **Local-first meeting speech AI · zero external transfer by default**
 
-For small meetings and personal live captions. Transcription, speaker identification, and meeting summaries run on your own machine.
+For personal live captions, single-/two-speaker transcription, and local processing of small-team meeting recordings.
+Realtime mode is built for low-latency captions and reference speaker labels; high-accuracy multi-speaker meeting archives should use full-file upload with offline diarization.
 Audio and transcripts stay local by default, and ASR / speaker / LLM engines can be switched from the Settings page.
+
+> Product boundary: realtime mode is optimized for low-latency captions and reference speaker labels. Upload/offline mode can run higher-accuracy pyannote diarization on the full audio. Single-mic realtime multi-speaker labels are best-effort hints, not offline meeting diarization quality.
 
 [![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![ModelScope](https://img.shields.io/badge/ModelScope-Qwen3--ASR-orange.svg)](https://modelscope.cn/models/Qwen/Qwen3-ASR-0.6B)
+[![Status](https://img.shields.io/badge/status-v0.3.0--beta-orange.svg)](#)
 
 [中文](README.md) | **English**
+
+> Current status: **v0.3.0-beta**. Good for local trials, personal workflows, and LAN validation; do not expose it as an unaudited public production service.
 
 </div>
 
@@ -36,7 +42,7 @@ Audio and transcripts stay local by default, and ASR / speaker / LLM engines can
 
 ## Target Users
 
-- Small teams: weekly meetings, reviews, customer calls, automatic minutes.
+- Small-team meeting recordings: weekly meetings, reviews, customer calls, local transcription and minutes after upload.
 - Developers and creators: live captions for courses, livestreams, podcasts.
 - Privacy-sensitive work: legal, medical, journalism, internal interviews.
 - LAN AI users: already running Ollama, LM Studio, LocalAI, or vLLM.
@@ -135,9 +141,9 @@ VITE_BACKEND_URL=http://127.0.0.1:8888
 ## Features
 
 - Real-time transcription: browser microphone -> WebSocket -> live text.
-- Offline file processing: upload audio, transcribe, identify speakers, export SRT / VTT / Markdown / JSON.
+- Offline file processing: upload audio, transcribe, optionally run pyannote offline diarization, export SRT / VTT / Markdown / JSON.
 - Multiple ASR engines: Qwen3-ASR, SenseVoice, Paraformer, Paraformer Streaming.
-- Speaker identification: enroll local voiceprints and label speakers.
+- Speaker identification: a separate voiceprint / diarization pipeline, not a built-in ASR capability. Realtime multi-speaker labels are reference-only.
 - Switchable speaker engines: CamPlus, ERes2NetV2, Wespeaker.
 - Optional local LLM: summaries, action items, minutes via Ollama / LM Studio / LocalAI / vLLM / OpenAI-compatible endpoints.
 - Offline fallback: TextRank summaries when LLM is disabled or unavailable.
@@ -189,6 +195,7 @@ Key constraints:
 - A single microphone cannot separate overlapping speakers.
 - Realtime mode uses short segments, so clustering context is limited.
 - ASR generally assumes one dominant speaker per segment.
+- Speaker identification is handled by CamPlus / ERes2NetV2 / Wespeaker or offline pyannote; it is not provided by the ASR model itself.
 
 ## ASR Engines
 
@@ -198,6 +205,16 @@ Key constraints:
 | SenseVoice-Small | `iic/SenseVoiceSmall` | `funasr` | Faster multilingual upload transcription |
 | Paraformer | `paraformer-zh` | `funasr` | Stable Chinese meeting / interview transcription |
 | Paraformer Streaming | `paraformer-zh-streaming` | `funasr` | Low-latency live captions |
+
+### Capability Matrix — Backend Source of Truth
+
+The Settings page reads ASR capabilities from the backend `/v1/models` response instead of hardcoding them in the UI. If your deployment disables a capability or adds a custom adapter, override the returned metadata with `ASR_CAPABILITIES_JSON` or `ASR_CAPABILITIES_FILE`.
+
+Default separation of concerns:
+- ASR engines do speech-to-text, not speaker identification.
+- Speaker Engine provides realtime reference speaker labels.
+- pyannote provides offline high-accuracy diarization for uploaded files.
+- Paraformer Streaming is currently exposed as server-side segmented refresh, not token-level streaming output.
 
 If a target model or dependency is unavailable, the backend returns a clear error and keeps the current ASR active.
 

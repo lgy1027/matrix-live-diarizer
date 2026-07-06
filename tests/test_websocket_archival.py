@@ -3,7 +3,9 @@ import sys
 import types
 import os
 import tempfile
-from unittest.mock import MagicMock
+import asyncio
+import numpy as np
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -66,3 +68,46 @@ def test_websocket_rename_with_no_title(fake_engines, monkeypatch, tmp_path):
         ws.send_json({"action": "rename", "title": None})
         resp = ws.receive_json()
         assert resp["type"] == "renamed"
+
+
+def test_process_speech_segment_archives_real_time_offsets(fake_engines, monkeypatch, tmp_path):
+    """实时存档应使用会话内真实时间轴,而不是固定写 0.0."""
+    client = _make_client(monkeypatch, tmp_path)
+    app = client.app
+
+    import app.api.websocket as ws_mod
+
+    asr = MagicMock()
+    asr.run_asr = AsyncMock(return_value={
+        "text": "第二段内容",
+        "words": [{"text": "第", "start": 0.1, "end": 0.2}],
+    })
+    speaker = MagicMock()
+    speaker.extract_feat.return_value = ([0.1] * 192, 1.0)
+    speaker.compare_and_identify.return_value = ("Spk_001", 0.95)
+
+    monkeypatch.setattr(ws_mod, "asr_engine", asr)
+    monkeypatch.setattr(ws_mod, "get_speaker_engine", lambda: speaker)
+
+    class DummyWebSocket:
+        def __init__(self, app):
+            self.app = app
+            self.sent = []
+
+        async def send_json(self, msg):
+            self.sent.append(msg)
+
+    ws = DummyWebSocket(app)
+    ctx = ws_mod.SessionContext("test_user")
+    audio = (np.ones(16000, dtype=np.float32) * 0.1)
+    asyncio.run(
+        ws_mod._process_speech_segment(
+            ws, ctx, audio, "test_user", 16000, segment_start_time=12.5
+        )
+    )
+
+    sid = ws._session_id
+    segments = app.state.transcript_repo.list_segments(sid)
+    assert segments[0]["start_time"] == 12.5
+    assert segments[0]["end_time"] == 13.5
+    assert segments[0]["words"][0]["start"] == 12.6

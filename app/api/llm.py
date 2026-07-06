@@ -2,6 +2,7 @@
 import asyncio
 import importlib
 import logging
+import os
 from dataclasses import replace
 from typing import Optional
 
@@ -87,6 +88,36 @@ def _get_gateway(request: Request) -> LLMGateway:
         return LLMGateway(replace(cfg, enabled=False))
 
 
+def _is_authenticated_status_request(request: Request) -> bool:
+    """LLM status 是白名单端点;这里手动判断是否可返回完整配置."""
+    if os.environ.get("TEST_AUTH_BYPASS") == "1":
+        return True
+    auth_header = request.headers.get("authorization", "")
+    if not auth_header.lower().startswith("bearer "):
+        return False
+    token = auth_header.split(" ", 1)[1].strip()
+    if not token:
+        return False
+    auth_service = getattr(request.app.state, "auth_service", None)
+    if auth_service is None:
+        return False
+    decoded = auth_service.decode_token(token)
+    if not decoded:
+        return False
+    try:
+        user = auth_service.get_user(int(decoded["sub"]))
+    except (KeyError, TypeError, ValueError):
+        return False
+    if not user or not user.get("is_active") or user.get("must_change_password"):
+        return False
+    try:
+        token_pwd_iat = float(decoded.get("pwd_iat", 0))
+        current_pwd_iat = float(user.get("password_changed_at") or 0)
+    except (TypeError, ValueError):
+        return False
+    return current_pwd_iat <= token_pwd_iat
+
+
 class SummarizeRequest(BaseModel):
     session_id: str
     max_words: int = 200
@@ -120,6 +151,14 @@ class LLMSettingsRequest(BaseModel):
 @router.get("/v1/llm/status")
 def llm_status(request: Request):
     cfg, source, provider = _effective_llm_cfg(_settings_repo(request))
+    if not _is_authenticated_status_request(request):
+        return {
+            "enabled": cfg.enabled,
+            "available": False,
+            "fallback": "extractive-textrank",
+            "auth_required": True,
+        }
+
     error = None
     try:
         gw = LLMGateway(cfg)

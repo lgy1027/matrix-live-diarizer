@@ -25,12 +25,41 @@ logging.basicConfig(
 logger = logging.getLogger("Matrix_Core")
 
 
+def _is_running_under_pytest() -> bool:
+    import sys
+    return "pytest" in sys.modules or bool(os.environ.get("PYTEST_CURRENT_TEST"))
+
+
+def _validate_runtime_safety() -> None:
+    """拒绝明显危险的生产运行配置."""
+    mode = config.deployment.mode
+    if (
+        os.environ.get("TEST_AUTH_BYPASS") == "1"
+        and mode in ("lan", "public")
+    ):
+        raise RuntimeError("DEPLOYMENT_MODE=lan/public 时禁止设置 TEST_AUTH_BYPASS=1")
+    if (
+        os.environ.get("TEST_AUTH_BYPASS") == "1"
+        and not config.server.debug
+        and not _is_running_under_pytest()
+    ):
+        raise RuntimeError("TEST_AUTH_BYPASS=1 只能用于测试环境,禁止在正常服务中启动")
+    if mode in ("lan", "public"):
+        if not config.auth.jwt_secret:
+            raise RuntimeError(f"DEPLOYMENT_MODE={mode} 时必须设置 JWT_SECRET")
+        if "*" in config.cors.allowed_origins:
+            raise RuntimeError(f"DEPLOYMENT_MODE={mode} 时必须把 ALLOWED_ORIGINS 收紧到可信 Origin")
+    if mode == "public":
+        logger.warning("DEPLOYMENT_MODE=public: 本项目不推荐公网裸露部署,请确认已启用 HTTPS/反向代理/防火墙")
+
+
 def create_app() -> FastAPI:
     """创建 FastAPI 应用实例"""
+    _validate_runtime_safety()
     app = FastAPI(
         title=APP_TITLE,
         description="实时音频转写与说话人识别系统",
-        version="1.0.0"
+        version="0.3.0-beta"
     )
     
     # 速率限制中间件(从 config.rate_limit 读取,支持 .env 调参)

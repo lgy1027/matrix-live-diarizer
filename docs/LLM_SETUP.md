@@ -103,11 +103,11 @@ LLM_MODEL=gpt-4o-mini
 
 ## 前端配置
 
-打开 `web/index.html` → 左侧菜单 **Settings** → LLM 区块：
+启动服务后打开 `http://127.0.0.1:8000/` → 左侧菜单 **Settings** → LLM 区块：
 - 勾选"启用 LLM"
 - 状态显示 "✅ 可用"（如果 endpoint 通）
 
-详细字段配置在 `.env` 文件（不通过 UI 配置）。
+设置页支持保存 provider / endpoint / model / API Key 到本地 SQLite；`.env` 仍作为默认配置来源。
 
 > ⚠️ **生产环境部署**:如果你把 Matrix 放在 nginx/Cloudflare 后面,
 > **不要**依赖 X-Forwarded-For 做限流/审计 — 详见

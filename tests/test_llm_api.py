@@ -131,6 +131,32 @@ def test_status_includes_fallback_field(monkeypatch):
     assert data["fallback"] == "extractive-textrank"
 
 
+def test_llm_status_unauthenticated_is_minimal_and_does_not_probe(monkeypatch):
+    """未鉴权访问 status 不返回 endpoint/model,也不触发 LLM 探活."""
+    monkeypatch.delenv("TEST_AUTH_BYPASS", raising=False)
+    client, config = _make_client(monkeypatch)
+    monkeypatch.setattr(config.llm, "enabled", True)
+    monkeypatch.setattr(config.llm, "endpoint", "http://127.0.0.1:11434/v1")
+    monkeypatch.setattr(config.llm, "model", "private-model")
+
+    from app.services.llm_gateway import LLMGateway
+
+    async def fail_probe(self):
+        raise AssertionError("unauthenticated status must not probe LLM")
+
+    monkeypatch.setattr(LLMGateway, "is_available", fail_probe)
+
+    resp = client.get("/v1/llm/status")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["enabled"] is True
+    assert data["available"] is False
+    assert data["auth_required"] is True
+    assert data["fallback"] == "extractive-textrank"
+    assert "endpoint" not in data
+    assert "model" not in data
+
+
 def test_get_llm_settings_uses_env_defaults(monkeypatch):
     client, config = _make_client(monkeypatch)
     monkeypatch.setattr(config.llm, "enabled", False)

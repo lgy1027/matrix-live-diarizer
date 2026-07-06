@@ -16,6 +16,9 @@ CREATE TABLE IF NOT EXISTS sessions (
     client_id     TEXT,
     original_filename TEXT,
     duration_sec  REAL,
+    asr_engine    TEXT,
+    speaker_engine TEXT,
+    diarization_source TEXT,
     speaker_count INTEGER DEFAULT 0,
     is_archived   INTEGER DEFAULT 0,
     created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -34,6 +37,9 @@ CREATE TABLE IF NOT EXISTS segments (
     end_time      REAL NOT NULL,
     confidence    REAL,
     is_final      INTEGER DEFAULT 1,
+    asr_engine    TEXT,
+    speaker_engine TEXT,
+    diarization_source TEXT,
     words_json    TEXT,                          -- 字级时间戳 JSON, ASR_WORD_TIMESTAMPS=true 时填充
     UNIQUE(session_id, segment_index)
 );
@@ -121,11 +127,20 @@ class Database:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA synchronous=NORMAL")
             conn.executescript(SCHEMA_SQL)
-            # 兼容老库:加 v0.3 新列(已存在则忽略)
-            try:
-                conn.execute("ALTER TABLE segments ADD COLUMN words_json TEXT")
-            except Exception:
-                pass  # 重复列错误,新库已含
+            # 开发期老库兜底: 新项目不承诺旧表格式,但本地已有库可自动补列。
+            for table, column_def in (
+                ("sessions", "asr_engine TEXT"),
+                ("sessions", "speaker_engine TEXT"),
+                ("sessions", "diarization_source TEXT"),
+                ("segments", "asr_engine TEXT"),
+                ("segments", "speaker_engine TEXT"),
+                ("segments", "diarization_source TEXT"),
+                ("segments", "words_json TEXT"),
+            ):
+                try:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {column_def}")
+                except Exception:
+                    pass
             # 兼容老库:加 v0.4 新列 password_changed_at (Bug-91 审核)
             try:
                 conn.execute("ALTER TABLE users ADD COLUMN password_changed_at REAL DEFAULT 0")
@@ -158,7 +173,20 @@ class Database:
     def _init_schema_on_conn(self, conn: sqlite3.Connection) -> None:
         """在已开启的连接上建表(兜底用)"""
         conn.executescript(SCHEMA_SQL)
-        # 老库兼容 ALTER (Bug-91 审核)
+        for table, column_def in (
+            ("sessions", "asr_engine TEXT"),
+            ("sessions", "speaker_engine TEXT"),
+            ("sessions", "diarization_source TEXT"),
+            ("segments", "asr_engine TEXT"),
+            ("segments", "speaker_engine TEXT"),
+            ("segments", "diarization_source TEXT"),
+            ("segments", "words_json TEXT"),
+        ):
+            try:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column_def}")
+            except Exception:
+                pass
+        # 老库兜底 ALTER (Bug-91 审核)
         try:
             conn.execute("ALTER TABLE users ADD COLUMN password_changed_at REAL DEFAULT 0")
         except Exception:

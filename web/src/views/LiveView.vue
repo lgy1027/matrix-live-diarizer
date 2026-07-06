@@ -10,6 +10,7 @@ import { uploadAudio } from '../api/speakers'
 import { getModels, type ModelsInfo } from '../api/engines'
 import SpeakerLabel from '../components/SpeakerLabel.vue'
 import SpeakerMenu from '../components/SpeakerMenu.vue'
+import EmText from '../components/EmText.vue'
 import type { LiveSegment } from '../stores/live'
 type UploadResp = Awaited<ReturnType<typeof uploadAudio>>
 
@@ -182,7 +183,7 @@ onMounted(loadModels)
   <section class="live-wrap">
     <div class="live-grid">
       <div class="live-main">
-        <h1 class="page-title" v-html="t('view.live.title')" />
+        <h1 class="page-title"><EmText :text="t('view.live.title')" /></h1>
         <div class="live-meta">
           <span><span>{{ t('view.live.meta.room') }}</span> <b>A</b></span>
           <template v-if="live.rec">

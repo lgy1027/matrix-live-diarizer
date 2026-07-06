@@ -1,4 +1,6 @@
 import pytest
+import asyncio
+from unittest.mock import AsyncMock, MagicMock
 import numpy as np
 from typing import List, Tuple
 
@@ -363,6 +365,31 @@ class TestDiarizationToggle:
         # 验证函数存在
         assert callable(process_audio_chunk_with_diarization)
         assert callable(process_audio_chunk_asr_only)
+
+    def test_process_chunk_with_diarization_uses_filename_default_name(self, monkeypatch):
+        """长音频分段 diarization 路径应可执行,并把文件名传给声纹默认名."""
+        import app.api.upload as upload_mod
+
+        asr = MagicMock()
+        asr.run_asr = AsyncMock(return_value={"text": "测试文本", "words": None})
+        speaker = MagicMock()
+        speaker.extract_feat.return_value = ([0.1] * 192, 1.0)
+        speaker.compare_and_identify.return_value = ("Spk_meeting", 0.9)
+
+        monkeypatch.setattr(upload_mod, "asr_engine", asr)
+        monkeypatch.setattr(upload_mod, "get_speaker_engine", lambda: speaker)
+
+        chunk = np.ones(16000, dtype=np.float32) * 0.1
+        result = asyncio.run(
+            upload_mod.process_audio_chunk_with_diarization(
+                chunk, 30.0, 31.0, "weekly-meeting.wav"
+            )
+        )
+
+        assert result.speaker == "Spk_meeting"
+        assert result.text == "测试文本"
+        speaker.compare_and_identify.assert_called_once()
+        assert speaker.compare_and_identify.call_args.kwargs["default_name"] == "weekly-meeting"
     
     def test_diarization_disabled_text_merge(self):
         """测试禁用说话人识别时的文本合并逻辑

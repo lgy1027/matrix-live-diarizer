@@ -11,7 +11,7 @@ from starlette.websockets import WebSocketState
 from app.config import config
 from app.constants import SYSTEM_SPEAKER
 from app.services import SessionContext
-from engine.speaker.speaker_factory import get_speaker_engine
+from engine.speaker.speaker_factory import get_engine_info, get_speaker_engine
 
 logger = logging.getLogger("Matrix_Core")
 
@@ -193,6 +193,39 @@ def _strip_filler_words(text: str) -> str:
     return out.strip()
 
 
+def _offset_words(words, offset: float):
+    """把 segment 内相对 words 时间戳偏移到会话时间轴."""
+    if not words:
+        return None
+    shifted = []
+    for item in words:
+        if not isinstance(item, dict):
+            continue
+        copied = dict(item)
+        try:
+            copied["start"] = float(copied.get("start", 0)) + offset
+            copied["end"] = float(copied.get("end", 0)) + offset
+        except (TypeError, ValueError):
+            pass
+        shifted.append(copied)
+    return shifted or None
+
+
+def _current_asr_type() -> str:
+    try:
+        from engine.asr import get_asr_engine_info
+        return str(get_asr_engine_info().get("type") or config.audio.asr_engine)
+    except Exception:
+        return config.audio.asr_engine
+
+
+def _current_speaker_type() -> str:
+    try:
+        return str(get_engine_info().get("type") or config.speaker.engine_type)
+    except Exception:
+        return config.speaker.engine_type
+
+
 def compute_skip_count(queue_size: int, threshold: int, keep_recent: int = 25) -> int:
     """队列满时,计算要跳过的旧帧数(保留最近 N 帧)
 
@@ -273,6 +306,8 @@ async def audio_processor(
     # 统计信息
     total_frames = 0
     skipped_frames = 0
+    samples_seen = 0
+    speech_start_sample = 0
 
     while not stop_event.is_set():
         # 跳帧策略(纯函数 compute_skip_count 算要跳的帧数)
@@ -292,7 +327,8 @@ async def audio_processor(
             # 超时且有待处理的语音，强制识别
             if len(speech_buffer) > 0:
                 await _process_speech_segment(
-                    websocket, ctx, speech_buffer, client_id, sample_rate
+                    websocket, ctx, speech_buffer, client_id, sample_rate,
+                    segment_start_time=speech_start_sample / sample_rate,
                 )
                 speech_buffer = np.array([], dtype=np.float32)
                 ctx.last_full_text = ""  # 超时后重置上下文
@@ -304,6 +340,9 @@ async def audio_processor(
 
         # 转换音频格式
         chunk = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
+        chunk_start_sample = samples_seen
+        chunk_end_sample = samples_seen + len(chunk)
+        samples_seen = chunk_end_sample
 
         # 调用纯函数 classify_frame(单帧 VAD 判定)
         is_speech_chunk = classify_frame(chunk, asr_engine)
@@ -314,6 +353,7 @@ async def audio_processor(
                 # 静音 → 语音：开始累积
                 state = STATE_SPEECH
                 speech_buffer = chunk.copy()
+                speech_start_sample = chunk_start_sample
                 silence_frame_count = 0
                 logger.debug(f"[PROCESSOR] {client_id} 语音开始")
                 # 推 transcribing 占位消息(纯函数判定: 仅 SILENCE→SPEECH 触发)
@@ -356,11 +396,13 @@ async def audio_processor(
                 ):
                     logger.debug(f"[PROCESSOR] {client_id} 达到上限，强制识别")
                     await _process_speech_segment(
-                        websocket, ctx, speech_buffer, client_id, sample_rate
+                        websocket, ctx, speech_buffer, client_id, sample_rate,
+                        segment_start_time=speech_start_sample / sample_rate,
                     )
                     # 保留最后 0.5 秒作为上下文
                     keep_samples = int(sample_rate * 0.5)
                     speech_buffer = speech_buffer[-keep_samples:] if len(speech_buffer) > keep_samples else np.array([], dtype=np.float32)
+                    speech_start_sample = max(chunk_end_sample - len(speech_buffer), 0)
 
             else:
                 # 语音中检测到静音帧
@@ -379,7 +421,8 @@ async def audio_processor(
                     # 触发 ASR
                     if len(speech_buffer) > sample_rate * 0.1:  # 至少 0.1 秒
                         await _process_speech_segment(
-                            websocket, ctx, speech_buffer, client_id, sample_rate
+                            websocket, ctx, speech_buffer, client_id, sample_rate,
+                            segment_start_time=speech_start_sample / sample_rate,
                         )
                     
                     # 重置状态
@@ -396,7 +439,8 @@ async def audio_processor(
         logger.debug(f"[PROCESSOR] {client_id} 退出前 flush 残余 buffer ({len(speech_buffer)/sample_rate:.2f}s)")
         try:
             await _process_speech_segment(
-                websocket, ctx, speech_buffer, client_id, sample_rate
+                websocket, ctx, speech_buffer, client_id, sample_rate,
+                segment_start_time=speech_start_sample / sample_rate,
             )
         except Exception as e:
             logger.warning(f"[PROCESSOR] flush 失败: {e}")
@@ -412,7 +456,8 @@ async def _process_speech_segment(
     ctx: SessionContext,
     audio_data: np.ndarray,
     client_id: str,
-    sample_rate: int = 16000
+    sample_rate: int = 16000,
+    segment_start_time: float = 0.0,
 ):
     """处理一个语音段"""
     if len(audio_data) < 1600:  # 至少 0.1 秒
@@ -420,6 +465,7 @@ async def _process_speech_segment(
     
     # 计算音频时长
     audio_duration = len(audio_data) / sample_rate
+    segment_end_time = segment_start_time + audio_duration
     
     # 并行执行 ASR 和声纹提取
     async with inference_lock:
@@ -506,6 +552,9 @@ async def _process_speech_segment(
                         source="websocket",
                         title=default_title,
                         client_id=ctx.client_id,
+                        asr_engine=_current_asr_type(),
+                        speaker_engine=_current_speaker_type(),
+                        diarization_source="realtime-speaker-engine",
                     )
                     websocket._session_id = session_id
                     logger.info(f"[WS] {client_id} 自动创建会话: {session_id} ({default_title})")
@@ -518,15 +567,19 @@ async def _process_speech_segment(
                     repo = websocket.app.state.transcript_repo
                     segs = repo.list_segments(session_id)
                     import json as _json
-                    words_json = _json.dumps(seg_words, ensure_ascii=False) if seg_words else None
+                    archive_words = _offset_words(seg_words, segment_start_time)
+                    words_json = _json.dumps(archive_words, ensure_ascii=False) if archive_words else None
                     repo.insert_segment(
                         session_id,
                         segment_index=len(segs),
                         text=full_text,
-                        start_time=0.0,  # v0.2 MVP: 不记精确时间
-                        end_time=audio_duration,
+                        start_time=segment_start_time,
+                        end_time=segment_end_time,
                         speaker_id=spk_id,
                         words_json=words_json,
+                        asr_engine=_current_asr_type(),
+                        speaker_engine=_current_speaker_type(),
+                        diarization_source="realtime-speaker-engine",
                     )
                 except Exception as e:
                     logger.warning(f"[WS] 存档失败: {e}")
@@ -583,6 +636,9 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                 user_row = auth_service.get_user(user_id)
                 if not user_row or not user_row.get("is_active"):
                     await websocket.close(code=4401, reason="用户不存在/禁用")
+                    return
+                if user_row.get("must_change_password"):
+                    await websocket.close(code=4403, reason="首次登录必须先修改默认密码")
                     return
                 token_pwd_iat = float(decoded.get("pwd_iat", 0))
                 current_pwd_iat = float(user_row.get("password_changed_at") or 0)
@@ -659,6 +715,9 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                                     source="websocket",
                                     title=new_title,
                                     client_id=client_id,
+                                    asr_engine=_current_asr_type(),
+                                    speaker_engine=_current_speaker_type(),
+                                    diarization_source="realtime-speaker-engine",
                                 )
                                 websocket._session_id = sid
                                 logger.info(f"[WS] {client_id} 命名会话: {sid} ({new_title})")

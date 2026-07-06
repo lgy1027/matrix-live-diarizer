@@ -24,6 +24,19 @@ def test_history_config_defaults():
     assert cfg.auto_archive is False
 
 
+def test_deployment_config_defaults_to_local():
+    from app.config import DeploymentConfig
+    cfg = DeploymentConfig.from_env()
+    assert cfg.mode == "local"
+
+
+def test_deployment_config_reads_known_mode(monkeypatch):
+    from app.config import DeploymentConfig
+    monkeypatch.setenv("DEPLOYMENT_MODE", "LAN")
+    cfg = DeploymentConfig.from_env()
+    assert cfg.mode == "lan"
+
+
 def test_llm_config_reads_env(monkeypatch):
     from app.config import LLMConfig
     monkeypatch.setenv("LLM_ENABLED", "true")
@@ -43,8 +56,9 @@ def test_llm_allowed_hosts_from_env(monkeypatch):
 
 
 def test_appconfig_load_includes_new_blocks():
-    from app.config import AppConfig, StorageConfig, LLMConfig, HistoryConfig
+    from app.config import AppConfig, StorageConfig, LLMConfig, HistoryConfig, DeploymentConfig
     cfg = AppConfig.load()
     assert isinstance(cfg.storage, StorageConfig)
     assert isinstance(cfg.llm, LLMConfig)
     assert isinstance(cfg.history, HistoryConfig)
+    assert isinstance(cfg.deployment, DeploymentConfig)

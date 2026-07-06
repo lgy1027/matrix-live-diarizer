@@ -67,6 +67,20 @@ class ServerConfig:
 
 
 @dataclass
+class DeploymentConfig:
+    """部署模式: local / lan / public"""
+    mode: str = "local"
+
+    @classmethod
+    def from_env(cls) -> "DeploymentConfig":
+        mode = get_env_str("DEPLOYMENT_MODE", "local").lower().strip()
+        if mode not in ("local", "lan", "public"):
+            logger.warning(f"无效 DEPLOYMENT_MODE={mode!r},回退 local")
+            mode = "local"
+        return cls(mode=mode)
+
+
+@dataclass
 class AudioConfig:
     """音频处理配置"""
     sample_rate: int = 16000
@@ -277,11 +291,13 @@ class AppConfig:
     history: HistoryConfig = field(default_factory=HistoryConfig)
     cors: CORSConfig = field(default_factory=CORSConfig)
     auth: AuthConfig = field(default_factory=AuthConfig)
+    deployment: DeploymentConfig = field(default_factory=DeploymentConfig)
 
     @classmethod
     def load(cls) -> "AppConfig":
         return cls(
             server=ServerConfig.from_env(),
+            deployment=DeploymentConfig.from_env(),
             audio=AudioConfig.from_env(),
             speaker=SpeakerConfig.from_env(),
             rate_limit=RateLimitConfig.from_env(),

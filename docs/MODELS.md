@@ -2,6 +2,8 @@
 
 本项目以"小、快、可在消费级硬件跑"为原则做模型选型。本文档归档已调研过的候选模型,以及它们的取舍。
 
+运行时能力以 `/v1/models` 为准。设置页读取后端返回的 `asr_engines.engines[*].capabilities`,不会在前端硬编码能力矩阵。部署方可以用 `ASR_CAPABILITIES_JSON` 或 `ASR_CAPABILITIES_FILE` 覆盖某个模型的能力说明,例如关闭字级时间戳、标记自研适配器支持真流式、补充本部署限制等。
+
 ---
 
 ## 当前可用
@@ -24,6 +26,8 @@
 - **优点**: 中文识别极强,SOTA 表现,社区活跃
 - **缺点**: 体积较大,低端机器加载慢;HF 镜像依赖
 
+> 能力边界：word timestamps / 字级时间戳当前只在 Qwen3-ASR + `ASR_WORD_TIMESTAMPS=true` 路径可用。说话人识别不是 Qwen3-ASR 自带能力,由声纹引擎或上传离线 pyannote 负责。
+
 ### 声纹: CamPlus / ERes2NetV2 / ResNet34 (Wespeaker)
 - **来源**: ModelScope `damo/speech_campplus_sv_zh-cn_16k-common` 等
 - **大小**: 7-18M 参数(都 < 100MB)
@@ -36,10 +40,15 @@
 - **依赖**: `funasr>=1.2.0`
 - **切换**: 设置页或 `PUT /v1/asr/engine`
 - **行为**: 新 ASR 下载/加载完成前继续使用旧 ASR;加载失败不会影响当前引擎
+- **能力来源**: 后端 `/v1/models` 返回,可通过 `ASR_CAPABILITIES_JSON` / `ASR_CAPABILITIES_FILE` 配置覆盖
 - **适用**:
   - SenseVoice-Small: 多语种上传转写,模型更轻
   - Paraformer: 中文会议/访谈离线转写
   - Paraformer Streaming: 低延迟实时字幕
+- **能力差异**:
+  - FunASR 系列当前按段级结果接入,不提供 Qwen3 ForcedAligner 的 word timestamps
+  - Paraformer Streaming 表示模型适合流式/低延迟场景,但当前服务端展示不是 token-level 真流式逐 token 输出
+  - 切换 ASR 只改变转写模型,不会改变说话人识别算法;实时说话人由 Speaker Engine 完成,上传离线 diarization 可走 pyannote
 
 ### VAD: Silero VAD
 - **来源**: torch.hub `snakers4/silero-vad`

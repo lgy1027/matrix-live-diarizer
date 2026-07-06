@@ -9,6 +9,7 @@ import { useDialog } from '../composables/useDialog'
 import { useEnrollSpeaker } from '../composables/useEnrollSpeaker'
 import { spkColor } from '../utils/spk'
 import { fmtMinutes, fmtRel } from '../utils/format'
+import EmText from '../components/EmText.vue'
 
 const { t: ti18n } = useI18n()
 const t = (key: string, ...args: (string | number)[]): string => {
@@ -217,7 +218,7 @@ onMounted(() => {
     <!-- head -->
     <header class="voice-head">
       <div class="voice-titles">
-        <h1 class="page-title" v-html="t('view.voice.title')" />
+        <h1 class="page-title"><EmText :text="t('view.voice.title')" /></h1>
         <p class="page-sub">{{ t('view.voice.sub') }}</p>
       </div>
       <div class="voice-stats">

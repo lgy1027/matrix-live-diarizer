@@ -63,6 +63,34 @@ def test_get_all_asr_engines_shape():
     assert data["cached"] == []
 
 
+def test_asr_engine_capabilities_are_explicit():
+    from engine.asr.factory import get_asr_engine_info
+
+    qwen = get_asr_engine_info("qwen3")
+    streaming = get_asr_engine_info("paraformer_streaming")
+
+    assert qwen["capabilities"]["word_timestamps"] is True
+    assert qwen["capabilities"]["speaker_diarization"] is False
+    assert streaming["capabilities"]["upload"] is True
+    assert streaming["capabilities"]["true_streaming"] == "adapter_not_yet"
+    assert streaming["capabilities"]["word_timestamps"] is False
+
+
+def test_asr_engine_capabilities_can_be_overridden(monkeypatch):
+    monkeypatch.setenv(
+        "ASR_CAPABILITIES_JSON",
+        '{"qwen3":{"description":"Custom deployment","capabilities":{"word_timestamps":false,"notes":"本部署关闭字级时间戳"}}}',
+    )
+    from engine.asr.factory import get_asr_engine_info
+
+    info = get_asr_engine_info("qwen3")
+    assert info["customized"] is True
+    assert info["description"] == "Custom deployment"
+    assert info["capabilities"]["word_timestamps"] is False
+    assert info["capabilities"]["speaker_diarization"] is False
+    assert info["capabilities"]["notes"] == "本部署关闭字级时间戳"
+
+
 def test_asr_manager_switch_success_after_load(monkeypatch):
     from engine.asr import factory
 

@@ -31,6 +31,36 @@ def test_get_session(repo):
     assert s["original_filename"] == "a.wav"
 
 
+def test_session_and_segment_store_runtime_model_metadata(repo):
+    sid = repo.create_session(
+        source="upload",
+        original_filename="meeting.wav",
+        asr_engine="sensevoice",
+        speaker_engine="eres2net",
+        diarization_source="pyannote",
+    )
+    repo.insert_segment(
+        sid,
+        0,
+        "hello",
+        0.0,
+        1.0,
+        speaker_id="SPEAKER_00",
+        asr_engine="sensevoice",
+        speaker_engine="eres2net",
+        diarization_source="pyannote",
+    )
+
+    session = repo.get_session(sid)
+    segment = repo.list_segments(sid)[0]
+    assert session["asr_engine"] == "sensevoice"
+    assert session["speaker_engine"] == "eres2net"
+    assert session["diarization_source"] == "pyannote"
+    assert segment["asr_engine"] == "sensevoice"
+    assert segment["speaker_engine"] == "eres2net"
+    assert segment["diarization_source"] == "pyannote"
+
+
 def test_get_session_not_found(repo):
     assert repo.get_session("nonexistent") is None
 

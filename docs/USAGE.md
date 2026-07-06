@@ -9,19 +9,18 @@
 
 1. 启动后端：`python main.py`（等 `[ASR] 模型加载成功` 日志出现）
    - Mac M 系列卡住超过 90s：`ASR_DEVICE=cpu python main.py`
-2. 浏览器打开 `web/index.html` 文件（**不是**访问 8000 端口，前端是纯静态）
-3. 页面会自动连接 `ws://127.0.0.1:8000` 后端
+2. 浏览器打开 `http://127.0.0.1:8000/`（生产模式下 FastAPI 托管 `web/dist`）
+3. 页面会自动连接同源后端的 REST API 和 WebSocket
 4. 左侧 4 个标签：**Live**（实时） / **Library**（历史） / **Voice**（声纹库） / **Settings**（设置）
 5. 默认语言为 **中文**（右上角切 EN）
 
-> 💡 静态文件说明：`web/index.html` 用 `file://` 协议打开，不依赖后端部署前端。
-> 后端只暴露 WebSocket + REST API（不托管前端）。
+> 开发前端时可以单独运行 `cd web && npm run dev`，再通过 `web/.env.local` 指向后端端口。
 
 ## 2. 实时转写（Live）
 
 1. 点中间 **录音按钮**（琥珀色圆形）→ 浏览器弹麦克风权限 → 同意
 2. 说话 → 转写实时显示在 Transcript 区域
-3. 多人说话 → 顶部 `[Spk_xxx]` 标签自动切换
+3. 多人说话 → 顶部 `[Spk_xxx]` 标签自动切换（实时多人标签仅作参考）
 4. 再点一次录音按钮结束 → 会话自动存档到 Library
 
 ### 实时流配置
@@ -30,9 +29,9 @@
 - 静音超过 3 秒自动结束识别
 - 单段最大 5 秒强制识别（避免长段延迟）
 
-![首页](images/home.png)
+![实时转写](images/Live-Transcription.png)
 
-![录音识别](images/upload.png)
+![历史会话](images/library.png)
 
 ### 实时转写 — 说话人操作
 
@@ -87,9 +86,13 @@
 1. **多麦克风**：每人一麦 + 每人都 enroll 自己的声纹
 2. **离线模式**：上传完整录音文件，启用 pyannote 3.1 离线 diarization（业界 SOTA，Diarization Error Rate ~18%）
 
+> ASR 只负责转文字。实时说话人标签来自 CamPlus / ERes2NetV2 / Wespeaker 声纹引擎；上传离线高准确度 diarization 来自 pyannote。切换 Qwen3 / Paraformer / SenseVoice 不会让 ASR 模型本身具备说话人识别能力。
+
 详见 **[SPEAKER_DIARIZATION.md](SPEAKER_DIARIZATION.md)** 完整文档。
 
 ## 3. 文件上传
+
+上传模式和实时模式的目标不同：实时模式优先低延迟,上传模式拿到完整文件后可以做更稳的分段、合并和离线 diarization。需要多人会议归档时,优先上传完整录音并启用 pyannote。
 
 ### 方式 A：Live 页右侧 "Quick Capture"
 
@@ -133,7 +136,7 @@ curl -X POST "http://127.0.0.1:8000/v1/upload?enable_diarization=false" \
 - 删除 / 重命名会话
 - LLM 一键生成摘要 / 行动项 / 纪要（需先在 Settings 启用 LLM）
 
-![说话人](images/voice.png)
+![说话人](images/Voice-Library.png)
 
 ## 5. 声纹库（Voice Library）
 

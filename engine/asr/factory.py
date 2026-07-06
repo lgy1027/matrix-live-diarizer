@@ -9,6 +9,8 @@ import logging
 import importlib.util
 import sys
 import threading
+import json
+import os
 from typing import Any
 
 logger = logging.getLogger("ASR_Engine")
@@ -24,6 +26,17 @@ ASR_ENGINE_CONFIG: dict[str, dict[str, Any]] = {
         "languages_en": "52 languages / dialects",
         "supports_streaming": False,
         "supports_words": True,
+        "capabilities": {
+            "transcription": True,
+            "upload": True,
+            "realtime_segmented": True,
+            "true_streaming": False,
+            "word_timestamps": True,
+            "speaker_diarization": False,
+            "recommended_for": ["high_quality_upload", "general_realtime"],
+            "notes": "字级时间戳仅在 ASR_WORD_TIMESTAMPS=true 且 forced aligner 加载成功时可用。",
+            "notes_en": "Word timestamps require ASR_WORD_TIMESTAMPS=true and a loaded forced aligner.",
+        },
     },
     "sensevoice": {
         "name": "SenseVoice-Small",
@@ -35,6 +48,17 @@ ASR_ENGINE_CONFIG: dict[str, dict[str, Any]] = {
         "supports_streaming": False,
         "supports_words": False,
         "optional_dependency": "funasr",
+        "capabilities": {
+            "transcription": True,
+            "upload": True,
+            "realtime_segmented": True,
+            "true_streaming": False,
+            "word_timestamps": False,
+            "speaker_diarization": False,
+            "recommended_for": ["fast_upload", "lightweight_multilingual"],
+            "notes": "不返回字级时间戳;说话人识别仍由独立声纹/pyannote 模块完成。",
+            "notes_en": "No word timestamps; speaker diarization is provided by separate speaker/pyannote modules.",
+        },
     },
     "paraformer": {
         "name": "Paraformer",
@@ -46,6 +70,17 @@ ASR_ENGINE_CONFIG: dict[str, dict[str, Any]] = {
         "supports_streaming": False,
         "supports_words": False,
         "optional_dependency": "funasr",
+        "capabilities": {
+            "transcription": True,
+            "upload": True,
+            "realtime_segmented": True,
+            "true_streaming": False,
+            "word_timestamps": False,
+            "speaker_diarization": False,
+            "recommended_for": ["chinese_meeting_upload"],
+            "notes": "偏中文会议/访谈;导出字幕使用 segment 级时间戳。",
+            "notes_en": "Best for Chinese meeting/interview transcription; exports use segment-level timestamps.",
+        },
     },
     "paraformer_streaming": {
         "name": "Paraformer Streaming",
@@ -57,6 +92,17 @@ ASR_ENGINE_CONFIG: dict[str, dict[str, Any]] = {
         "supports_streaming": True,
         "supports_words": False,
         "optional_dependency": "funasr",
+        "capabilities": {
+            "transcription": True,
+            "upload": True,
+            "realtime_segmented": True,
+            "true_streaming": "adapter_not_yet",
+            "word_timestamps": False,
+            "speaker_diarization": False,
+            "recommended_for": ["low_latency_future"],
+            "notes": "模型支持流式,但当前项目适配层仍按 VAD segment 调用,不是 token-level 真流式输出。",
+            "notes_en": "The model supports streaming, but this app currently calls it on VAD segments, not token-level streaming.",
+        },
     },
 }
 
@@ -64,10 +110,61 @@ ASR_ENGINE_CONFIG: dict[str, dict[str, Any]] = {
 VALID_ASR_ENGINE_TYPES = set(ASR_ENGINE_CONFIG)
 
 
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    merged = base.copy()
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _load_capability_overrides() -> dict[str, Any]:
+    """读取用户自定义 ASR 能力覆盖.
+
+    支持:
+    - ASR_CAPABILITIES_JSON='{"qwen3": {"capabilities": {"word_timestamps": false}}}'
+    - ASR_CAPABILITIES_FILE='./config/asr_capabilities.json'
+    """
+    raw = os.getenv("ASR_CAPABILITIES_JSON", "").strip()
+    file_path = os.getenv("ASR_CAPABILITIES_FILE", "").strip()
+    if not raw and file_path:
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                raw = f.read()
+        except OSError as e:
+            logger.warning(f"[ASR] 读取 ASR_CAPABILITIES_FILE 失败: {e}")
+            return {}
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        logger.warning(f"[ASR] ASR capabilities JSON 无效: {e}")
+        return {}
+    if not isinstance(data, dict):
+        logger.warning("[ASR] ASR capabilities override 必须是 object")
+        return {}
+    return data
+
+
+def _engine_info_with_overrides(engine_type: str) -> dict[str, Any]:
+    info = ASR_ENGINE_CONFIG.get(engine_type, ASR_ENGINE_CONFIG["qwen3"]).copy()
+    overrides = _load_capability_overrides()
+    override = overrides.get(engine_type) or overrides.get(_normalize_engine_type(engine_type))
+    if isinstance(override, dict):
+        info = _deep_merge(info, override)
+        info["customized"] = True
+    else:
+        info["customized"] = False
+    return info
+
+
 def _dependency_status(engine_type: str) -> dict[str, Any]:
     """检查 ASR 引擎运行时依赖是否可用."""
     engine_type = _normalize_engine_type(engine_type)
-    info = ASR_ENGINE_CONFIG.get(engine_type, {})
+    info = _engine_info_with_overrides(engine_type)
     dep = info.get("optional_dependency")
     if not dep:
         return {"available": True}
@@ -151,17 +248,27 @@ def get_asr_engine_info(engine_type: str | None = None) -> dict[str, Any]:
     if engine_type is None:
         engine_type = get_asr_manager().current_type
     engine_type = _normalize_engine_type(engine_type)
-    info = ASR_ENGINE_CONFIG.get(engine_type, ASR_ENGINE_CONFIG["qwen3"]).copy()
+    info = _engine_info_with_overrides(engine_type)
     info["type"] = engine_type
+    if engine_type == "qwen3":
+        try:
+            from app.config import config
+            info["word_timestamps_enabled"] = bool(config.audio.asr_word_timestamps)
+        except Exception:
+            info["word_timestamps_enabled"] = False
+    else:
+        info["word_timestamps_enabled"] = False
     info.update(_dependency_status(engine_type))
     return info
 
 
 def get_all_asr_engines() -> dict[str, Any]:
-    engines = {
-        key: {**value, "type": key, **_dependency_status(key)}
-        for key, value in ASR_ENGINE_CONFIG.items()
-    }
+    engines = {}
+    for key in ASR_ENGINE_CONFIG:
+        info = _engine_info_with_overrides(key)
+        info["type"] = key
+        info.update(_dependency_status(key))
+        engines[key] = info
     return {
         "current": get_asr_manager().current_type,
         "engines": engines,

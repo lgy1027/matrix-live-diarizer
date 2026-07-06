@@ -7,6 +7,7 @@ import { llmSummarize, llmActionItems, llmMinutes } from '../api/llm'
 import { useDialog } from '../composables/useDialog'
 import { spkColor } from '../utils/spk'
 import { fmtSec, fmtDate, fmtClock } from '../utils/format'
+import EmText from '../components/EmText.vue'
 
 const { t } = useI18n()
 const lib = useLibraryStore()
@@ -96,7 +97,7 @@ onMounted(() => {
   <section class="lib-wrap">
     <header class="lib-head">
       <div class="lib-titles">
-        <h1 class="page-title" v-html="t('view.library.title')" />
+        <h1 class="page-title"><EmText :text="t('view.library.title')" /></h1>
         <p class="page-sub">{{ t('view.library.sub') }}</p>
       </div>
       <div class="lib-stats">

@@ -20,6 +20,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+ENROLL_MAX_FILE_SIZE: int = 50 * 1024 * 1024
+ENROLL_UPLOAD_CHUNK_SIZE: int = 1024 * 1024
+
 # speaker_id 路径参数验证
 SPEAKER_ID_PATH = Path(
     ...,
@@ -441,16 +444,34 @@ async def enroll_speaker(
     if ext not in ALLOWED:
         raise HTTPException(status_code=400, detail=f"不支持的文件类型: {ext}")
 
-    content = await file.read()
-    if len(content) == 0:
-        raise HTTPException(status_code=400, detail="文件为空")
-    if len(content) > 500 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="文件超过 500MB")
-
-    # 临时保存(用完即删)
+    total_written = 0
+    exceeded_limit = False
     with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
-        tmp.write(content)
         tmp_path = tmp.name
+        while True:
+            chunk = await file.read(ENROLL_UPLOAD_CHUNK_SIZE)
+            if not chunk:
+                break
+            total_written += len(chunk)
+            if total_written > ENROLL_MAX_FILE_SIZE:
+                exceeded_limit = True
+                break
+            tmp.write(chunk)
+    if exceeded_limit:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise HTTPException(
+            status_code=400,
+            detail=f"文件超过 {ENROLL_MAX_FILE_SIZE // (1024 * 1024)}MB,请上传 1-30 秒声纹样本",
+        )
+    if total_written == 0:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise HTTPException(status_code=400, detail="文件为空")
 
     try:
         audio, sr = librosa.load(tmp_path, sr=16000)

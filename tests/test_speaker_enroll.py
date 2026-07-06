@@ -184,6 +184,21 @@ def test_enroll_endpoint_rejects_empty_file(monkeypatch):
     assert resp.status_code == 400
 
 
+def test_enroll_endpoint_rejects_oversized_file_while_streaming(monkeypatch):
+    """enroll 上传应边读边限制大小,而不是整文件读入内存后再判断."""
+    import app.api.speakers as speakers_mod
+
+    client = _make_client(monkeypatch)
+    monkeypatch.setattr(speakers_mod, "ENROLL_MAX_FILE_SIZE", 100)
+    monkeypatch.setattr(speakers_mod, "ENROLL_UPLOAD_CHUNK_SIZE", 32)
+    resp = client.post(
+        "/v1/speakers/enroll?speaker_id=Spk_large",
+        files={"file": ("large.wav", b"x" * 200, "audio/wav")},
+    )
+    assert resp.status_code == 400
+    assert "超过" in resp.json()["detail"]
+
+
 def test_enroll_endpoint_requires_speaker_id(monkeypatch):
     """缺 speaker_id query param 应 422"""
     client = _make_client(monkeypatch)

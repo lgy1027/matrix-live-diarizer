@@ -23,7 +23,7 @@ from app.config import config
 from app.constants import FILE_UPLOAD_SESSION
 from app.schemas import UploadResponse, ModelsResponse, SegmentResult
 from app.services.transcribe import transcribe_file
-from engine.speaker.speaker_factory import get_speaker_engine
+from engine.speaker.speaker_factory import get_engine_info, get_speaker_engine
 
 logger = logging.getLogger("Matrix_Core")
 
@@ -47,6 +47,25 @@ def _current_asr_display_name() -> str:
         return str(get_asr_engine_info().get("name") or "ASR")
     except Exception:
         return "ASR"
+
+
+def _current_asr_type() -> str:
+    try:
+        from engine.asr import get_asr_engine_info
+        return str(get_asr_engine_info().get("type") or config.audio.asr_engine)
+    except Exception:
+        return config.audio.asr_engine
+
+
+def _current_speaker_type() -> str:
+    try:
+        return str(get_engine_info().get("type") or config.speaker.engine_type)
+    except Exception:
+        return config.speaker.engine_type
+
+
+def _diarization_source(enable_diarization: bool, source: str | None) -> str | None:
+    return source if enable_diarization else None
 
 
 def init_engines(asr, spk, lock, base_dir: str, repo=None):
@@ -117,7 +136,8 @@ def merge_text_with_overlap(prev_text: str, new_text: str, overlap_chars: int = 
 async def process_audio_chunk_with_diarization(
     chunk: np.ndarray,
     start_time: float,
-    end_time: float
+    end_time: float,
+    original_filename: str | None = None,
 ) -> SegmentResult:
     """分段处理：ASR + 说话人识别"""
     audio_duration = end_time - start_time
@@ -313,6 +333,9 @@ async def upload_audio(
                     title=file.filename,
                     original_filename=file.filename,
                     duration_sec=duration,
+                    asr_engine=_current_asr_type(),
+                    speaker_engine=_current_speaker_type() if enable_diarization else None,
+                    diarization_source=_diarization_source(enable_diarization, "camplus"),
                 )
                 # 字级时间戳:把 words 序列化为 words_json 存到 DB
                 import json as _json
@@ -326,6 +349,9 @@ async def upload_audio(
                     end_time=duration,
                     speaker_id=spk_id if enable_diarization else None,
                     words_json=words_json,
+                    asr_engine=_current_asr_type(),
+                    speaker_engine=_current_speaker_type() if enable_diarization else None,
+                    diarization_source=_diarization_source(enable_diarization, "camplus"),
                 )
                 session_id = sid
             else:
@@ -367,7 +393,12 @@ async def upload_audio(
         
         for i, (chunk, start_time, end_time) in enumerate(chunks):
             async with inference_lock:
-                result = await process_func(chunk, start_time, end_time)
+                if enable_diarization:
+                    result = await process_audio_chunk_with_diarization(
+                        chunk, start_time, end_time, file.filename
+                    )
+                else:
+                    result = await process_audio_chunk_asr_only(chunk, start_time, end_time)
             
             segments.append(result)
             if result.speaker:
@@ -455,6 +486,9 @@ async def upload_audio(
                 title=file.filename,
                 original_filename=file.filename,
                 duration_sec=duration,
+                asr_engine=_current_asr_type(),
+                speaker_engine=_current_speaker_type() if enable_diarization else None,
+                diarization_source=_diarization_source(enable_diarization, diarization_source),
             )
             for i, seg in enumerate(segments):
                 if not seg.text:
@@ -466,6 +500,9 @@ async def upload_audio(
                     start_time=seg.start_time,
                     end_time=seg.end_time,
                     speaker_id=seg.speaker if enable_diarization else None,
+                    asr_engine=_current_asr_type(),
+                    speaker_engine=_current_speaker_type() if enable_diarization else None,
+                    diarization_source=_diarization_source(enable_diarization, diarization_source),
                 )
             session_id = sid
         else:

@@ -29,6 +29,20 @@ export interface AsrInfo {
   install_hint_en?: string
   python?: string
   type?: string
+  word_timestamps_enabled?: boolean
+  customized?: boolean
+  capabilities?: {
+    transcription?: boolean
+    upload?: boolean
+    realtime_segmented?: boolean
+    true_streaming?: boolean | string
+    word_timestamps?: boolean
+    speaker_diarization?: boolean
+    recommended_for?: string[]
+    notes?: string
+    notes_en?: string
+    [key: string]: unknown
+  }
 }
 
 export interface ModelsInfo {

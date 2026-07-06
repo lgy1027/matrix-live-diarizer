@@ -1,61 +1,61 @@
 # Web 框架
-fastapi
-uvicorn>=0.23.0
-python-multipart>=0.0.6
+fastapi>=0.115.0,<1.0.0
+uvicorn>=0.23.0,<1.0.0
+python-multipart>=0.0.9,<1.0.0
 
 # 深度学习
 # 锁住 torch/torchvision/torchaudio 配套版本 — 不同步会 RuntimeError
 # (torchvision::nms does not exist 等) — 必须三方一致
-torch>=2.0.0
-torchvision
-torchaudio
+torch>=2.3.0,<3.0.0
+torchvision>=0.18.0,<1.0.0
+torchaudio>=2.3.0,<3.0.0
 transformers>=4.30.0,<5
 
 # transformers 间接依赖(隐式,不写会报 import error)
-huggingface-hub
-tokenizers
-safetensors
-accelerate
-packaging
-pyyaml
+huggingface-hub>=0.23.0,<1.0.0
+tokenizers>=0.19.0,<1.0.0
+safetensors>=0.4.0,<1.0.0
+accelerate>=0.30.0,<2.0.0
+packaging>=23.0,<26.0
+pyyaml>=6.0.0,<7.0.0
 
 # ASR 模型
-modelscope>=1.10.0
-qwen-asr>=0.0.6
+modelscope>=1.10.0,<2.0.0
+qwen-asr>=0.0.6,<0.1.0
 
 # 新增 ASR 引擎依赖:
 #   ASR_ENGINE=sensevoice / paraformer / paraformer_streaming
 # 注意: FunASR 当前在 Windows/Python 3.13 会因 editdistance 无预编译 wheel 而安装失败。
 #       请使用 Python 3.10-3.12 环境安装本依赖后启用这些 ASR。
-funasr>=1.2.0; python_version >= "3.10" and python_version < "3.13"
+funasr>=1.2.0,<2.0.0; python_version >= "3.10" and python_version < "3.13"
 
 # 声纹向量库
-chromadb>=0.4.0
+chromadb>=0.4.0,<1.0.0
 
 # 音频处理
-librosa>=0.10.0
-soundfile>=0.12.0
-numpy>=1.24.0
-scipy>=1.10.0
+librosa>=0.10.0,<1.0.0
+soundfile>=0.12.0,<1.0.0
+numpy>=1.24.0,<3.0.0
+scipy>=1.10.0,<2.0.0
 
 # 数据模型
-pydantic>=2.0.0
+pydantic>=2.0.0,<3.0.0
 
 # 鉴权
-PyJWT>=2.8.0
-werkzeug>=3.0.0
+PyJWT>=2.8.0,<3.0.0
+werkzeug>=3.0.0,<4.0.0
 
 # 配置管理
-python-dotenv>=1.0.0
+python-dotenv>=1.0.0,<2.0.0
 
 # modelscope 隐式依赖
-setuptools<81              # pkg_resources 在 81+ 版本移除
-addict
-simplejson
-sortedcontainers
+setuptools>=68.0.0,<81     # pkg_resources 在 81+ 版本移除
+addict>=2.4.0,<3.0.0
+simplejson>=3.19.0,<4.0.0
+sortedcontainers>=2.4.0,<3.0.0
 
 # soundfile 隐式依赖
-cffi
+cffi>=1.16.0,<2.0.0
 
 # 摘要 (TextRank 兜底) — LLM 不可用时本地提取
 summa==1.2.0
@@ -66,4 +66,4 @@ summa==1.2.0
 #   1. brew install ffmpeg (macOS) 或 apt install ffmpeg (Linux)
 #   2. HF_TOKEN 环境变量 + https://huggingface.co/pyannote/segmentation-3.0 接受用户条款
 # 详细: docs/SPEAKER_DIARIZATION.md
-pyannote.audio>=3.1.0
+pyannote.audio>=3.1.0,<4.0.0

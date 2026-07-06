@@ -4,14 +4,20 @@
 
 **本地优先的会议语音 AI · 默认 0 字节外传**
 
-3-10 人小会议 / 个人实时字幕。转写 + 说话人识别 + 摘要纪要，跑在你自己的机器上。
+面向个人实时字幕、单人/双人录音转写，以及小团队会议录音的本地 AI 处理工具。
+实时模式适合低延迟字幕和参考性说话人标签；多人会议高准确度归档建议上传完整录音并启用离线 diarization。
 **音频和转写默认不上云**，ASR / 声纹 / LLM 都可以在设置页按需切换。
+
+> 产品边界：**实时模式**主打低延迟字幕和参考性说话人标签；**上传离线模式**可在完整音频上做更高准确度的 pyannote diarization。单麦克风实时多人识别只能作为辅助参考，不等同于云会议产品的离线后处理结果。
 
 [![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![ModelScope](https://img.shields.io/badge/ModelScope-Qwen3--ASR-orange.svg)](https://modelscope.cn/models/Qwen/Qwen3-ASR-0.6B)
+[![Status](https://img.shields.io/badge/status-v0.3.0--beta-orange.svg)](#)
 
 **中文** | [English](README.en.md)
+
+> 当前版本为 **v0.3.0-beta**：适合本地试用、个人工作流和小团队内网部署验证；不建议直接作为公网生产服务裸露部署。
 
 </div>
 
@@ -36,7 +42,7 @@
 
 ## 目标用户
 
-- 🏢 **3-10 人小团队** — 周会 / 产品评审 / 客户沟通，自动出纪要
+- 🏢 **小团队会议录音** — 周会 / 产品评审 / 客户沟通，上传后自动转写和整理纪要
 - 👤 **个人开发者** — 直播 / 课程 / 播客的实时字幕
 - 🔒 **律师 / 医生 / 记者** — 录音受法规或行业约束，不能上云
 - 🏠 **局域网 AI 用户** — 已有 vLLM / Ollama，想把转写接上
@@ -143,9 +149,9 @@ VITE_BACKEND_URL=http://127.0.0.1:8888
 ## ✨ 它能做什么
 
 - 🎤 **实时转写** — 浏览器录音，WebSocket 流式，说话即出文字
-- 📁 **离线处理** — 上传录音文件，自动分段 + 说话人识别，导出 SRT / VTT / MD / JSON
+- 📁 **离线处理** — 上传录音文件，自动分段 + 可选 pyannote 离线说话人分离，导出 SRT / VTT / MD / JSON
 - 🧠 **多 ASR 引擎** — Qwen3-ASR / SenseVoice / Paraformer / Paraformer Streaming，可在设置页动态切换
-- 👥 **说话人识别** — 手动注册声纹，会议里自动标"张三说的"
+- 👥 **说话人识别** — 独立声纹/diarization 流水线，不是 ASR 模型自带能力；实时多人标签仅作参考
 - 🔁 **声纹引擎切换** — CamPlus / ERes2NetV2 / Wespeaker，设置页确认后热切换
 - 🤖 **可选 LLM** — 摘要 / 行动项 / 会议纪要；设置页支持 Ollama / LM Studio / LocalAI / vLLM / OpenAI-compatible provider
 - 🛡️ **离线兜底** — LLM 未配时自动用 TextRank 提取本地摘要,不出错也不空白
@@ -191,12 +197,13 @@ VITE_BACKEND_URL=http://127.0.0.1:8888
 | **2-3 人会议**（安静环境/每人说话 ≥ 2s） | **60-80%** | 实时 (WebSocket) | 短段 cosine 波动大,需手动 enroll 提高准确度 |
 | **3-10 人会议**（单麦克风 + 多人重叠） | **40-60%** best-effort | 实时 仅作参考 | 单麦克风物理限制,**不建议生产级依赖** |
 | **3-10 人会议**（多麦克风 enroll） | **85%+** | 实时 + 强制 enroll | 每人独立麦 + 主动注册声纹 |
-| **3-10 人会议**（**离线高准确度**） | **80%+ DER** | 上传文件 + `?diarization=pyannote` | 集成 pyannote 3.1,业界 SOTA |
+| **3-10 人会议**（**离线高准确度**） | **80%+ DER** | 上传文件 + `?diarization=pyannote` | 集成 pyannote 3.1,适合归档前整理 |
 
 **核心限制**：
 - 单麦克风无法做声源分离（beamforming 需要硬件麦克风阵列）
 - 实时模式 ASR 必须 0.5-5s 出结果,没有长上下文可聚类
 - Qwen3-ASR 假设"一段一人",多人重叠直接丢失
+- 说话人识别由 CamPlus/ERes2NetV2/Wespeaker 或离线 pyannote 完成,不是 ASR 自带功能
 
 **推荐用法**：
 - 想做**多人精确区分**：用多麦克风 OR 上传录音跑离线 pyannote
@@ -212,6 +219,7 @@ VITE_BACKEND_URL=http://127.0.0.1:8888
 | **[docs/API.md](docs/API.md)** | 所有 API 端点（WebSocket/上传/说话人/引擎）+ 环境变量 |
 | **[docs/LLM_SETUP.md](docs/LLM_SETUP.md)** | LLM 配置：本地 Ollama / 公网 OpenAI / 局域网 vLLM |
 | **[docs/PRIVACY.md](docs/PRIVACY.md)** | 隐私保证：默认本地 + 可选远程 + 4 道护栏 |
+| **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)** | 启动、模型、局域网、字级时间戳等常见问题 |
 
 ## 📱 移动端使用
 
@@ -230,7 +238,22 @@ VITE_BACKEND_URL=http://127.0.0.1:8888
 | **Paraformer** | `paraformer-zh` | `funasr` | 中文会议/访谈离线转写 |
 | **Paraformer Streaming** | `paraformer-zh-streaming` | `funasr` | 低延迟实时字幕 |
 
+### 能力矩阵 — 以后端 `/v1/models` 为准
+
+设置页不会硬编码 ASR 能力,而是统一读取后端 `/v1/models` 返回的 `asr_engines`。如果你的部署关闭了某个能力,或者自定义了某个模型适配器,可以通过 `ASR_CAPABILITIES_JSON` 或 `ASR_CAPABILITIES_FILE` 覆盖后端返回的能力说明。
+
+默认分工如下:
+- ASR 负责语音转文字,不负责说话人识别。
+- Speaker Engine 负责实时参考性声纹标签。
+- pyannote 负责上传文件后的离线高准确度 diarization。
+- Paraformer Streaming 当前只接入为服务端分段刷新,还不是 token-level 真流式逐 token 输出。
+
 设置页可以动态切换 ASR。若目标模型或依赖尚未就绪,后端会返回明确提示;模型下载/加载完成前旧 ASR 会继续工作。
+
+能力差异提示:
+- **word timestamps / 字级时间戳** 仅 Qwen3-ASR + `ASR_WORD_TIMESTAMPS=true` 路径支持;FunASR 系列当前按段落结果展示。
+- **Paraformer Streaming** 适合低延迟字幕,但当前接入不是 token-level 真流式逐 token 输出,仍会按服务端语音段刷新。
+- **说话人识别** 与 ASR 引擎解耦:切换 ASR 不会让模型本身具备 diarization,实时声纹由 Speaker Engine 完成,上传高准确度 diarization 走 pyannote。
 
 > Windows + Python 3.13 下 `funasr` 可能因为 `editdistance` wheel 缺失安装失败。建议使用 Python 3.10-3.12 或 Docker 环境启用 FunASR 系列引擎。
 

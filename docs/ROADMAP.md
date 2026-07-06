@@ -33,26 +33,26 @@
 
 ## 优先级 1 — 快速赢（1-2 天/项，ROI 极高）
 
-### 1.1 WebSocket 自动重连
+### 1.1 WebSocket 自动重连 ✅ 已完成
 
-**痛点**：当前 `web/index.html:870` `ws.onclose` 只把 `state.wsState` 置为 "idle"，**网络抖动 / 临时断网后用户必须手动刷新页面**，正在录的会话也丢上下文。
+**状态**：Vue 版前端已在 `web/src/ws/liveStream.ts` 实现指数退避重连。网络抖动时会尝试 1/2/4/8/16 秒重连，鉴权失败则进入 `auth-failed`。
 
-**实现**：
+**当前实现**：
 ```js
-// web/index.html ws.onclose 替换
-ws.onclose = () => {
-  if (state.rec && reconnectAttempts < 5) {
-    setTimeout(() => connectWs(), 1000 * Math.pow(2, reconnectAttempts++));
-    toast(t("live.reconnecting"));
-    return;
-  }
-  state.wsState = "idle";
-};
+// web/src/ws/liveStream.ts
+if (this.attempts >= 5) {
+  this.opts.onState('reconnecting')
+  return
+}
+const delay = 1000 * Math.pow(2, this.attempts)
+this.attempts++
+this.opts.onState('reconnecting')
+this.reconnectTimer = setTimeout(() => this.openSocket(), delay)
 ```
 
 **影响**：100% 真实用户，影响录制连续性。
 
-**估时**：0.5 天（含测试 + 视觉提示）
+**完成说明**：已由 Vue WebSocket 客户端接管；后续只需补充更明显的 UI 提示。
 
 ---
 

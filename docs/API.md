@@ -161,6 +161,31 @@ curl -X PUT http://127.0.0.1:8000/v1/engine \
 curl http://127.0.0.1:8000/v1/models
 ```
 
+响应中的 `asr_engines.engines[*].capabilities` 是前端设置页展示模型能力的唯一来源。部署方可通过 `ASR_CAPABILITIES_JSON` 或 `ASR_CAPABILITIES_FILE` 覆盖某个 ASR 的能力说明,例如:
+
+```json
+{
+  "qwen3": {
+    "capabilities": {
+      "word_timestamps": false
+    },
+    "notes": "本部署关闭字级时间戳"
+  }
+}
+```
+
+常用 capability 字段:
+
+| 字段 | 含义 |
+|------|------|
+| `transcription` | 是否支持语音转文字 |
+| `upload` | 是否支持上传文件转写 |
+| `realtime_segmented` | 是否支持 WebSocket 分段实时转写 |
+| `true_streaming` | 是否支持 token-level 真流式输出;可为 `false` 或 `"adapter_not_yet"` |
+| `word_timestamps` | 是否支持字级时间戳 |
+| `speaker_diarization` | ASR 本身是否提供说话人识别。本项目默认由 Speaker Engine / pyannote 提供 |
+| `notes` / `notes_en` | 中文 / 英文补充说明 |
+
 ## 5. 健康检查
 
 ```bash
@@ -187,6 +212,19 @@ curl http://127.0.0.1:8000/ready
 | `/v1/llm/action-items` | POST | 提取行动项 |
 | `/v1/llm/minutes` | POST | 生成会议纪要 |
 | `/v1/llm/prompts` | GET / PUT | prompt 模板（**PUT 限本机访问**）|
+
+`/v1/llm/status` 是公开探针端点,但未鉴权时只返回极简状态:
+
+```json
+{
+  "enabled": true,
+  "available": false,
+  "fallback": "extractive-textrank",
+  "auth_required": true
+}
+```
+
+只有带有效 Bearer token 且用户已完成默认密码修改时,才返回完整 endpoint / model / provider 等配置并执行真实 LLM 探活。
 
 ## 7. 历史与导出（v0.2+）
 
@@ -299,6 +337,7 @@ PUT /v1/llm/settings
 | port | `8000` | `PORT` | 监听端口 |
 | workers | `1` | `WORKERS` | 工作进程数（MPS 必须 1）|
 | debug | `false` | `DEBUG` | 调试模式 |
+| deployment_mode | `local` | `DEPLOYMENT_MODE` | `local` / `lan` / `public`; `lan/public` 强制要求 `JWT_SECRET` 和非 `*` CORS |
 
 ### 音频处理
 
@@ -334,6 +373,8 @@ PUT /v1/llm/settings
 | speaker_engine | `campplus` | `SPEAKER_ENGINE` | 启动时默认引擎 |
 | asr_device | `auto` | `ASR_DEVICE` | auto / cpu / mps / cuda |
 | asr_load_timeout_sec | `90` | `ASR_LOAD_TIMEOUT_SEC` | 模型加载超时（防 MPS 死锁）|
+| asr_capabilities_json | 空 | `ASR_CAPABILITIES_JSON` | 覆盖 `/v1/models` 返回的 ASR 能力元数据 |
+| asr_capabilities_file | 空 | `ASR_CAPABILITIES_FILE` | 从 JSON 文件读取 ASR 能力元数据覆盖 |
 
 ### 存储
 

@@ -24,6 +24,11 @@ WHITELIST_PATHS = (
     "/v1/llm/status",
 )
 
+PASSWORD_CHANGE_ALLOWED_PATHS = (
+    "/v1/auth/me",
+    "/v1/auth/change-password",
+)
+
 
 class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
@@ -91,6 +96,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 return JSONResponse(
                     status_code=401,
                     content={"detail": "密码已修改, 请重新登录"},
+                )
+            if user_row.get("must_change_password") and path not in PASSWORD_CHANGE_ALLOWED_PATHS:
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": "首次登录必须先修改默认密码"},
                 )
         except HTTPException:
             raise

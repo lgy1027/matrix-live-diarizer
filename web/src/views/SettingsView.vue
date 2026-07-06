@@ -6,6 +6,7 @@ import { getLlmSettings, getLlmStatus, saveLlmSettings, type LlmSettings } from 
 type LlmResp = Awaited<ReturnType<typeof getLlmStatus>>
 import { getStorageStatus } from '../api/storage'
 import { useDialog } from '../composables/useDialog'
+import EmText from '../components/EmText.vue'
 
 const { t, locale } = useI18n()
 const dialog = useDialog()
@@ -52,6 +53,31 @@ function asrUnavailableMessage(info?: AsrInfo) {
   if (!info) return ''
   if (isEnglish.value) return info.install_hint_en || info.reason || asrDescription(info)
   return info.install_hint || asrDescription(info)
+}
+
+function yesNo(v: unknown) {
+  return v ? (t('common.yes') || 'Yes') : (t('common.no') || 'No')
+}
+
+function asrCapabilityNote(info?: AsrInfo) {
+  const caps = info?.capabilities || {}
+  const note = isEnglish.value ? (caps.notes_en || caps.notes) : (caps.notes || caps.notes_en)
+  const parts = [
+    `${t('settings.asr.cap.upload') || 'Upload'}: ${yesNo(caps.upload)}`,
+    `${t('settings.asr.cap.realtime') || 'Realtime'}: ${yesNo(caps.realtime_segmented)}`,
+    `${t('settings.asr.cap.words') || 'Word timestamps'}: ${yesNo(caps.word_timestamps)}`,
+    `${t('settings.asr.cap.speaker') || 'Speaker ID'}: ${yesNo(caps.speaker_diarization)}`,
+  ]
+  if (caps.true_streaming === 'adapter_not_yet') {
+    parts.push(t('settings.asr.cap.streamingAdapter') || 'Token streaming: adapter not yet')
+  } else {
+    parts.push(`${t('settings.asr.cap.tokenStreaming') || 'Token streaming'}: ${yesNo(caps.true_streaming)}`)
+  }
+  if (info?.customized) {
+    parts.push(t('settings.asr.cap.customized') || 'Customized')
+  }
+  if (note) parts.push(String(note))
+  return parts.join(' · ')
 }
 
 function engineSpeed(info?: EngineInfo) {
@@ -229,7 +255,7 @@ onMounted(load)
 <template>
   <section class="set-wrap">
     <header class="set-head">
-      <h1 class="page-title" v-html="t('view.settings.title')" />
+      <h1 class="page-title"><EmText :text="t('view.settings.title')" /></h1>
       <p class="page-sub">{{ t('view.settings.sub') || '声纹引擎 / 本地 LLM / 历史存储' }}</p>
     </header>
     <div class="set-grid">
@@ -264,6 +290,7 @@ onMounted(load)
               <span v-if="!cachedAsr.has(key)">{{ t('settings.asr.notCached') || '未加载' }}</span>
             </div>
             <div class="m muted">{{ asrEngines[key]?.available === false ? asrUnavailableMessage(asrEngines[key]) : asrDescription(asrEngines[key]) }}</div>
+            <div class="m capability">{{ asrCapabilityNote(asrEngines[key]) }}</div>
           </div>
           <span v-if="key === currentAsr" class="pill">{{ t('settings.asr.current') || '当前' }}</span>
           <span v-else-if="key === switchingAsr" class="pill">{{ t('settings.asr.switchingShort') || '切换中' }}</span>
@@ -403,7 +430,7 @@ onMounted(load)
 
     <!-- 历史存储 -->
     <div class="set-row">
-      <div class="l" v-html="t('view.settings.storage')" />
+      <div class="l"><EmText :text="t('view.settings.storage')" /></div>
       <div class="d">{{ t('settings.storage.desc') || '所有转写会话是否持久化到本地 SQLite,可在历史会话(Library)页查看。重启服务后生效。' }}</div>
       <div class="storage-state">
         <span v-if="historyEnabled === true" class="tag green">● {{ t('settings.storage.on') || '已启用' }}</span>
@@ -419,7 +446,7 @@ onMounted(load)
 
     <!-- About -->
     <div class="set-row">
-      <div class="l" v-html="t('view.settings.about')" />
+      <div class="l"><EmText :text="t('view.settings.about')" /></div>
       <div class="about">
         <span>{{ t('settings.about.text') }}</span><br />
         <span>

@@ -73,6 +73,16 @@
 
 ## 4. ⚠️ 生产部署前必检
 
+建议先明确部署模式:
+
+| `DEPLOYMENT_MODE` | 用途 | 启动校验 |
+|---|---|---|
+| `local` | 本机试用/开发,默认值 | 不强制 `JWT_SECRET` / CORS |
+| `lan` | 局域网多人访问 | 必须设置 `JWT_SECRET`,且 `ALLOWED_ORIGINS` 不能是 `*` |
+| `public` | 公网或半公网访问 | 同 `lan`,并在日志中提示必须放在 HTTPS/反向代理/防火墙之后 |
+
+项目不建议公网裸露部署。`DEPLOYMENT_MODE=public` 只表示"我知道这是公网环境,请启用更严格启动校验",不是生产安全的一键开关。
+
 | 项 | 风险 | 必须改 |
 |---|---|---|
 | **`JWT_SECRET` 环境变量** | 不设的话,每次启动用随机密钥,**所有用户 token 立即失效** | 生产必须设一个长随机值(32+ 字节) |
@@ -85,11 +95,12 @@
 ### 配置示例 `.env`
 ```bash
 # 必设
+DEPLOYMENT_MODE=lan
 JWT_SECRET=$(openssl rand -hex 32)
 
 # 推荐
 TOKEN_TTL_HOURS=8
-ALLOWED_ORIGINS=["https://matrix.example.com"]
+ALLOWED_ORIGINS=https://matrix.example.com
 ```
 
 ---
@@ -123,6 +134,6 @@ print(generate_password_hash("your-new-password", method="pbkdf2:sha256", salt_l
 
 ## 6. 测试模式 bypass
 
-`AuthMiddleware` 在 `TEST_AUTH_BYPASS=1` 时跳过鉴权(给 53 个现有 client fixture 用,避免改一堆测试)。
+`AuthMiddleware` 在 `TEST_AUTH_BYPASS=1` 时跳过鉴权(给测试 fixture 用,避免测试用例都先登录)。
 
-生产环境**不应**设这个环境变量 — `app/__init__.py` 创建 app 时会加载,生产部署保证 `TEST_AUTH_BYPASS` 不在 env 中。
+生产环境**不应**设这个环境变量。`DEPLOYMENT_MODE=lan/public` 时服务会拒绝带 `TEST_AUTH_BYPASS=1` 启动;本地开发如需使用,请保持 `DEPLOYMENT_MODE=local`。

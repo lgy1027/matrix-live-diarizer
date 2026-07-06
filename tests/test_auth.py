@@ -70,6 +70,25 @@ def _make_client(monkeypatch):
     return TestClient(app_mod.create_app())
 
 
+def test_auth_bypass_rejected_in_lan_mode_even_when_debug(monkeypatch, tmp_path):
+    """LAN/public 部署声明后,TEST_AUTH_BYPASS 不允许绕过鉴权."""
+    import importlib
+
+    monkeypatch.setenv("STORAGE_DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setenv("JWT_SECRET", "test-secret-for-unit-tests")
+    monkeypatch.setenv("DEPLOYMENT_MODE", "lan")
+    monkeypatch.setenv("DEBUG", "true")
+    monkeypatch.setenv("ALLOWED_ORIGINS", "http://127.0.0.1:8000")
+    monkeypatch.setenv("TEST_AUTH_BYPASS", "1")
+    cfg_mod = importlib.import_module("app.config")
+    importlib.reload(cfg_mod)
+    app_mod = importlib.import_module("app")
+    importlib.reload(app_mod)
+
+    with pytest.raises(RuntimeError, match="TEST_AUTH_BYPASS"):
+        app_mod.create_app()
+
+
 # ========== 默认 admin 初始化 ==========
 
 def test_default_admin_created_on_init(monkeypatch, tmp_path):
@@ -244,12 +263,27 @@ def test_protected_endpoint_invalid_token_returns_401(monkeypatch):
     assert r.status_code == 401
 
 
-def test_protected_endpoint_valid_token_returns_200(monkeypatch):
-    """有效 token 返 200"""
+def test_default_password_token_requires_password_change(monkeypatch):
+    """默认 admin/admin 登录后必须先改密,不能直接访问业务端点"""
     client = _make_client(monkeypatch)
-    # 先登录拿 token
     lr = client.post("/v1/auth/login", json={"username": "admin", "password": "admin"})
     token = lr.json()["token"]
+    r = client.get("/v1/speakers", headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 403
+    assert "修改默认密码" in r.json()["detail"]
+
+
+def test_protected_endpoint_valid_token_returns_200_after_password_change(monkeypatch):
+    """改密后的有效 token 可访问业务端点"""
+    client = _make_client(monkeypatch)
+    lr = client.post("/v1/auth/login", json={"username": "admin", "password": "admin"})
+    token = lr.json()["token"]
+    changed = client.post(
+        "/v1/auth/change-password",
+        json={"old_password": "admin", "new_password": "newsecret123"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    token = changed.json()["token"]
     r = client.get("/v1/speakers", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 200
 

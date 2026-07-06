@@ -17,14 +17,28 @@ class TranscriptRepository:
         client_id: Optional[str] = None,
         original_filename: Optional[str] = None,
         duration_sec: Optional[float] = None,
+        asr_engine: Optional[str] = None,
+        speaker_engine: Optional[str] = None,
+        diarization_source: Optional[str] = None,
     ) -> str:
         sid = str(uuid.uuid4())
         with self.db.connect() as conn:
             conn.execute(
                 """INSERT INTO sessions
-                   (id, source, title, client_id, original_filename, duration_sec)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (sid, source, title, client_id, original_filename, duration_sec),
+                   (id, source, title, client_id, original_filename, duration_sec,
+                    asr_engine, speaker_engine, diarization_source)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    sid,
+                    source,
+                    title,
+                    client_id,
+                    original_filename,
+                    duration_sec,
+                    asr_engine,
+                    speaker_engine,
+                    diarization_source,
+                ),
             )
             conn.commit()
         return sid
@@ -97,13 +111,29 @@ class TranscriptRepository:
         speaker_id: Optional[str] = None,
         confidence: Optional[float] = None,
         words_json: Optional[str] = None,
+        asr_engine: Optional[str] = None,
+        speaker_engine: Optional[str] = None,
+        diarization_source: Optional[str] = None,
     ) -> int:
         with self.db.connect() as conn:
             cur = conn.execute(
                 """INSERT INTO segments
-                   (session_id, segment_index, speaker_id, text, start_time, end_time, confidence, words_json)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (session_id, segment_index, speaker_id, text, start_time, end_time, confidence, words_json),
+                   (session_id, segment_index, speaker_id, text, start_time, end_time,
+                    confidence, words_json, asr_engine, speaker_engine, diarization_source)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    session_id,
+                    segment_index,
+                    speaker_id,
+                    text,
+                    start_time,
+                    end_time,
+                    confidence,
+                    words_json,
+                    asr_engine,
+                    speaker_engine,
+                    diarization_source,
+                ),
             )
             conn.commit()
         return cur.lastrowid
