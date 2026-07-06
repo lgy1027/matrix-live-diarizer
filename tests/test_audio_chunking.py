@@ -226,6 +226,34 @@ class TestChunkTimeCalculation:
 
 class TestEdgeCases:
     """边界条件测试"""
+
+    def test_reject_zero_chunk_duration(self):
+        """分段时长为 0 会导致非正步长,必须拒绝而不是进入循环"""
+        sample_rate = 16000
+        audio = np.random.randn(sample_rate).astype(np.float32)
+
+        with pytest.raises(Exception) as exc:
+            split_audio_into_chunks(
+                audio, sample_rate,
+                chunk_duration=0.0,
+                overlap_duration=0.0
+            )
+
+        assert getattr(exc.value, "status_code", None) == 400
+
+    def test_reject_overlap_not_smaller_than_chunk(self):
+        """重叠时长大于等于分段时长时步长无效,必须拒绝"""
+        sample_rate = 16000
+        audio = np.random.randn(sample_rate * 2).astype(np.float32)
+
+        with pytest.raises(Exception) as exc:
+            split_audio_into_chunks(
+                audio, sample_rate,
+                chunk_duration=1.0,
+                overlap_duration=1.0
+            )
+
+        assert getattr(exc.value, "status_code", None) == 400
     
     def test_minimum_duration(self):
         """最小有效时长（0.5秒）"""

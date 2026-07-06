@@ -54,11 +54,11 @@ from app import create_app
 
 # ========== helpers ==========
 
-def _make_client():
+def _make_client(upload_chunk_duration: str = "30"):
     """创建 TestClient,DB 走 tmp。**重要**:必须在 patch 之前调用"""
     tmp = tempfile.mkdtemp()
     os.environ["STORAGE_DB_PATH"] = os.path.join(tmp, "test.db")
-    os.environ["UPLOAD_CHUNK_DURATION"] = "30"
+    os.environ["UPLOAD_CHUNK_DURATION"] = upload_chunk_duration
     cfg_mod = importlib.import_module("app.config")
     importlib.reload(cfg_mod)
     app_mod = importlib.import_module("app")
@@ -158,6 +158,41 @@ def test_session_detail_includes_words(monkeypatch, tmp_path):
     assert words[0]["start"] == 0.0
     assert words[3]["text"] == "界"
     assert words[3]["end"] == 2.0
+
+
+def test_long_upload_session_detail_includes_words(monkeypatch, tmp_path):
+    """长音频分段路径也要把 words 写入 SQLite,避免历史/导出丢字级时间戳."""
+    client = _make_client(upload_chunk_duration="1")
+    _setup_word_level_mocks(monkeypatch, with_words=True)
+
+    import app.api.upload as upload_mod
+    monkeypatch.setattr(upload_mod.config.storage, "history_enabled", True)
+    monkeypatch.setattr(upload_mod.config.audio, "upload_chunk_duration", 0)
+    monkeypatch.setattr(upload_mod.config.audio, "upload_overlap_duration", 0.0)
+
+    wav_path = tmp_path / "long.wav"
+    _make_wav(str(wav_path), duration_sec=2.5)
+    chunk = np.ones(16000, dtype=np.float32) * 0.1
+    monkeypatch.setattr(
+        upload_mod,
+        "split_audio_into_chunks",
+        lambda audio, sample_rate, chunk_duration, overlap_duration: [
+            (chunk, 0.0, 1.0),
+            (chunk, 1.0, 2.0),
+        ],
+    )
+
+    sid = client.post(
+        "/v1/upload",
+        files={"file": ("long.wav", open(wav_path, "rb"), "audio/wav")},
+        params={"enable_diarization": "false"},
+    ).json()["session_id"]
+
+    detail = client.get(f"/v1/sessions/{sid}").json()
+    segs = detail["segments"]
+    assert len(segs) >= 2, f"应走长音频分段路径,实际: {segs}"
+    assert all(seg.get("words") for seg in segs), f"长音频 segments.words 缺失: {segs}"
+    assert segs[0]["words"][0]["text"] == "你"
 
 
 def test_srt_export_word_level(monkeypatch, tmp_path):

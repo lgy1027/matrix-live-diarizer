@@ -88,9 +88,23 @@ def split_audio_into_chunks(
     overlap_duration: float
 ) -> List[Tuple[np.ndarray, float, float]]:
     """音频分段，返回 [(chunk, start_time, end_time), ...]"""
+    if sample_rate <= 0:
+        raise HTTPException(status_code=400, detail="采样率配置无效")
+    if chunk_duration <= 0:
+        raise HTTPException(status_code=400, detail="UPLOAD_CHUNK_DURATION 必须大于 0")
+    if overlap_duration < 0:
+        raise HTTPException(status_code=400, detail="UPLOAD_OVERLAP_DURATION 不能为负数")
+
     chunk_samples = int(chunk_duration * sample_rate)
     overlap_samples = int(overlap_duration * sample_rate)
     step_samples = chunk_samples - overlap_samples
+    if chunk_samples <= 0:
+        raise HTTPException(status_code=400, detail="UPLOAD_CHUNK_DURATION 过小")
+    if step_samples <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="UPLOAD_OVERLAP_DURATION 必须小于 UPLOAD_CHUNK_DURATION",
+        )
     
     chunks = []
     start = 0
@@ -481,6 +495,7 @@ async def upload_audio(
 
         # 自动存档（长音频批量）
         if transcript_repo and config.storage.history_enabled:
+            import json as _json
             sid = transcript_repo.create_session(
                 source="upload",
                 title=file.filename,
@@ -493,6 +508,7 @@ async def upload_audio(
             for i, seg in enumerate(segments):
                 if not seg.text:
                     continue
+                words_json = _json.dumps(seg.words, ensure_ascii=False) if seg.words else None
                 transcript_repo.insert_segment(
                     sid,
                     segment_index=i,
@@ -500,6 +516,7 @@ async def upload_audio(
                     start_time=seg.start_time,
                     end_time=seg.end_time,
                     speaker_id=seg.speaker if enable_diarization else None,
+                    words_json=words_json,
                     asr_engine=_current_asr_type(),
                     speaker_engine=_current_speaker_type() if enable_diarization else None,
                     diarization_source=_diarization_source(enable_diarization, diarization_source),

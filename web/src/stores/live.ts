@@ -49,6 +49,17 @@ export const useLiveStore = defineStore('live', () => {
   let timerId: ReturnType<typeof setInterval> | null = null
   let segSeq = 0
 
+  function registerSpeaker(speaker: string) {
+    if (!speaker) return
+    const cur = speakers.value.get(speaker) || 0
+    speakers.value.set(speaker, cur + 1)
+    speakers.value = new Map(speakers.value)
+    if (speaker.startsWith('Spk_') && !sessionSpeakers.value.has(speaker)) {
+      sessionSpeakers.value.set(speaker, sessionSpeakers.value.size + 1)
+      sessionSpeakers.value = new Map(sessionSpeakers.value)
+    }
+  }
+
   function onMessage(m: AsrMessage) {
     if ('type' in m && m.type === 'renamed') {
       sessionTitle.value = m.title
@@ -87,20 +98,7 @@ export const useLiveStore = defineStore('live', () => {
     // ASR 片段
     if ('text' in m && 'speaker' in m && m.speaker !== 'SYSTEM') {
       const asr = m as Extract<AsrMessage, { speaker: string; text: string }>
-      // 关键: 给 Spk_xxx 分配 Speaker N 编号(无论后续走 placeholder 替换还是 new segment 路径)
-      // bug-fix: 之前只 placeholder 路径更新 sessionSpeakers,导致连续说话(无停顿、无 placeholder)
-      // 时新建段走 new segment 路径,Speaker N 不分配,getDisplayName 查不到返回'未知说话人'
-      if (asr.speaker && asr.speaker.startsWith('Spk_')) {
-        if (!sessionSpeakers.value.has(asr.speaker)) {
-          sessionSpeakers.value.set(asr.speaker, sessionSpeakers.value.size + 1)
-          sessionSpeakers.value = new Map(sessionSpeakers.value)
-        }
-      }
-      if (asr.speaker) {
-        const cur = speakers.value.get(asr.speaker) || 0
-        speakers.value.set(asr.speaker, cur + 1)
-        speakers.value = new Map(speakers.value)
-      }
+      registerSpeaker(asr.speaker)
       // 如果有匹配 seq 的占位段,用 ASR 结果替换它(而不是创建新段)
       const placeholder = segments.value.find(s => s.status === 'transcribing' && s.seq === (asr as any).seq)
       if (placeholder) {
@@ -178,21 +176,6 @@ export const useLiveStore = defineStore('live', () => {
         tick(startFrom)
       } else {
         target.displayed = fullText
-      }
-
-      // 更新 speakers Map
-      if (asr.speaker) {
-        const cur = speakers.value.get(asr.speaker) || 0
-        speakers.value.set(asr.speaker, cur + 1)
-        speakers.value = new Map(speakers.value)
-        // 友好名:Spk_xxx 第一次见 → Speaker N;已见过 → 同 N
-        if (asr.speaker.startsWith('Spk_')) {
-          if (!sessionSpeakers.value.has(asr.speaker)) {
-            const next = sessionSpeakers.value.size + 1
-            sessionSpeakers.value.set(asr.speaker, next)
-            sessionSpeakers.value = new Map(sessionSpeakers.value)
-          }
-        }
       }
     }
   }

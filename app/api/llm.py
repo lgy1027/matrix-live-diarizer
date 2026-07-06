@@ -1,5 +1,4 @@
 """LLM API 端点 — LLM 关闭/失败时静默降级到 extractive,响应带 source 字段"""
-import asyncio
 import importlib
 import logging
 import os
@@ -149,7 +148,7 @@ class LLMSettingsRequest(BaseModel):
 
 
 @router.get("/v1/llm/status")
-def llm_status(request: Request):
+async def llm_status(request: Request):
     cfg, source, provider = _effective_llm_cfg(_settings_repo(request))
     if not _is_authenticated_status_request(request):
         return {
@@ -171,7 +170,7 @@ def llm_status(request: Request):
     elif cfg.mock:
         available = True
     else:
-        available = asyncio.run(gw.is_available())
+        available = await gw.is_available()
     return {
         "enabled": cfg.enabled,
         "available": available,

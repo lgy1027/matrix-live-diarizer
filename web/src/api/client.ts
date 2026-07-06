@@ -25,7 +25,7 @@ apiClient.interceptors.response.use(
     if (err.response?.status === 401) {
       const auth = useAuthStore()
       auth.clear()
-      const next = encodeURIComponent(router.currentRoute.value.fullPath)
+      const next = router.currentRoute.value.fullPath
       router.push({ name: 'login', query: { next } })
     }
     return Promise.reject(err)
