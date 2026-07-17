@@ -1,7 +1,7 @@
 """FastAPI 应用工厂"""
-import asyncio
 import logging
 import os
+from functools import partial
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -10,10 +10,9 @@ from transformers import logging as tf_logging
 from app.config import config
 from app.constants import APP_TITLE
 from app.api import api_router
-from app.api.websocket import init_engines as init_ws_engines
-from app.api.upload import init_engines as init_upload_engines
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.auth import AuthMiddleware
+from app.middleware.security import SecurityHeadersMiddleware
 
 tf_logging.set_verbosity_error()
 
@@ -23,6 +22,24 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger("Matrix_Core")
+
+
+def _register_lifecycle_handlers(app: FastAPI, *, startup, shutdown) -> None:
+    """Register lifecycle hooks across FastAPI/Starlette versions.
+
+    ``FastAPI.add_event_handler`` is not exposed by every supported FastAPI
+    build.  The router-owned callback lists are the underlying Starlette
+    lifecycle contract and work for both the older event API and current
+    lifespan execution.
+    """
+    app.router.on_startup.append(startup)
+    app.router.on_shutdown.append(shutdown)
+
+
+async def _shutdown_application(job_runner, runtime) -> None:
+    """Stop background work before releasing process-local model resources."""
+    await job_runner.stop()
+    await runtime.close()
 
 
 def _is_running_under_pytest() -> bool:
@@ -59,7 +76,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=APP_TITLE,
         description="实时音频转写与说话人识别系统",
-        version="0.3.0-beta"
+        version="0.4.0-alpha.0"
     )
     
     # 速率限制中间件(从 config.rate_limit 读取,支持 .env 调参)
@@ -74,20 +91,24 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(config.cors.allowed_origins),
+        allow_origin_regex=(
+            r"https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$"
+            if config.deployment.mode == "local" else None
+        ),
         allow_credentials=config.cors.allow_credentials,
         allow_methods=list(config.cors.allow_methods),
         allow_headers=list(config.cors.allow_headers),
     )
 
-    # 鉴权中间件 (Roadmap 安全项)
+    # Authentication boundary for every product API.
     # 全部 /v1/* 需 Bearer token, 白名单路径除外
     app.add_middleware(AuthMiddleware)
+    app.add_middleware(SecurityHeadersMiddleware)
 
     _init_engines(app)
     app.include_router(api_router)
 
-    # v0.3+: SPA 接管 /, web/dist/index.html 是 Vue 入口
-    # 旧的 web/login.html, web/index.html, web/css/studio.css 全部删除 (Vue 全管)
+    # SPA 接管 /，web/dist/index.html 是唯一前端入口。
     web_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web")
     dist_dir = os.path.join(web_dir, "dist")
     dist_index = os.path.join(dist_dir, "index.html")
@@ -133,39 +154,71 @@ def _init_engines(app: FastAPI):
     logger.info(f"ASR 引擎: {asr_info['name']}, 模型: {asr_info['model']}")
     logger.info(f"声纹引擎: {engine_info['name']}, 模型: {engine_info['model']}")
 
-    inference_lock = asyncio.Lock()
+    from app.runtime import ApplicationRuntime
+    from app.runtime import diagnose_audio_dependencies
+    runtime = ApplicationRuntime(asr_engine, spk_engine)
 
-    import os
-    from app.api.health import init_health_check
+    dependency_report = diagnose_audio_dependencies()
+    if dependency_report.compatible:
+        logger.info("音频运行时诊断: %s", dependency_report.message)
+    else:
+        logger.warning("音频运行时诊断: %s", dependency_report.message)
 
-    # 持久化层（先于 init_upload_engines，确保 transcript_repo 可被注入）
+    # Product persistence layer.
     from app.repositories.database import Database
-    from app.repositories.transcripts import TranscriptRepository
     from app.repositories.settings import SettingsRepository
+    from app.repositories.meetings import MeetingRepository
+    from app.repositories.jobs import JobRepository
+    from app.repositories.people import PeopleRepository
 
-    db = Database(config.storage.db_path)
+    db = Database(
+        config.storage.db_path,
+        create_default_admin=not config.auth.skip_default_admin,
+    )
     db.init_schema()
-    transcript_repo = TranscriptRepository(db)
     settings_repo = SettingsRepository(db)
+    meeting_repo = MeetingRepository(db)
+    job_repo = JobRepository(db)
+    people_repo = PeopleRepository(db)
 
     app.state.db = db
-    app.state.transcript_repo = transcript_repo
     app.state.settings_repo = settings_repo
+    app.state.meeting_repo = meeting_repo
+    app.state.job_repo = job_repo
+    app.state.people_repo = people_repo
 
-    # 鉴权服务 (Roadmap 安全项)
+    # Authentication service.
     from app.services.auth import AuthService
     app.state.auth_service = AuthService(db)
 
-    current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    init_ws_engines(asr_engine, spk_engine, inference_lock)
-    init_upload_engines(asr_engine, spk_engine, inference_lock, current_dir, transcript_repo)
-    init_health_check(asr_engine, spk_engine)
-
+    app.state.runtime = runtime
+    # Compatibility aliases for integrations; application code reads runtime.
     app.state.asr_engine = asr_engine
     app.state.asr_manager = asr_manager
     app.state.spk_engine = spk_engine
-    app.state.inference_lock = inference_lock
     app.state.config = config  # SPA 重构: 让 health.py 读 storage 配置
 
+    from app.services.meeting_processor import MeetingProcessor
+    from app.services.job_runner import JobRunner
+
+    meeting_processor = MeetingProcessor(
+        meeting_repo=meeting_repo,
+        job_repo=job_repo,
+        runtime=runtime,
+        people_repo=people_repo,
+    )
+    app.state.meeting_processor = meeting_processor
+    job_runner = JobRunner(job_repo, meeting_repo, meeting_processor)
+    app.state.job_runner = job_runner
+    _register_lifecycle_handlers(
+        app,
+        startup=job_runner.start,
+        shutdown=partial(_shutdown_application, job_runner, runtime),
+    )
+
     logger.info(f"💾 数据库已初始化: {config.storage.db_path}")
-    logger.info("🔒 完全离线模式:所有数据仅在本机处理")
+    logger.info("🔒 音频、文稿和声纹默认仅存储在本机")
+    if config.llm.enabled and config.llm.allow_public:
+        logger.warning("🌐 LLM 公网访问已启用，会议文本可能发送到: %s", config.llm.endpoint)
+    else:
+        logger.info("📦 首次启动可能联网下载所选模型；推理完成后可使用本地缓存")

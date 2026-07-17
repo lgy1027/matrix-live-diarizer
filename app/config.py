@@ -51,7 +51,7 @@ def get_env_str_list(key: str, default: tuple = ()) -> tuple:
 @dataclass
 class ServerConfig:
     """服务器配置"""
-    host: str = "0.0.0.0"
+    host: str = "127.0.0.1"
     port: int = 8000
     workers: int = 1  # 单进程防止 GPU 内存溢出
     debug: bool = False
@@ -59,7 +59,7 @@ class ServerConfig:
     @classmethod
     def from_env(cls) -> "ServerConfig":
         return cls(
-            host=get_env_str("HOST", "0.0.0.0"),
+            host=get_env_str("HOST", "127.0.0.1"),
             port=get_env_int("PORT", 8000),
             workers=get_env_int("WORKERS", 1),
             debug=get_env_bool("DEBUG", False)
@@ -150,11 +150,121 @@ class AudioConfig:
 class SpeakerConfig:
     """声纹引擎: campplus / eres2net / wespeaker"""
     engine_type: str = "campplus"
+    # Legacy fallback kept for integrations that have not selected an engine.
+    person_match_threshold: float = 0.78
+    person_match_margin: float = 0.03
+    campplus_match_threshold: float = 0.78
+    campplus_match_margin: float = 0.03
+    eres2net_match_threshold: float = 0.78
+    eres2net_match_margin: float = 0.03
+    wespeaker_match_threshold: float = 0.78
+    wespeaker_match_margin: float = 0.03
+    person_auto_match_threshold: float = 0.88
+    person_auto_match_margin: float = 0.08
+    campplus_auto_match_threshold: float = 0.88
+    campplus_auto_match_margin: float = 0.08
+    eres2net_auto_match_threshold: float = 0.88
+    eres2net_auto_match_margin: float = 0.08
+    wespeaker_auto_match_threshold: float = 0.88
+    wespeaker_auto_match_margin: float = 0.08
+    diarization_device: str = "auto"
+
+    def person_match_policy(self, model_identifier: object) -> tuple[float, float]:
+        """Return an engine-specific acceptance threshold and ambiguity margin."""
+        from engine.speaker.speaker_factory import engine_type_for
+
+        engine_type = engine_type_for(model_identifier)
+        if engine_type == "campplus":
+            return self.campplus_match_threshold, self.campplus_match_margin
+        if engine_type == "eres2net":
+            return self.eres2net_match_threshold, self.eres2net_match_margin
+        if engine_type == "wespeaker":
+            return self.wespeaker_match_threshold, self.wespeaker_match_margin
+        return self.person_match_threshold, self.person_match_margin
+
+    def person_auto_match_policy(self, model_identifier: object) -> tuple[float, float]:
+        """Return the stricter policy required to display a name automatically."""
+        from engine.speaker.speaker_factory import engine_type_for
+
+        engine_type = engine_type_for(model_identifier)
+        if engine_type == "campplus":
+            configured = (
+                self.campplus_auto_match_threshold,
+                self.campplus_auto_match_margin,
+            )
+        elif engine_type == "eres2net":
+            configured = (
+                self.eres2net_auto_match_threshold,
+                self.eres2net_auto_match_margin,
+            )
+        elif engine_type == "wespeaker":
+            configured = (
+                self.wespeaker_auto_match_threshold,
+                self.wespeaker_auto_match_margin,
+            )
+        else:
+            configured = (
+                self.person_auto_match_threshold,
+                self.person_auto_match_margin,
+            )
+        suggestion = self.person_match_policy(model_identifier)
+        return max(configured[0], suggestion[0]), max(configured[1], suggestion[1])
     
     @classmethod
     def from_env(cls) -> "SpeakerConfig":
+        diarization_device = get_env_str("PYANNOTE_DEVICE", "auto").lower()
+        if diarization_device not in {"auto", "cpu", "cuda"}:
+            logger.warning(
+                "无效 PYANNOTE_DEVICE=%r，回退 auto", diarization_device
+            )
+            diarization_device = "auto"
+        fallback_threshold = get_env_float("PERSON_MATCH_THRESHOLD", 0.78)
+        fallback_margin = get_env_float("PERSON_MATCH_MARGIN", 0.03)
+        fallback_auto_threshold = get_env_float("PERSON_AUTO_MATCH_THRESHOLD", 0.88)
+        fallback_auto_margin = get_env_float("PERSON_AUTO_MATCH_MARGIN", 0.08)
         return cls(
-            engine_type=get_env_str("SPEAKER_ENGINE", "campplus").lower()
+            engine_type=get_env_str("SPEAKER_ENGINE", "campplus").lower(),
+            person_match_threshold=fallback_threshold,
+            person_match_margin=fallback_margin,
+            campplus_match_threshold=get_env_float(
+                "PERSON_MATCH_THRESHOLD_CAMPPLUS", fallback_threshold
+            ),
+            campplus_match_margin=get_env_float(
+                "PERSON_MATCH_MARGIN_CAMPPLUS", fallback_margin
+            ),
+            eres2net_match_threshold=get_env_float(
+                "PERSON_MATCH_THRESHOLD_ERES2NET", fallback_threshold
+            ),
+            eres2net_match_margin=get_env_float(
+                "PERSON_MATCH_MARGIN_ERES2NET", fallback_margin
+            ),
+            wespeaker_match_threshold=get_env_float(
+                "PERSON_MATCH_THRESHOLD_WESPEAKER", fallback_threshold
+            ),
+            wespeaker_match_margin=get_env_float(
+                "PERSON_MATCH_MARGIN_WESPEAKER", fallback_margin
+            ),
+            person_auto_match_threshold=fallback_auto_threshold,
+            person_auto_match_margin=fallback_auto_margin,
+            campplus_auto_match_threshold=get_env_float(
+                "PERSON_AUTO_MATCH_THRESHOLD_CAMPPLUS", fallback_auto_threshold
+            ),
+            campplus_auto_match_margin=get_env_float(
+                "PERSON_AUTO_MATCH_MARGIN_CAMPPLUS", fallback_auto_margin
+            ),
+            eres2net_auto_match_threshold=get_env_float(
+                "PERSON_AUTO_MATCH_THRESHOLD_ERES2NET", fallback_auto_threshold
+            ),
+            eres2net_auto_match_margin=get_env_float(
+                "PERSON_AUTO_MATCH_MARGIN_ERES2NET", fallback_auto_margin
+            ),
+            wespeaker_auto_match_threshold=get_env_float(
+                "PERSON_AUTO_MATCH_THRESHOLD_WESPEAKER", fallback_auto_threshold
+            ),
+            wespeaker_auto_match_margin=get_env_float(
+                "PERSON_AUTO_MATCH_MARGIN_WESPEAKER", fallback_auto_margin
+            ),
+            diarization_device=diarization_device,
         )
 
 
@@ -178,25 +288,25 @@ class RateLimitConfig:
 class StorageConfig:
     """SQLite 存储配置"""
     db_path: str = "./data/matrix.db"
-    history_enabled: bool = True
+    media_dir: str = "./data/media"
 
     @classmethod
     def from_env(cls) -> "StorageConfig":
         return cls(
             db_path=get_env_str("STORAGE_DB_PATH", "./data/matrix.db"),
-            history_enabled=get_env_bool("STORAGE_HISTORY_ENABLED", True),
+            media_dir=get_env_str("STORAGE_MEDIA_DIR", "./data/media"),
         )
 
 
 @dataclass
 class CORSConfig:
-    """CORS 配置 — 本地部署默认全开,LAN 部署需收紧
-
-    警告: 本项目是本地工具,默认 ['*'] 是因为前端用 file:// 打开,
-    浏览器不发 Origin,等于无 CORS 限制。
-    如部署到 LAN 暴露给其他人,务必显式列出可信 Origin。
-    """
-    allowed_origins: tuple[str, ...] = ("*",)   # 默认全开(本地),LAN 部署需改成 ["http://192.168.1.10:8000", ...]
+    """Browser origins allowed to call the local API."""
+    allowed_origins: tuple[str, ...] = (
+        "http://127.0.0.1:8000",
+        "http://localhost:8000",
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+    )
     allow_credentials: bool = False             # Matrix 不用 cookie 认证,默认 False
     allow_methods: tuple[str, ...] = ("*",)     # 允许所有 HTTP 方法
     allow_headers: tuple[str, ...] = ("*",)     # 允许所有 header
@@ -204,7 +314,7 @@ class CORSConfig:
     @classmethod
     def from_env(cls) -> "CORSConfig":
         return cls(
-            allowed_origins=get_env_str_list("ALLOWED_ORIGINS", ("*",)),
+            allowed_origins=get_env_str_list("ALLOWED_ORIGINS", cls.allowed_origins),
             allow_credentials=get_env_bool("CORS_ALLOW_CREDENTIALS", False),
             allow_methods=get_env_str_list("CORS_ALLOW_METHODS", ("*",)),
             allow_headers=get_env_str_list("CORS_ALLOW_HEADERS", ("*",)),
@@ -242,20 +352,6 @@ class LLMConfig:
 
 
 @dataclass
-class HistoryConfig:
-    """历史存档策略"""
-    retention_days: int = 0
-    auto_archive: bool = False
-
-    @classmethod
-    def from_env(cls) -> "HistoryConfig":
-        return cls(
-            retention_days=get_env_int("HISTORY_RETENTION_DAYS", 0),
-            auto_archive=get_env_bool("HISTORY_AUTO_ARCHIVE", False),
-        )
-
-
-@dataclass
 class AuthConfig:
     """JWT 鉴权配置(Roadmap 安全项)
 
@@ -269,6 +365,7 @@ class AuthConfig:
     jwt_secret: Optional[str] = None
     token_ttl_hours: int = 24
     skip_default_admin: bool = False
+    local_auth_disabled: bool = True
 
     @classmethod
     def from_env(cls) -> "AuthConfig":
@@ -276,6 +373,7 @@ class AuthConfig:
             jwt_secret=get_env_str("JWT_SECRET", "") or None,
             token_ttl_hours=get_env_int("TOKEN_TTL_HOURS", 24),
             skip_default_admin=get_env_bool("SKIP_DEFAULT_ADMIN", False),
+            local_auth_disabled=get_env_bool("LOCAL_AUTH_DISABLED", True),
         )
 
 
@@ -288,7 +386,6 @@ class AppConfig:
     rate_limit: RateLimitConfig = field(default_factory=RateLimitConfig)
     storage: StorageConfig = field(default_factory=StorageConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
-    history: HistoryConfig = field(default_factory=HistoryConfig)
     cors: CORSConfig = field(default_factory=CORSConfig)
     auth: AuthConfig = field(default_factory=AuthConfig)
     deployment: DeploymentConfig = field(default_factory=DeploymentConfig)
@@ -303,7 +400,6 @@ class AppConfig:
             rate_limit=RateLimitConfig.from_env(),
             storage=StorageConfig.from_env(),
             llm=LLMConfig.from_env(),
-            history=HistoryConfig.from_env(),
             cors=CORSConfig.from_env(),
             auth=AuthConfig.from_env(),
         )

@@ -3,6 +3,8 @@ import ipaddress
 import socket
 import asyncio
 import logging
+import threading
+from contextlib import asynccontextmanager
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -96,9 +98,10 @@ class LLMGateway:
             "stream": False,
         }
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.post(url, json=payload, headers=headers)
-                return resp.status_code == 200
+            resp = await self._post_with_dns_guard(
+                url, payload=payload, headers=headers, timeout=5.0
+            )
+            return resp.status_code == 200
         except Exception as e:
             logger.info(f"[LLM] 探测失败: {e}")
             return False
@@ -112,8 +115,11 @@ class LLMGateway:
         if not text:
             return None
         text = text.strip()
+        normalized = text.lstrip("-* ").strip()
         # 检测模型返回"无行动项"等否定词
-        if text and text[:5] in ("无", "无。", "无行动项", "没有", "暂无", "无任务", "N/A", "n/a"):
+        if normalized.startswith((
+            "无", "没有", "暂无", "未识别到明确行动项", "N/A", "n/a"
+        )):
             return []
         items = [line.strip("-* ").strip() for line in text.split("\n") if line.strip()]
         # 兜底:如果整段都不像行动项(>3 个短句可能模型失控),截断到 50
@@ -161,8 +167,10 @@ class LLMGateway:
 
         # 2. Fallback: extractive
         if op == "action_items":
+            from .extractive_summary import NO_ACTIONS
             items = self._extractive_fallback_action_items(segments)
-            return "\n".join(f"- {item}" for item in items), "extractive-fallback"
+            content = "\n".join(f"- {item}" for item in items) if items else f"- {NO_ACTIONS}"
+            return content, "extractive-fallback"
         return self._extractive_fallback(op, segments, **kwargs), "extractive-fallback"
 
     def _extractive_fallback(self, op: str, segments: list[dict], **kwargs) -> str:
@@ -184,12 +192,14 @@ class LLMGateway:
         return summarizer.extract_action_items(segments)
 
     def _segments_to_text(self, segments: list[dict]) -> str:
+        from .speaker_identity import speaker_display_name
+
         lines = []
         for seg in segments:
             text = (seg.get("text") or "").strip()
             if not text:
                 continue
-            spk = seg.get("speaker_id") or "?"
+            spk = speaker_display_name(seg, unknown="?")
             lines.append(f"[{spk}] {text}")
         return "\n".join(lines)
 
@@ -216,27 +226,44 @@ class LLMGateway:
         headers = {}
         if self.config.api_key:
             headers["Authorization"] = f"Bearer {self.config.api_key}"
-        pinned_ip = self._resolve_pinned_ip(url)
-        if pinned_ip:
-            self._install_socket_patch(url, pinned_ip)
         try:
-            async with httpx.AsyncClient(timeout=self.config.timeout_sec) as client:
-                resp = await client.post(url, json=payload, headers=headers)
-                if resp.status_code == 404:
-                    raise LLMModelMissingError(
-                        f"模型 {self.config.model} 未加载。"
-                        f"请运行: ollama pull {self.config.model}"
-                    )
-                resp.raise_for_status()
-                data = resp.json()
-                return data["choices"][0]["message"]["content"]
+            resp = await self._post_with_dns_guard(
+                url,
+                payload=payload,
+                headers=headers,
+                timeout=self.config.timeout_sec,
+            )
+            if resp.status_code == 404:
+                raise LLMModelMissingError(
+                    f"模型 {self.config.model} 未加载。"
+                    f"请运行: ollama pull {self.config.model}"
+                )
+            resp.raise_for_status()
+            data = resp.json()
+            return data["choices"][0]["message"]["content"]
         except httpx.TimeoutException as e:
             raise LLMTimeoutError(f"LLM 调用超时: {e}") from e
         except httpx.HTTPError as e:
             raise LLMUnavailableError(f"LLM HTTP 错误: {e}") from e
-        finally:
-            if pinned_ip:
-                self._uninstall_socket_patch()
+
+    async def _post_with_dns_guard(
+        self,
+        url: str,
+        *,
+        payload: dict,
+        headers: dict,
+        timeout: float,
+    ):
+        """Send one request while DNS pinning is exclusively installed.
+
+        ``socket.getaddrinfo`` is process-global.  The lock acquisition happens
+        in a worker thread so concurrent async callers do not block the event
+        loop, and the context manager always restores the socket function.
+        """
+        pinned_ip = self._resolve_pinned_ip(url)
+        async with self._dns_pin_guard(url, pinned_ip):
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                return await client.post(url, json=payload, headers=headers)
 
     # ---- DNS pinning(防 DNS rebinding 攻击)----
     # 思路:在 LLM 调用期间,临时把 socket.getaddrinfo 改成对目标域名返回校验过的 IP。
@@ -244,9 +271,25 @@ class LLMGateway:
     # 解决 "把 host 换成 IP 后 SSL cert IP mismatch" 的问题。
 
     _socket_patch_active: bool = False
+    _socket_patch_lock = threading.Lock()
+    _base_getaddrinfo = socket.getaddrinfo
     _original_getaddrinfo = None
     _pinned_target_host: Optional[str] = None
     _pinned_target_ip: Optional[str] = None
+
+    @classmethod
+    @asynccontextmanager
+    async def _dns_pin_guard(cls, url: str, pinned_ip: Optional[str]):
+        if not pinned_ip:
+            yield
+            return
+        await asyncio.to_thread(cls._socket_patch_lock.acquire)
+        try:
+            cls._install_socket_patch(url, pinned_ip)
+            yield
+        finally:
+            cls._uninstall_socket_patch()
+            cls._socket_patch_lock.release()
 
     @classmethod
     def _resolve_pinned_ip(cls, url: str) -> Optional[str]:

@@ -15,9 +15,9 @@
 - **能力**: 多语种(中英日韩等)、50+ 语言识别、自动语言检测、长音频(分段)
 - **可选**: Qwen3-ForcedAligner-0.6B(600MB),给字级时间戳用,`ASR_WORD_TIMESTAMPS=true` 启用
   - **开启后效果**:
-    - WebSocket 响应 / upload 响应 / SQLite 存档的 segments 都会带 `words: [{text, start, end}]`
+    - 实时响应和 SQLite 会议文稿可保存 `words: [{text, start, end}]`
     - SRT/VTT 字幕按字切分(0.3s/字 vs 默认 3s/段),适合视频剪辑/卡拉 OK
-    - 前端 detail.html / index.html hover 字幕显示该字时间
+    - 会议详情和字幕导出可使用更精确的时间
   - **代价**:
     - 首次启动多下载 600MB 模型(国内需 HF 镜像)
     - ASR 加载多 5-10s(MPS 上偶发死锁,90s 超时回退 CPU)
@@ -109,6 +109,37 @@
 3. **流式友好**: WebSocket 实时流优先选择低延迟模型;离线上传可使用非流式模型
 4. **可热切换**: ASR 与声纹引擎均支持运行时切换
 5. **离线 / 国产化**: ModelScope 镜像 + 阿里生态(Qwen/CamPlus/ERes2Net)优先
+
+## 许可证与供应链边界
+
+仓库的 MIT License 只覆盖项目代码，不覆盖 Qwen、FunASR、pyannote、CamPlus、ERes2Net、Wespeaker、Silero 或其他模型权重。模型可能有独立许可证、访问授权和使用限制，部署者必须在下载页面核对当前条款。
+
+默认 ASR、对齐、VAD、说话人分离和声纹模型均固定了 revision；可通过 `.env.example` 中对应变量显式覆盖。复现实验仍应记录模型仓库、revision、缓存文件哈希、Python 环境和硬件；不要把模型缓存作为项目代码重新分发。ModelScope 模型可能加载上游自定义代码，只应使用已审核来源并在低权限隔离环境运行。
+
+### 模型许可与联网矩阵
+
+“项目 MIT License”不等于“模型可任意商用或再分发”。下表描述应用的
+访问行为，不替代上游条款；发布部署包前应再次核对对应模型卡的当前
+license、地域和用途限制。
+
+| 能力 / 默认仓库 | 托管方 | 首次使用是否联网 | Token / 门控 | 许可责任 |
+|---|---|---:|---|---|
+| Qwen3 ASR / ForcedAligner (`Qwen/...`) | ModelScope（及所配置镜像） | 是 | 通常不需要 | 以 Qwen 模型卡为准，不随本仓库 MIT 授权 |
+| SenseVoice / Paraformer (`iic/...`) | ModelScope | 是 | 通常不需要 | 代码与权重条款可能不同，逐个模型卡核对 |
+| CamPlus / ERes2Net / ResNet34 (`damo/...`, `iic/...`) | ModelScope | 是 | 通常不需要 | 声纹权重及上游自定义代码不随项目再许可 |
+| pyannote Community-1 | Hugging Face | 是 | 需要 `HF_TOKEN` 且先接受模型条款 | 模型卡标注 CC-BY-4.0；仍须遵守门控条款和署名要求 |
+| Silero VAD (`snakers4/silero-vad`) | Torch Hub / GitHub | 是 | 不需要 | 以对应版本仓库和权重说明为准 |
+| 已缓存模型 | 本机用户缓存 | 否 | pyannote 首次授权仍需预先完成 | 缓存不得被默认打入本项目发布包 |
+
+模型下载是可选网络访问；转写推理、说话人分离和声纹比对在模型就绪后
+均可本机执行。外部 LLM 是另一条独立数据通路，详见 `docs/PRIVACY.md`。
+
+## 处理状态与来源
+
+- 实时结果首先是 `draft`，适合即时阅读，不应被描述为最终说话人结果。
+- 完整录音处理成功后为 `refined`。字级时间戳存在时优先按词对齐；否则只能按语句时间重叠近似分配，绝不按字符比例伪造边界。
+- 会议详情的 `processing_manifest` 记录本次实际使用的 ASR、分离、对齐和身份建议模型；设置页展示的是下一次处理的当前配置，两者含义不同。
+- `SPEAKER_XX` 只表示本场会议中的匿名聚类。严格通过模型兼容、语音时长、双样本、相似度与候选差距校验时可自动显示已登记人物，并标注为自动匹配；较弱结果只给建议，低置信度保持匿名。
 
 ---
 

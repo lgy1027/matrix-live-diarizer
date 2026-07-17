@@ -48,3 +48,25 @@ def test_export_mime_type_map():
     assert mime_type("vtt") == "text/vtt; charset=utf-8"
     assert mime_type("markdown") == "text/markdown; charset=utf-8"
     assert mime_type("json") == "application/json; charset=utf-8"
+
+
+def test_meeting_export_uses_only_auto_matched_or_confirmed_names():
+    from app.services.exporter import export_meeting
+
+    detail = {
+        "meeting": {"title": "评审"},
+        "segments": [{
+            "text": "开始", "start_time": 0, "end_time": 1,
+            "speaker_label": "SPEAKER_00", "person_name": "张三",
+            "manually_confirmed": 0, "identity_status": "suggested",
+        }],
+    }
+    assert "SPEAKER_00" in export_meeting(detail, "markdown")
+    assert "张三" not in export_meeting(detail, "markdown")
+
+    detail["segments"][0]["identity_status"] = "auto_matched"
+    assert "张三" in export_meeting(detail, "markdown")
+
+    detail["segments"][0]["identity_status"] = "confirmed"
+    detail["segments"][0]["manually_confirmed"] = 1
+    assert "张三" in export_meeting(detail, "markdown")

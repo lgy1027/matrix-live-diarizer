@@ -2,9 +2,10 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 // 注: 'computed' 仅用于 segments/speakers 等响应式数据,timer 用普通函数
 import { useRouter } from 'vue-router'
-import { LiveWs, type AsrMessage, type WsState } from '../ws/liveStream'
+import { LiveWs, type AsrMessage, type FinalUtterance, type WsState } from '../ws/liveStream'
 import { useAuthStore } from './auth'
 import { startMic, floatToInt16, rms, resampleTo16k, type MicHandle } from '../utils/audio'
+import { i18n } from '../i18n'
 
 export interface LiveSegment {
   id: number
@@ -17,6 +18,11 @@ export interface LiveSegment {
   status?: 'transcribing' | 'normal' | 'stale' | 'timeout'
   seq?: number            // 用于占位段 ↔ ASR 结果配对
   score?: number          // 声纹识别置信度 0-1,来自后端 compare_and_identify
+  start?: number
+  end?: number
+  timebase?: 'meeting'
+  isFinal?: boolean
+  speakerState?: 'unknown' | 'provisional' | 'final'
 }
 
 export const useLiveStore = defineStore('live', () => {
@@ -25,6 +31,8 @@ export const useLiveStore = defineStore('live', () => {
   const clientId = ref<string>('studio_' + Math.random().toString(36).slice(2, 10))
   const sessionId = ref<string | null>(null)
   const sessionTitle = ref<string | null>(null)
+  const refinementStatus = ref<'idle'|'queued'|'ready'|'unavailable'>('idle')
+  const refinementJobId = ref<string | null>(null)
   const wsState = ref<WsState>('idle')
   const rec = ref(false)
   const recRMS = ref(0)
@@ -35,7 +43,7 @@ export const useLiveStore = defineStore('live', () => {
   // 友好名:Spk_xxx → Speaker N (N 按会话内首次出现的顺序)
   // 同会话内稳定:同一个 Spk_xxx 始终映射到同一个 N
   const sessionSpeakers = ref<Map<string, number>>(new Map())
-  const recent = ref<{ id: string; title?: string; original_filename?: string; source: string; duration_sec: number; created_at: string }[]>([])
+  const recent = ref<{ id: string; title?: string; original_filename?: string; source: string; duration_sec: number | null; created_at: string }[]>([])
 
   const segCount = computed(() => segments.value.length)
   const spkCount = computed(() => speakers.value.size)
@@ -61,8 +69,18 @@ export const useLiveStore = defineStore('live', () => {
   }
 
   function onMessage(m: AsrMessage) {
+    if ('type' in m && (m.type === 'meeting' || m.type === 'meeting_finalized')) {
+      sessionId.value = m.meeting_id
+      if (m.type === 'meeting') sessionTitle.value = m.title
+      if (m.type === 'meeting_finalized') {
+        refinementStatus.value = m.refinement_status
+        refinementJobId.value = m.job_id || null
+      }
+      return
+    }
     if ('type' in m && m.type === 'renamed') {
       sessionTitle.value = m.title
+      if (m.meeting_id) sessionId.value = m.meeting_id
       return
     }
     // 转写中占位: VAD 进入 SPEECH 时服务端立刻推这条消息
@@ -77,7 +95,7 @@ export const useLiveStore = defineStore('live', () => {
         id: ++segSeq,
         speaker: '',
         text: '',
-        displayed: '▌ 正在识别…',
+        displayed: `▌ ${i18n.global.t('live.transcribing')}`,
         status: 'transcribing',
         seq,
         time: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
@@ -97,7 +115,7 @@ export const useLiveStore = defineStore('live', () => {
     }
     // ASR 片段
     if ('text' in m && 'speaker' in m && m.speaker !== 'SYSTEM') {
-      const asr = m as Extract<AsrMessage, { speaker: string; text: string }>
+      const asr = m as FinalUtterance
       registerSpeaker(asr.speaker)
       // 如果有匹配 seq 的占位段,用 ASR 结果替换它(而不是创建新段)
       const placeholder = segments.value.find(s => s.status === 'transcribing' && s.seq === (asr as any).seq)
@@ -109,6 +127,11 @@ export const useLiveStore = defineStore('live', () => {
         placeholder.time = asr.time || placeholder.time
         placeholder.seq = undefined
         if (asr.words) placeholder.words = asr.words
+        placeholder.start = asr.start
+        placeholder.end = asr.end
+        placeholder.timebase = asr.timebase
+        placeholder.isFinal = asr.is_final
+        placeholder.speakerState = asr.speaker_state
         if (typeof (asr as any).score === 'number') placeholder.score = (asr as any).score
         // 启动打字机
         const fullText = asr.text
@@ -138,7 +161,12 @@ export const useLiveStore = defineStore('live', () => {
       if (isMerge) {
         // merge: 把增量字符追加到 last.text,清掉旧打字机链,新链从 displayed 继续
         last.text = (last.text || '') + asr.text
-        if (asr.words) last.words = asr.words
+        if (asr.words) last.words = [...(last.words || []), ...asr.words]
+        last.start = Math.min(last.start ?? asr.start, asr.start)
+        last.end = Math.max(last.end ?? asr.end, asr.end)
+        last.timebase = asr.timebase
+        last.isFinal = asr.is_final
+        last.speakerState = asr.speaker_state
         if (typeof (asr as any).score === 'number') last.score = (asr as any).score
         if (last.typewriterId) {
           clearTimeout(last.typewriterId)
@@ -155,6 +183,11 @@ export const useLiveStore = defineStore('live', () => {
           time: asr.time || new Date().toLocaleTimeString('zh-CN', { hour12: false }),
           words: asr.words,
           score: typeof (asr as any).score === 'number' ? (asr as any).score : undefined,
+          start: asr.start,
+          end: asr.end,
+          timebase: asr.timebase,
+          isFinal: asr.is_final,
+          speakerState: asr.speaker_state,
         }
         segments.value.push(target)
       }
@@ -210,11 +243,11 @@ export const useLiveStore = defineStore('live', () => {
     const overridden = speakerOverride.value.get(seg.id)
     if (overridden) return overridden
 
-    if (!seg.speaker) return '未知说话人'
-    if (seg.speaker === 'SYSTEM') return '系统'
+    if (!seg.speaker) return i18n.global.t('speaker.unknown')
+    if (seg.speaker === 'SYSTEM') return 'SYSTEM'
     if (seg.speaker.startsWith('Spk_')) {
       const n = sessionSpeakers.value.get(seg.speaker)
-      return n !== undefined ? `Speaker ${n}` : '未知说话人'
+      return n !== undefined ? `Speaker ${n}` : i18n.global.t('speaker.unknown')
     }
     // 已注册声纹的 ID (非 Spk_ 前缀) — 走 speakers store 解析别名
     // 这里先返回原值;后续 commit 接 alias
@@ -234,7 +267,9 @@ export const useLiveStore = defineStore('live', () => {
 
   async function startRec() {
     if (rec.value) return
-    if (!auth.token) return
+    sessionId.value = null
+    refinementStatus.value = 'idle'
+    refinementJobId.value = null
     segments.value = []
     speakers.value = new Map()
     sessionSpeakers.value = new Map()
@@ -261,9 +296,15 @@ export const useLiveStore = defineStore('live', () => {
       // 启动 WS
       ws = new LiveWs({
         clientId: clientId.value,
-        token: auth.token,
+        token: auth.token || '',
         onMessage,
-        onState: (s) => { wsState.value = s },
+        onState: (s) => {
+          wsState.value = s
+          if (s === 'disconnected' && rec.value) {
+            window.toast?.(i18n.global.t('live.disconnected'), 'error')
+            stopRec()
+          }
+        },
         onClose: (code) => {
           if (code === 4401) {
             auth.clear()
@@ -325,6 +366,8 @@ export const useLiveStore = defineStore('live', () => {
     clientId,
     sessionId,
     sessionTitle,
+    refinementStatus,
+    refinementJobId,
     wsState,
     rec,
     recRMS,

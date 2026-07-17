@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 interface Props {
   speaker: string        // 派生的显示名 (Speaker 1 / Alice / 未知)
@@ -10,6 +11,7 @@ const props = withDefaults(defineProps<Props>(), {
   score: undefined,
   showQuestion: false,
 })
+const { t } = useI18n()
 
 const tier = computed(() => {
   if (props.score === undefined || props.score === null) return 'unknown'
@@ -19,7 +21,7 @@ const tier = computed(() => {
 })
 
 const displayText = computed(() => {
-  if (tier.value === 'low') return '未知说话人'
+  if (tier.value === 'low') return t('speaker.unknown')
   if (tier.value === 'medium' || props.showQuestion) return `${props.speaker}?`
   // high 或 unknown(score 缺失):保留原 speaker 名字,只换样式
   return props.speaker

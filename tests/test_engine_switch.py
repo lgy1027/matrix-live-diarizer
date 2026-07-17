@@ -20,21 +20,18 @@ class MockSpeakerEngine:
     def get_embedding_dim(self) -> int:
         return self.embedding_dim
     
-    def list_speakers(self, session_id=None):
-        return []
-    
-    def get_speaker(self, speaker_id):
-        return None
-    
-    def rename_speaker(self, speaker_id, name):
-        return True
-    
-    def delete_speaker(self, speaker_id):
-        return True
-
-
 class TestSpeakerEngineManager:
     """测试引擎管理器"""
+
+    def test_manager_is_the_only_speaker_engine_lifecycle_owner(self):
+        """具体引擎不得再用类级单例阻止缓存淘汰释放模型。"""
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[1] / "engine" / "speaker"
+        for filename in ("campplus_engine.py", "eres2net_engine.py", "wespeaker_engine.py"):
+            source = (root / filename).read_text(encoding="utf-8")
+            assert "_instance" not in source, filename
+            assert "def __new__" not in source, filename
 
     def test_manager_class_exists(self):
         """测试 SpeakerEngineManager 类存在"""
@@ -161,7 +158,7 @@ class TestEngineSwitchAPI:
     def mock_app(self):
         """创建测试应用"""
         from fastapi import FastAPI
-        from app.api.speakers import router
+        from app.api.engines import router
         
         app = FastAPI()
         app.include_router(router)
@@ -208,7 +205,7 @@ class TestEngineSwitchAPI:
         client = TestClient(mock_app)
         
         # 尝试 PUT 请求，即使 mock 不完整也应该返回非 404
-        with patch('app.api.speakers.get_engine_manager') as mock_get_manager:
+        with patch('app.api.engines.get_engine_manager') as mock_get_manager:
             mock_manager = Mock()
             mock_manager.switch_engine.return_value = {"success": True, "engine_type": "campplus"}
             mock_get_manager.return_value = mock_manager
@@ -222,7 +219,7 @@ class TestEngineSwitchAPI:
         """测试成功切换引擎"""
         from fastapi.testclient import TestClient
         
-        with patch('app.api.speakers.get_engine_manager', return_value=mock_manager):
+        with patch('app.api.engines.get_engine_manager', return_value=mock_manager):
             client = TestClient(mock_app)
             response = client.put("/v1/engine", json={"engine_type": "eres2net"})
             
@@ -240,7 +237,7 @@ class TestEngineSwitchAPI:
             "error": "Invalid engine type: invalid"
         }
         
-        with patch('app.api.speakers.get_engine_manager', return_value=mock_manager):
+        with patch('app.api.engines.get_engine_manager', return_value=mock_manager):
             client = TestClient(mock_app)
             response = client.put("/v1/engine", json={"engine_type": "invalid"})
             
@@ -250,7 +247,7 @@ class TestEngineSwitchAPI:
         """测试 GET /v1/engines 获取所有引擎"""
         from fastapi.testclient import TestClient
         
-        with patch('app.api.speakers.get_engine_manager', return_value=mock_manager):
+        with patch('app.api.engines.get_engine_manager', return_value=mock_manager):
             client = TestClient(mock_app)
             response = client.get("/v1/engines")
             
@@ -263,7 +260,7 @@ class TestEngineSwitchAPI:
         """测试空引擎类型"""
         from fastapi.testclient import TestClient
         
-        with patch('app.api.speakers.get_engine_manager') as mock_get_manager:
+        with patch('app.api.engines.get_engine_manager') as mock_get_manager:
             client = TestClient(mock_app)
             response = client.put("/v1/engine", json={"engine_type": ""})
             
@@ -294,7 +291,7 @@ class TestEngineSwitchAPI:
             "warning": "Embedding dimension changed from 192 to 256"
         }
         
-        with patch('app.api.speakers.get_engine_manager', return_value=mock_manager):
+        with patch('app.api.engines.get_engine_manager', return_value=mock_manager):
             client = TestClient(mock_app)
             response = client.put("/v1/engine", json={"engine_type": "wespeaker"})
             

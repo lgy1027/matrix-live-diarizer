@@ -32,7 +32,7 @@ apiClient.interceptors.response.use(
   },
 )
 
-/** 解 error 抛成 Error(detail) 跟旧 api.js 兼容 */
+/** 将后端 detail 统一转换为前端 Error。 */
 export async function call<T = unknown>(config: AxiosRequestConfig): Promise<T> {
   try {
     const r = await apiClient.request<T>(config)

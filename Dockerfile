@@ -3,6 +3,9 @@
 FROM --platform=$BUILDPLATFORM python:3.12-slim AS builder
 
 ARG TARGETARCH
+ARG TORCH_VERSION=2.11.0
+ARG TORCHVISION_VERSION=0.26.0
+ARG TORCHAUDIO_VERSION=2.11.0
 ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
@@ -19,7 +22,9 @@ RUN python -m pip install --upgrade pip setuptools wheel
 
 # PyTorch CPU(避免装完整 CUDA 包拉大镜像)
 RUN pip install \
-        torch torchvision torchaudio \
+        "torch==${TORCH_VERSION}" \
+        "torchvision==${TORCHVISION_VERSION}" \
+        "torchaudio==${TORCHAUDIO_VERSION}" \
         --index-url https://download.pytorch.org/whl/cpu
 
 COPY requirements.txt .
@@ -44,6 +49,9 @@ RUN npm run build
 FROM python:3.12-slim AS runtime
 
 ARG TARGETARCH
+ARG TORCH_VERSION=2.11.0
+ARG TORCHVISION_VERSION=0.26.0
+ARG TORCHAUDIO_VERSION=2.11.0
 ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     MODELSCOPE_CACHE=/home/matrix/.cache/modelscope \
@@ -67,11 +75,13 @@ COPY --from=builder /wheels /wheels
 RUN awk 'BEGIN{IGNORECASE=1} !/^(torch|torchvision|torchaudio)([<>=~! ].*)?$/' /app/requirements.txt > /app/requirements.docker.txt \
     && python -m pip install --upgrade pip setuptools wheel \
     && pip install --find-links /wheels \
-        torch torchvision torchaudio \
+        "torch==${TORCH_VERSION}" \
+        "torchvision==${TORCHVISION_VERSION}" \
+        "torchaudio==${TORCHAUDIO_VERSION}" \
         --index-url https://download.pytorch.org/whl/cpu \
     && pip install --find-links /wheels -r /app/requirements.docker.txt \
     && rm -rf /wheels /root/.cache /tmp/*
-RUN mkdir -p /app/data /app/uploads /app/engine/speaker/speaker_db \
+RUN mkdir -p /app/data /app/uploads \
         /home/matrix/.cache/modelscope /home/matrix/.cache/huggingface /home/matrix/.cache/torch \
     && chown -R matrix:matrix /app /home/matrix/.cache
 

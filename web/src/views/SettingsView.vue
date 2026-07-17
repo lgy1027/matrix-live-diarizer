@@ -2,9 +2,8 @@
 import { onMounted, ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getEngines, getModels, switchAsrEngine, switchEngine, type AsrInfo, type EngineInfo, type ModelsInfo } from '../api/engines'
-import { getLlmSettings, getLlmStatus, saveLlmSettings, type LlmSettings } from '../api/llm'
+import { getLlmSettings, getLlmStatus, saveLlmSettings, testLlmConnection, type LlmSettings } from '../api/llm'
 type LlmResp = Awaited<ReturnType<typeof getLlmStatus>>
-import { getStorageStatus } from '../api/storage'
 import { useDialog } from '../composables/useDialog'
 import EmText from '../components/EmText.vue'
 
@@ -16,10 +15,8 @@ const currentEngine = ref<string | null>(null)
 const models = ref<ModelsInfo | null>(null)
 const llm = ref<LlmResp | null>(null)
 const llmSettings = ref<LlmSettings | null>(null)
-const llmApiKey = ref('')
-const clearLlmApiKey = ref(false)
 const savingLlm = ref(false)
-const historyEnabled = ref<boolean | null>(null)
+const testingLlm = ref(false)
 const switchingEngine = ref<string | null>(null)
 const switchingAsr = ref<string | null>(null)
 
@@ -117,12 +114,6 @@ async function load() {
     llm.value = null
     llmSettings.value = null
   }
-  try {
-    const s = await getStorageStatus()
-    historyEnabled.value = s.history_enabled
-  } catch {
-    historyEnabled.value = null
-  }
 }
 
 async function pickEngine(key: string) {
@@ -207,21 +198,49 @@ async function saveLlmConfig() {
   if (!llmSettings.value) return
   try {
     savingLlm.value = true
-    const payload = {
-      ...llmSettings.value,
-      api_key: clearLlmApiKey.value ? '' : llmApiKey.value.trim() || undefined,
-    }
-    await saveLlmSettings(payload)
+    await saveLlmSettings(llmSettings.value)
     llm.value = await getLlmStatus()
     llmSettings.value = await getLlmSettings()
-    llmApiKey.value = ''
-    clearLlmApiKey.value = false
-    window.toast?.(t('settings.llm.saved') || 'LLM 配置已保存', 'ok')
+    window.toast?.(t('settings.llm.savedPassive') || 'LLM 配置已保存，未发起连接测试', 'ok')
   } catch (e) {
     window.toast?.(`${t('settings.llm.saveFail') || '保存失败'}: ${e instanceof Error ? e.message : e}`, 'error')
   } finally {
     savingLlm.value = false
   }
+}
+
+async function testLlmConfig() {
+  if (!llm.value?.enabled || testingLlm.value) return
+  const ok = await dialog.showConfirm({
+    title: t('view.settings.llm.test') || '测试连接',
+    message: t('settings.llm.testNotice', llm.value.endpoint || '—')
+      || `测试将向已保存的 ${llm.value.endpoint || '—'} 发送一次最小 ping 请求。`,
+    detail: t('settings.llm.testPrivacy') || '不会发送会议文稿，但可能产生极少量 API 用量。',
+    confirmText: t('settings.llm.testConfirm') || '继续测试',
+    cancelText: t('btn.cancel') || '取消',
+    danger: false,
+  })
+  if (!ok) return
+  try {
+    testingLlm.value = true
+    llm.value = await testLlmConnection()
+    window.toast?.(
+      llm.value.available
+        ? (t('settings.llm.testSuccess') || 'LLM 连接可用')
+        : (llm.value.error || t('settings.llm.testFailed') || 'LLM 连接不可用'),
+      llm.value.available ? 'ok' : 'error',
+    )
+  } catch (e) {
+    window.toast?.(`${t('settings.llm.testFailed') || '连接测试失败'}: ${e instanceof Error ? e.message : e}`, 'error')
+  } finally {
+    testingLlm.value = false
+  }
+}
+
+function formatTestedAt(value?: string | null) {
+  if (!value) return ''
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString(locale.value)
 }
 
 function showLlmHelp() {
@@ -258,6 +277,12 @@ onMounted(load)
       <h1 class="page-title"><EmText :text="t('view.settings.title')" /></h1>
       <p class="page-sub">{{ t('view.settings.sub') || '声纹引擎 / 本地 LLM / 历史存储' }}</p>
     </header>
+    <section class="capability-map" aria-labelledby="capability-title">
+      <div class="capability-intro"><span>HOW IT WORKS</span><h2 id="capability-title">{{ t('product.settings.capabilities') }}</h2><p>{{ t('product.settings.capabilitiesHint') }}</p></div>
+      <article><b>01</b><h3>{{ t('product.settings.transcription') }}</h3><p>{{ t('product.settings.transcriptionHint') }}</p></article>
+      <article><b>02</b><h3>{{ t('product.settings.diarization') }}</h3><p>{{ t('product.settings.diarizationHint') }}</p></article>
+      <article><b>03</b><h3>{{ t('product.settings.identity') }}</h3><p>{{ t('product.settings.identityHint') }}</p></article>
+    </section>
     <div class="set-grid">
 
     <!-- ASR 引擎 -->
@@ -290,6 +315,7 @@ onMounted(load)
               <span v-if="!cachedAsr.has(key)">{{ t('settings.asr.notCached') || '未加载' }}</span>
             </div>
             <div class="m muted">{{ asrEngines[key]?.available === false ? asrUnavailableMessage(asrEngines[key]) : asrDescription(asrEngines[key]) }}</div>
+            <div class="m model-source">{{ t('product.settings.modelId') }}: {{ asrEngines[key]?.model || t('product.settings.modelIdUnavailable') }}</div>
             <div class="m capability">{{ asrCapabilityNote(asrEngines[key]) }}</div>
           </div>
           <span v-if="key === currentAsr" class="pill">{{ t('settings.asr.current') || '当前' }}</span>
@@ -303,6 +329,7 @@ onMounted(load)
         <code>ASR_ENGINE={{ currentAsr }}</code>
         <span>{{ t('settings.asr.dynamicHint') || '点击可动态切换;新模型加载完成前继续使用旧 ASR' }}</span>
       </div>
+      <p class="run-provenance-hint">{{ t('product.settings.futureRunsHint') }}</p>
     </div>
 
     <!-- 声纹引擎 -->
@@ -330,6 +357,7 @@ onMounted(load)
               <span class="sep">·</span>
               {{ engineDescription(engines[key]) }}
             </div>
+            <div class="m model-source">{{ t('product.settings.modelId') }}: {{ engines[key]?.model || t('product.settings.modelIdUnavailable') }}</div>
           </div>
           <div
             class="swatch"
@@ -342,6 +370,7 @@ onMounted(load)
           {{ t('settings.engine.loading') }}
         </div>
       </div>
+      <p class="run-provenance-hint">{{ t('product.settings.voiceSuggestionHint') }}</p>
     </div>
 
     <!-- LLM -->
@@ -384,16 +413,11 @@ onMounted(load)
           <span>Model</span>
           <input v-model.trim="llmSettings.model" placeholder="qwen2.5:1.5b" />
         </label>
-        <label>
-          <span>API Key</span>
-          <input v-model="llmApiKey" type="password" :placeholder="llmSettings.has_api_key ? (t('settings.llm.keySet') || '已保存,留空不修改') : (t('settings.llm.keyOptional') || '本机服务可留空')" />
-        </label>
+        <div class="llm-secret-note">
+          {{ llmSettings.has_api_key ? t('settings.llm.keyFromEnv') : t('settings.llm.keyEnvHint') }}
+        </div>
       </div>
       <div class="llm-options">
-        <label v-if="llmSettings.has_api_key">
-          <input v-model="clearLlmApiKey" type="checkbox" />
-          <span>{{ t('settings.llm.clearKey') || '清空已保存 API Key' }}</span>
-        </label>
         <label>
           <input v-model="llmSettings.allow_public" type="checkbox" />
           <span>{{ t('settings.llm.allowPublic') || '允许公网 endpoint' }}</span>
@@ -405,13 +429,24 @@ onMounted(load)
         <button class="btn primary sm" type="button" :disabled="savingLlm" @click="saveLlmConfig">
           {{ savingLlm ? (t('settings.llm.saving') || '保存中…') : (t('settings.llm.save') || '保存配置') }}
         </button>
+        <button
+          class="btn ghost sm"
+          type="button"
+          :disabled="!llm.enabled || savingLlm || testingLlm"
+          @click="testLlmConfig"
+        >
+          {{ testingLlm ? t('view.settings.llm.testing') : t('view.settings.llm.test') }}
+        </button>
       </div>
+      <div class="llm-test-notice">{{ t('settings.llm.testNotice', llm.endpoint || '—') }}</div>
       <div class="llm-status">
         <span>{{ t('settings.llm.statusLabel') }}</span>
-        <b v-if="llm.available" class="on">{{ t('settings.llm.statusAvail') }}</b>
-        <b v-else class="off">{{ t('settings.llm.statusNotRun') }}</b>
+        <b v-if="llm.available === true" class="on">{{ t('settings.llm.statusAvail') }}</b>
+        <b v-else-if="llm.available === false" class="off">{{ t('settings.llm.statusUnavailable') }}</b>
+        <b v-else class="off">{{ t('settings.llm.statusNeverTested') }}</b>
         <span v-if="llm.model" class="model">· {{ llm.model }}</span>
         <span class="model">· {{ llm.config_source || 'env' }}</span>
+        <span v-if="llm.last_tested_at" class="model">· {{ t('settings.llm.lastTested', formatTestedAt(llm.last_tested_at)) }}</span>
       </div>
       <div v-if="llm.error" class="llm-error">{{ llm.error }}</div>
       <div class="llm-detail">
@@ -425,22 +460,6 @@ onMounted(load)
           </svg>
           {{ t('settings.llm.help') || '配置说明' }}
         </button>
-      </div>
-    </div>
-
-    <!-- 历史存储 -->
-    <div class="set-row">
-      <div class="l"><EmText :text="t('view.settings.storage')" /></div>
-      <div class="d">{{ t('settings.storage.desc') || '所有转写会话是否持久化到本地 SQLite,可在历史会话(Library)页查看。重启服务后生效。' }}</div>
-      <div class="storage-state">
-        <span v-if="historyEnabled === true" class="tag green">● {{ t('settings.storage.on') || '已启用' }}</span>
-        <span v-else-if="historyEnabled === false" class="tag">○ {{ t('settings.storage.off') || '已停用' }}</span>
-        <span v-else class="tag">? {{ t('settings.storage.unknown') || '未知' }}</span>
-        <small>
-          {{ t('settings.storage.hint') || '运行时配置 · 由' }}
-          <code>STORAGE_HISTORY_ENABLED</code>
-          {{ t('settings.storage.envHint') || '环境变量控制' }}
-        </small>
       </div>
     </div>
 
@@ -465,6 +484,7 @@ onMounted(load)
 </template>
 
 <style scoped>
+.capability-map{display:grid;grid-template-columns:1.25fr repeat(3,1fr);gap:1px;margin:0 0 34px;border:1px solid var(--border);background:var(--border);border-radius:10px;overflow:hidden}.capability-map>*{background:var(--ink-2);padding:20px}.capability-intro span,.capability-map article>b{color:var(--amber);font:9px var(--mono);letter-spacing:.12em}.capability-intro h2{font:22px var(--serif);margin:8px 0}.capability-map h3{font-size:13px;margin:10px 0 5px}.capability-map p{color:var(--text-3);font-size:11px;line-height:1.55}@media(max-width:900px){.capability-map{grid-template-columns:1fr 1fr}}@media(max-width:560px){.capability-map{grid-template-columns:1fr}}
 .set-wrap { padding: 32px 48px 48px; }  /* 整改: 删 max-width */
 .set-head { padding-bottom: 24px; border-bottom: 1px solid var(--border); margin-bottom: 0; }
 /* 整改 1: 改用 .page-title / .page-sub (components.css), scoped 块里不再重复定义 */
@@ -591,6 +611,15 @@ onMounted(load)
   color: var(--text-3);
   letter-spacing: 0.06em;
 }
+.model-source{overflow-wrap:anywhere;color:var(--text-3)}
+.run-provenance-hint{margin-top:12px;color:var(--text-3);font-size:10px;line-height:1.55}
+
+.llm-secret-note {
+  grid-column: 1 / -1;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
 .llm-form input,
 .llm-form select {
   width: 100%;
@@ -616,6 +645,13 @@ onMounted(load)
   align-items: center;
   gap: 6px;
 }
+.llm-test-notice {
+  margin-top: 10px;
+  color: var(--text-3);
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.5;
+}
 .llm-error {
   margin-top: 10px;
   font-family: var(--mono);
@@ -637,19 +673,6 @@ onMounted(load)
 .llm-detail .sep { color: var(--text-3); }
 .llm-detail b { font-weight: 500; }
 .llm-detail .help { margin-left: auto; }
-.storage-state {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  flex-wrap: wrap;
-}
-.storage-state small {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
-  color: var(--text-3);
-  letter-spacing: 0.06em;
-}
-.storage-state code { color: var(--amber); font-family: 'JetBrains Mono', monospace; font-size: 10px; }
 .config-hint {
   display: flex;
   align-items: center;

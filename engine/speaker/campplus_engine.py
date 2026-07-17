@@ -6,17 +6,17 @@ EER: 0.65% (VoxCeleb)
 import numpy as np
 import torch
 import chromadb
+from chromadb.config import Settings
 from modelscope.models import Model
 import time
-import os
 import logging
 from collections import defaultdict
 from typing import List, Dict, Optional, Tuple
 
 from engine.speaker.base_engine import BaseSpeakerEngine
+from engine.speaker.speaker_factory import ENGINE_CONFIG
 
 logger = logging.getLogger("Matrix_Speaker")
-current_dir = os.path.dirname(os.path.abspath(__file__))
 
 
 class CamPlusEngine(BaseSpeakerEngine):
@@ -28,8 +28,6 @@ class CamPlusEngine(BaseSpeakerEngine):
     3. 智能合并：相似度高的临时说话人自动合并
     """
     
-    _instance = None
-
     # Bug-68: 短于这个时长的音频直接跳过声纹匹配,标 "Spk_unknown"
     # 典型场景: 用户短促回复"嗯/对/好"(0.1-0.3s)cosine 距离波动大,易误合
     # 0.3s 是经验值:CamPlus 训练在 4-10s 段,<0.3s 段 embedding 无意义
@@ -58,34 +56,29 @@ class CamPlusEngine(BaseSpeakerEngine):
             return "short"
         return "reliable"
 
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super(CamPlusEngine, cls).__new__(cls)
-            
-            model_id = 'damo/speech_campplus_sv_zh-cn_16k-common'
-            cls._instance.model = Model.from_pretrained(model_id, device='cpu')
-            cls._instance.model.eval()
-            
-            cls._instance.chroma_client = chromadb.PersistentClient(
-                path=os.path.join(current_dir, "speaker_db", "campplus")
-            )
-            cls._instance.collection = cls._instance.chroma_client.get_or_create_collection(
-                name="speaker_fingerprints",
-                metadata={"hnsw:space": "cosine"}
-            )
-            
-            cls._instance.emb_buffer = defaultdict(list)
-            cls._instance.EMB_BUFFER_SIZE = 5  # 增加平滑窗口
-            
-            # 临时说话人缓存：存储待确认的说话人
-            # {client_id: [(emb, audio_duration), ...]}
-            cls._instance.pending_speakers = defaultdict(list)
-            cls._instance.PENDING_THRESHOLD = 3  # 需要3个样本才确认新说话人
-            
-            cls._instance.ENGINE_NAME = "CamPlus"
-            
-            logger.info("[CamPlus] 引擎初始化完成")
-        return cls._instance
+    def __init__(self):
+        model_id = 'damo/speech_campplus_sv_zh-cn_16k-common'
+        self.device = "cpu"
+        self.model = Model.from_pretrained(
+            model_id,
+            revision=ENGINE_CONFIG["campplus"]["model_revision"],
+            device='cpu',
+        )
+        self.model.eval()
+
+        self.chroma_client = chromadb.EphemeralClient(
+            settings=Settings(anonymized_telemetry=False)
+        )
+        self.collection = self.chroma_client.get_or_create_collection(
+            name="speaker_fingerprints",
+            metadata={"hnsw:space": "cosine"}
+        )
+        self.emb_buffer = defaultdict(list)
+        self.EMB_BUFFER_SIZE = 5
+        self.pending_speakers = defaultdict(list)
+        self.PENDING_THRESHOLD = 3
+        self.ENGINE_NAME = "CamPlus"
+        logger.info("[CamPlus] 引擎初始化完成")
 
     @property
     def _model_name(self) -> str:
@@ -128,6 +121,7 @@ class CamPlusEngine(BaseSpeakerEngine):
             del self.emb_buffer[client_id]
         if client_id in self.pending_speakers:
             del self.pending_speakers[client_id]
+        self.delete_session_clusters(client_id)
         logger.info(f"[CamPlus] 已清理客户端 {client_id} 的缓冲区")
 
     def _check_pending_speakers(self, emb: np.ndarray, client_id: str) -> Optional[str]:
@@ -234,10 +228,10 @@ class CamPlusEngine(BaseSpeakerEngine):
             return pending_spk, 0.5
 
         # 查询已确认的说话人
-        results = self.collection.query(
-            query_embeddings=[emb_list],
-            n_results=3,  # 获取前3个候选
-            where={"session_id": client_id}
+        results = self.query_session_candidates(
+            emb_list,
+            client_id,
+            n_results=3,
         )
 
         if results['distances'] and len(results['distances'][0]) > 0:
@@ -281,7 +275,7 @@ class CamPlusEngine(BaseSpeakerEngine):
 
                 update_kwargs = {
                     "ids": [best_id],
-                    "metadatas": [{"session_id": client_id, "count": best_count + 1, "last_update": time.time(), "confirmed": True}],
+                    "metadatas": [self.cluster_metadata(best_meta, client_id, best_count + 1)],
                 }
                 if embedding_to_save is not None:
                     update_kwargs["embeddings"] = [embedding_to_save]
@@ -292,19 +286,18 @@ class CamPlusEngine(BaseSpeakerEngine):
             
             # 边缘匹配：需要已有足够样本
             if best_dist < high_thresh and best_count >= MIN_SAMPLES_FOR_EDGE:
+                update_kwargs = {
+                    "ids": [best_id],
+                    "metadatas": [self.cluster_metadata(best_meta, client_id, best_count + 1)],
+                }
                 old_mean = np.array(
                     self.collection.get(ids=[best_id], include=['embeddings'])['embeddings'][0]
                 )
-                
                 weight = min(0.10, 1.0 / (best_count + 1))
                 new_mean = (old_mean * (1 - weight)) + (smoothed_emb * weight)
                 new_mean = new_mean / (np.linalg.norm(new_mean) + 1e-6)
-                
-                self.collection.update(
-                    ids=[best_id],
-                    embeddings=[new_mean.tolist()],
-                    metadatas=[{"session_id": client_id, "count": best_count + 1, "last_update": time.time(), "confirmed": True}]
-                )
+                update_kwargs["embeddings"] = [new_mean.tolist()]
+                self.collection.update(**update_kwargs)
                 logger.info(f"[EDGE OK] {best_id} (sim: {1-best_dist:.0%}, samples={best_count+1})")
                 return best_id, float(1 - best_dist)
             
@@ -316,19 +309,18 @@ class CamPlusEngine(BaseSpeakerEngine):
                 count = meta.get("count", 1)
                 
                 if dist < high_thresh and count >= MIN_SAMPLES_FOR_EDGE:
+                    update_kwargs = {
+                        "ids": [spk_id],
+                        "metadatas": [self.cluster_metadata(meta, client_id, count + 1)],
+                    }
                     old_mean = np.array(
                         self.collection.get(ids=[spk_id], include=['embeddings'])['embeddings'][0]
                     )
-                    
                     weight = min(0.10, 1.0 / (count + 1))
                     new_mean = (old_mean * (1 - weight)) + (smoothed_emb * weight)
                     new_mean = new_mean / (np.linalg.norm(new_mean) + 1e-6)
-                    
-                    self.collection.update(
-                        ids=[spk_id],
-                        embeddings=[new_mean.tolist()],
-                        metadatas=[{"session_id": client_id, "count": count + 1, "last_update": time.time(), "confirmed": True}]
-                    )
+                    update_kwargs["embeddings"] = [new_mean.tolist()]
+                    self.collection.update(**update_kwargs)
                     logger.info(f"[ALT MATCH] {spk_id} (sim: {1-dist:.0%}, samples={count+1})")
                     return spk_id, float(1 - dist)
             

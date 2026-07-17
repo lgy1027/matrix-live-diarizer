@@ -8,14 +8,17 @@
 2. 安装依赖:
    ```bash
    pip install -r requirements.txt
+   pip install -r requirements-dev.txt
    cd web
    npm ci
    ```
 3. 修改代码后运行校验:
    ```bash
+   npm run check:i18n
+   npm run typecheck
    npm run build
    cd ..
-   python -m pytest
+   python -m pytest -q
    ```
 4. 提 PR 时说明:
    - 改了什么行为

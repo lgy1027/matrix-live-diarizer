@@ -65,21 +65,17 @@ class TestHealthEndpoints:
 
     def test_ready_checks_asr_engine(self, mock_app):
         """测试 /ready 检查 ASR 引擎状态"""
-        with patch('app.api.health.asr_engine', Mock()):
-            client = TestClient(mock_app)
-            response = client.get("/ready")
-            
-            data = response.json()
-            assert "asr" in data
+        mock_app.state.runtime = Mock(asr=Mock(), speaker=Mock())
+        client = TestClient(mock_app)
+        response = client.get("/ready")
+        assert response.json()["asr"] is True
 
     def test_ready_checks_speaker_engine(self, mock_app):
         """测试 /ready 检查说话人引擎状态"""
-        with patch('app.api.health.spk_engine', Mock()):
-            client = TestClient(mock_app)
-            response = client.get("/ready")
-            
-            data = response.json()
-            assert "speaker" in data
+        mock_app.state.runtime = Mock(asr=Mock(), speaker=Mock())
+        client = TestClient(mock_app)
+        response = client.get("/ready")
+        assert response.json()["speaker"] is True
 
 
 if __name__ == "__main__":

@@ -1,0 +1,19 @@
+# Lightweight CI environment. Heavy inference packages are replaced in tests/conftest.py.
+fastapi>=0.115,<1
+uvicorn>=0.23,<1
+python-multipart>=0.0.9,<1
+transformers>=4.30,<5
+chromadb>=0.6.3,<0.7
+pydantic>=2,<3
+python-dotenv>=1,<2
+numpy>=1.24,<3
+soundfile>=0.12,<1
+summa==1.2.0
+PyJWT>=2.8,<3
+werkzeug>=3,<4
+setuptools>=68,<81
+addict>=2.4,<3
+simplejson>=3.19,<4
+sortedcontainers>=2.4,<3
+cffi>=1.16,<2
+-r requirements-dev.txt

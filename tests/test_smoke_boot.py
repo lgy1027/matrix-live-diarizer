@@ -17,6 +17,13 @@ import pytest
 import httpx
 
 
+if os.environ.get("MATRIX_TEST_REAL_DEPENDENCIES") != "1":
+    pytest.skip(
+        "set MATRIX_TEST_REAL_DEPENDENCIES=1 to load real model dependencies",
+        allow_module_level=True,
+    )
+
+
 def _find_free_port() -> int:
     """找一个空闲端口,避免与其他测试冲突"""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -113,14 +120,14 @@ def test_engines_endpoint(server_url):
 
 
 @pytest.mark.timeout(120)
-def test_speakers_endpoint(server_url):
-    """/v1/speakers 应返回 200 + 空列表(或已有数据)"""
-    r = httpx.get(f"{server_url}/v1/speakers", timeout=5)
+def test_people_endpoint(server_url):
+    """The product identity API is /v1/people, not the legacy speaker library."""
+    r = httpx.get(f"{server_url}/v1/people", timeout=5)
     assert r.status_code == 200
     data = r.json()
-    assert "speakers" in data
+    assert "items" in data
     assert "total" in data
-    assert isinstance(data["speakers"], list)
+    assert isinstance(data["items"], list)
 
 
 @pytest.mark.timeout(120)

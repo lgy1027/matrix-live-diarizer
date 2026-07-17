@@ -1,4 +1,4 @@
-/* 通用控件类 (从旧 web/index.html 内联抽出) */
+/* 通用控件类 */
 .h-display {
   font-family: var(--serif);
   font-variation-settings: 'SOFT' 50, 'WONK' 1, 'opsz' 96;
@@ -128,3 +128,16 @@
   letter-spacing: 0;
   text-transform: none;
 }
+.processing-row {
+  display: grid;
+  grid-template-columns: minmax(100px, 220px) auto auto;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+.processing-row > div { height: 4px; background: var(--ink-4); border-radius: 4px; overflow: hidden; }
+.processing-row i { display: block; height: 100%; background: var(--teal); transition: width 0.3s; }
+.processing-row span { color: var(--teal); font: 9px var(--mono); }
+.processing-row button { color: var(--amber); font: 9px var(--mono); }
+.processing-row.failed { grid-template-columns: 1fr auto; }
+.processing-row.failed span { color: var(--red); }

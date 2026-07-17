@@ -10,16 +10,24 @@ logger = logging.getLogger("Matrix_Extractive")
 
 # 中英文行动项关键词
 ACTION_KEYWORDS_ZH = [
-    "需要", "应该", "必须", "接下来", "下周", "明天", "今天", "截止",
-    "责任", "负责", "跟进", "待办", "TODO", "todo", "要求", "必须完成",
+    "需要", "应该", "必须", "责任", "负责", "跟进", "待办", "TODO", "todo",
+    "要求", "完成", "提交", "安排", "处理", "联系", "准备", "交付", "截止",
 ]
 ACTION_KEYWORDS_EN = [
-    "need to", "should", "must", "TODO", "todo", "next week", "tomorrow",
-    "deadline", "by friday", "owner", "responsible", "action item",
+    "need to", "should", "must", "TODO", "todo", "deadline", "owner",
+    "responsible", "action item", "follow up", "complete", "submit", "prepare",
+]
+DECISION_KEYWORDS_ZH = [
+    "决定", "决议", "确定", "确认", "结论", "同意", "通过", "采用", "最终", "暂定",
+]
+DECISION_KEYWORDS_EN = [
+    "decided", "decision", "agreed", "approved", "confirmed", "conclusion",
 ]
 
 MIN_SENTENCES_FOR_TEXTRANK = 3
 EMPTY_PLACEHOLDER = "(无内容)"
+NO_ACTIONS = "未识别到明确行动项。"
+NO_DECISIONS = "未识别到明确决议。"
 
 
 class ExtractiveSummarizer:
@@ -44,13 +52,11 @@ class ExtractiveSummarizer:
         sentences = self._split_sentences(text)
 
         if not sentences:
-            return EMPTY_PLACEHOLDER
+            return "当前文稿为空，无法生成摘要。"
 
         if len(sentences) < MIN_SENTENCES_FOR_TEXTRANK:
-            joined = "。".join(sentences)
-            if not joined.endswith("。"):
-                joined += "。"
-            return joined
+            bullets = "\n".join(f"- {sentence}" for sentence in sentences)
+            return f"文稿内容较少，以下为原文要点：\n{bullets}"
 
         # 长文本走 TextRank(summa 1.2.0 API: ratio / words / language,不是 sentences)
         # max_sentences 不直接对应,改用 words 估计:中文 1 句 ≈ 30 字
@@ -81,16 +87,29 @@ class ExtractiveSummarizer:
                     items.append(clean)
         return items[:20]
 
+    def extract_decisions(self, segments: List[Dict]) -> List[str]:
+        text = self._segments_to_paragraph(segments)
+        sentences = self._split_sentences(text)
+        keywords = DECISION_KEYWORDS_ZH + DECISION_KEYWORDS_EN
+        decisions = []
+        for sentence in sentences:
+            if any(keyword.lower() in sentence.lower() for keyword in keywords):
+                clean = re.sub(r"^\[[\w_]+\]\s*", "", sentence).strip()
+                if clean and clean not in decisions:
+                    decisions.append(clean)
+        return decisions[:20]
+
     def generate_minutes(self, segments: List[Dict]) -> str:
         topic = self.summarize(segments, max_sentences=3)
-        decisions = self.summarize(segments[len(segments) // 2:], max_sentences=2) if segments else ""
+        decisions = self.extract_decisions(segments)
         actions = self.extract_action_items(segments)
 
-        action_text = "\n".join(f"- {a}" for a in actions) if actions else "- (本地抽取未发现行动项)"
+        decision_text = "\n".join(f"- {item}" for item in decisions) if decisions else f"- {NO_DECISIONS}"
+        action_text = "\n".join(f"- {a}" for a in actions) if actions else f"- {NO_ACTIONS}"
 
         return (
             f"## 议题\n{topic or '(无内容)'}\n\n"
-            f"## 决议\n{decisions or '(本地抽取未发现明确决议)'}\n\n"
+            f"## 决议\n{decision_text}\n\n"
             f"## 行动项\n{action_text}"
         )
 

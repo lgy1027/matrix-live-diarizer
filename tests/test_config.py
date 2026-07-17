@@ -5,7 +5,6 @@ def test_storage_config_defaults():
     from app.config import StorageConfig
     cfg = StorageConfig.from_env()
     assert cfg.db_path == "./data/matrix.db"
-    assert cfg.history_enabled is True
 
 
 def test_llm_config_defaults():
@@ -17,17 +16,16 @@ def test_llm_config_defaults():
     assert cfg.timeout_sec == 60
 
 
-def test_history_config_defaults():
-    from app.config import HistoryConfig
-    cfg = HistoryConfig.from_env()
-    assert cfg.retention_days == 0  # 0 = 永久保留
-    assert cfg.auto_archive is False
-
-
 def test_deployment_config_defaults_to_local():
     from app.config import DeploymentConfig
     cfg = DeploymentConfig.from_env()
     assert cfg.mode == "local"
+
+
+def test_server_defaults_to_loopback(monkeypatch):
+    from app.config import ServerConfig
+    monkeypatch.delenv("HOST", raising=False)
+    assert ServerConfig.from_env().host == "127.0.0.1"
 
 
 def test_deployment_config_reads_known_mode(monkeypatch):
@@ -56,9 +54,16 @@ def test_llm_allowed_hosts_from_env(monkeypatch):
 
 
 def test_appconfig_load_includes_new_blocks():
-    from app.config import AppConfig, StorageConfig, LLMConfig, HistoryConfig, DeploymentConfig
+    from app.config import AppConfig, StorageConfig, LLMConfig, DeploymentConfig
     cfg = AppConfig.load()
     assert isinstance(cfg.storage, StorageConfig)
     assert isinstance(cfg.llm, LLMConfig)
-    assert isinstance(cfg.history, HistoryConfig)
     assert isinstance(cfg.deployment, DeploymentConfig)
+
+
+def test_invalid_pyannote_device_falls_back_to_auto(monkeypatch):
+    from app.config import SpeakerConfig
+
+    monkeypatch.setenv("PYANNOTE_DEVICE", "metal")
+
+    assert SpeakerConfig.from_env().diarization_device == "auto"

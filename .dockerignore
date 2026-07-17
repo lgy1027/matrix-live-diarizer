@@ -2,7 +2,6 @@
 .github
 data/
 uploads/
-engine/speaker/speaker_db/
 __pycache__
 *.pyc
 *.pyo

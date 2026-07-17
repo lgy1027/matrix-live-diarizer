@@ -11,19 +11,19 @@ const err = ref('')
 const submitting = ref(false)
 
 async function submit() {
-  if (!oldPwd.value || !newPwd.value) { err.value = '请填写完整'; return }
-  if (newPwd.value.length < 8) { err.value = '新密码需 ≥8 字符'; return }
+  if (!oldPwd.value || !newPwd.value) { err.value = t('account.pwd.errEmpty'); return }
+  if (newPwd.value.length < 8) { err.value = t('account.pwd.errShort'); return }
   if (!/[a-zA-Z]/.test(newPwd.value) || !/\d/.test(newPwd.value)) {
-    err.value = '新密码需含字母+数字'
+    err.value = t('account.pwd.errFmt')
     return
   }
-  if (oldPwd.value === newPwd.value) { err.value = '新密码不能与原密码相同'; return }
+  if (oldPwd.value === newPwd.value) { err.value = t('account.pwd.errSame'); return }
   err.value = ''
   submitting.value = true
   try {
     emit('submit', oldPwd.value, newPwd.value)
   } catch (e) {
-    err.value = e instanceof Error ? e.message : '改密失败'
+    err.value = e instanceof Error ? e.message : t('account.pwd.errFailed')
   } finally {
     submitting.value = false
   }

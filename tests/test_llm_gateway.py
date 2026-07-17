@@ -1,5 +1,6 @@
 import pytest
 import asyncio
+import socket
 from app.services.llm_gateway import LLMGateway, EndpointSecurityError
 from app.config import LLMConfig
 
@@ -240,6 +241,30 @@ def test_action_items_falls_back_returns_list():
     assert isinstance(result, list)
 
 
+def test_llm_transcript_uses_only_trusted_person_names():
+    gateway = LLMGateway(LLMConfig(enabled=False))
+    transcript = gateway._segments_to_text([
+        {
+            "text": "建议内容", "speaker_label": "SPEAKER_00",
+            "person_name": "张三", "identity_status": "suggested",
+        },
+        {
+            "text": "自动内容", "speaker_label": "SPEAKER_01",
+            "person_name": "李四", "identity_status": "auto_matched",
+        },
+        {
+            "text": "确认内容", "speaker_label": "SPEAKER_02",
+            "person_name": "王五", "identity_status": "confirmed",
+        },
+    ])
+
+    assert transcript.splitlines() == [
+        "[SPEAKER_00] 建议内容",
+        "[李四] 自动内容",
+        "[王五] 确认内容",
+    ]
+
+
 def test_minutes_falls_back():
     """纪要降级返回 string 含议题/决议/行动项"""
     from app.services.llm_gateway import LLMGateway
@@ -316,3 +341,52 @@ def test_socket_patch_skips_ip_literal():
     # 已是 IP literal,patch 不应安装
     assert LLMGateway._socket_patch_active is False
     assert _socket.getaddrinfo is orig
+
+
+def test_concurrent_dns_pinned_requests_are_serialized(monkeypatch):
+    """Process-global DNS pinning must never overlap across LLM requests."""
+    import app.services.llm_gateway as gw_mod
+
+    active = 0
+    max_active = 0
+
+    class FakeResp:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"choices": [{"message": {"content": "OK"}}]}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, url, json, headers=None):
+            nonlocal active, max_active
+            active += 1
+            max_active = max(max_active, active)
+            await asyncio.sleep(0.01)
+            active -= 1
+            return FakeResp()
+
+    monkeypatch.setattr(gw_mod.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(socket, "gethostbyname", lambda _host: "198.18.0.51")
+
+    first = LLMGateway(LLMConfig(enabled=True, endpoint="https://one.example/v1", allow_public=True))
+    second = LLMGateway(LLMConfig(enabled=True, endpoint="https://two.example/v1", allow_public=True))
+
+    async def run_both():
+        await asyncio.gather(first._call_llm("one"), second._call_llm("two"))
+
+    asyncio.run(run_both())
+    assert max_active == 1
+    assert socket.getaddrinfo is LLMGateway._base_getaddrinfo
+    assert LLMGateway._socket_patch_active is False

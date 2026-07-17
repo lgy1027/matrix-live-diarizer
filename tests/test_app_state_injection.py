@@ -36,6 +36,9 @@ def mock_heavy_engines(monkeypatch, tmp_path):
     )
     monkeypatch.setitem(sys.modules, "engine.speaker", fake_speaker)
 
+    app_mod = import_module("app")
+    reload(app_mod)
+
     yield
 
 
@@ -46,11 +49,13 @@ def test_app_state_has_db():
     assert app.state.db is not None
 
 
-def test_app_state_has_transcript_repo():
+def test_app_state_has_product_repositories():
     from app import create_app
     app = create_app()
-    assert hasattr(app.state, "transcript_repo")
-    assert app.state.transcript_repo is not None
+    assert app.state.meeting_repo is not None
+    assert app.state.job_repo is not None
+    assert app.state.people_repo is not None
+    assert not hasattr(app.state, "transcript_repo")
 
 
 def test_app_state_has_settings_repo():

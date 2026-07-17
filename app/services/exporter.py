@@ -131,7 +131,7 @@ def export_markdown(
 ) -> str:
     """Markdown 格式：按说话人分组"""
     lines = [
-        f"# {title or '未命名会话'}",
+        f"# {title or '未命名会议'}",
         "",
         f"**Duration**: {_format_mm_ss(duration_sec)}  ",
         f"**Speakers**: {speaker_count}",
@@ -217,4 +217,45 @@ def export(fmt: str, **kwargs) -> str:
             segments=kwargs["segments"],
             speakers=kwargs["speakers"],
         )
+    raise FormatError(f"不支持的格式: {fmt}")
+
+
+def export_meeting(detail: dict, fmt: str) -> str:
+    """Export the current product meeting shape through one canonical path."""
+    if fmt == "json":
+        return json.dumps(detail, ensure_ascii=False, indent=2)
+
+    meeting = detail["meeting"]
+    segments = detail.get("segments", [])
+
+    from app.services.speaker_identity import speaker_display_name
+
+    def speaker(segment: dict) -> str:
+        return speaker_display_name(segment)
+
+    if fmt == "srt":
+        blocks = [
+            f"{index}\n{_format_srt_time(item['start_time'])} --> "
+            f"{_format_srt_time(item['end_time'])}\n[{speaker(item)}] {item['text']}"
+            for index, item in enumerate(segments, 1)
+            if str(item.get("text") or "").strip()
+        ]
+        return "\n\n".join(blocks)
+    if fmt == "vtt":
+        blocks = [
+            f"{_format_vtt_time(item['start_time'])} --> "
+            f"{_format_vtt_time(item['end_time'])}\n<v {speaker(item)}>{item['text']}"
+            for item in segments
+            if str(item.get("text") or "").strip()
+        ]
+        return "WEBVTT\n\n" + "\n\n".join(blocks)
+    if fmt == "markdown":
+        lines = [f"# {meeting['title']}", ""]
+        for item in segments:
+            if str(item.get("text") or "").strip():
+                lines.append(
+                    f"- **{_format_vtt_time(item['start_time'])} · {speaker(item)}**  \n"
+                    f"  {item['text']}"
+                )
+        return "\n".join(lines)
     raise FormatError(f"不支持的格式: {fmt}")

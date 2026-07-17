@@ -21,6 +21,11 @@ class SettingsRepository:
             )
             conn.commit()
 
+    def delete(self, key: str) -> None:
+        with self.db.connect() as conn:
+            conn.execute("DELETE FROM settings WHERE key = ?", (key,))
+            conn.commit()
+
     def get_bool(self, key: str, default: bool = False) -> bool:
         v = self.get(key)
         if v is None:

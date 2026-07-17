@@ -119,7 +119,7 @@ onMounted(() => {
         <div class="field">
           <label for="password">
             <span class="key">PASSWORD</span>
-            <button type="button" class="show-pwd" @click="showPwd = !showPwd">{{ showPwd ? '隐藏' : '显示' }}</button>
+            <button type="button" class="show-pwd" @click="showPwd = !showPwd">{{ t(showPwd ? 'login.hidePassword' : 'login.showPassword') }}</button>
           </label>
           <input
             id="password"

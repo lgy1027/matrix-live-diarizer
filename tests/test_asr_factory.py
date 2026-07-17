@@ -74,6 +74,10 @@ def test_asr_engine_capabilities_are_explicit():
     assert streaming["capabilities"]["upload"] is True
     assert streaming["capabilities"]["true_streaming"] == "adapter_not_yet"
     assert streaming["capabilities"]["word_timestamps"] is False
+    assert qwen["capabilities"]["result_contract"] == "asr-result-v1"
+    assert qwen["capabilities"]["timestamp_granularity"] == "word_optional"
+    assert streaming["capabilities"]["native_metadata"] is True
+    assert streaming["capabilities"]["timestamp_granularity"] == "dynamic"
 
 
 def test_asr_engine_capabilities_can_be_overridden(monkeypatch):
