@@ -5,13 +5,17 @@ import time
 import re
 import numpy as np
 import logging
+import wave
+from pathlib import Path
 from fastapi import APIRouter, WebSocket
 from starlette.websockets import WebSocketState
 
 from app.config import config
 from app.constants import SYSTEM_SPEAKER
 from app.services import SessionContext
-from engine.speaker.speaker_factory import get_engine_info, get_speaker_engine
+from app.runtime import EngineSnapshot
+from app.services.realtime_auth import authenticate_websocket
+from engine.speaker.speaker_factory import get_engine_info
 
 logger = logging.getLogger("Matrix_Core")
 
@@ -31,9 +35,6 @@ _FILLER_PATTERNS = [
 
 router = APIRouter()
 
-asr_engine = None
-inference_lock = None
-
 # client_id 验证：只允许字母、数字、下划线，最长 64 字符
 CLIENT_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_]{1,64}$')
 
@@ -49,17 +50,99 @@ def validate_client_id(client_id: str) -> str:
     return safe_id
 
 
-def check_engines():
+def _runtime_for(websocket: WebSocket):
+    return getattr(websocket.app.state, "runtime", None)
+
+
+def _engine_snapshot(websocket: WebSocket) -> EngineSnapshot:
+    snapshot = getattr(websocket, "_engine_snapshot", None)
+    if snapshot is not None:
+        return snapshot
+    runtime = _runtime_for(websocket)
+    if runtime is None:
+        raise RuntimeError("Application runtime is not initialized")
+    snapshot = runtime.snapshot()
+    websocket._engine_snapshot = snapshot
+    return snapshot
+
+
+def check_engines(websocket: WebSocket):
     """检查引擎是否已初始化"""
-    if asr_engine is None or inference_lock is None:
-        raise RuntimeError("Engines not initialized. Call init_engines() first.")
+    runtime = _runtime_for(websocket)
+    if runtime is None or runtime.asr is None or runtime.speaker is None:
+        raise RuntimeError("Application runtime is not initialized")
 
 
-def init_engines(asr, spk, lock):
-    """初始化引擎实例"""
-    global asr_engine, inference_lock
-    asr_engine = asr
-    inference_lock = lock
+async def _ensure_live_meeting(
+    websocket: WebSocket, client_id: str, *, notify: bool = True
+) -> str:
+    meeting_id = getattr(websocket, "_meeting_id", None)
+    if meeting_id:
+        return meeting_id
+    default_title = f"实时记录-{time.strftime('%H%M%S')}"
+    meeting_id = websocket.app.state.meeting_repo.create(
+        source="live", title=default_title, processing_mode="quick", status="processing"
+    )
+    websocket._meeting_id = meeting_id
+    if notify:
+        await websocket.send_json(
+            {"type": "meeting", "meeting_id": meeting_id, "title": default_title}
+        )
+    logger.info("[WS] %s 创建实时会议: %s", client_id, meeting_id)
+    return meeting_id
+
+
+async def _append_live_audio(
+    websocket: WebSocket, client_id: str, pcm_bytes: bytes
+) -> None:
+    meeting_id = await _ensure_live_meeting(websocket, client_id)
+    writer = getattr(websocket, "_audio_writer", None)
+    if writer is None:
+        live_dir = Path(config.storage.media_dir).resolve() / "live"
+        live_dir.mkdir(parents=True, exist_ok=True)
+        audio_path = live_dir / f"{meeting_id}.wav"
+        writer = wave.open(str(audio_path), "wb")
+        writer.setnchannels(1)
+        writer.setsampwidth(2)
+        writer.setframerate(config.audio.sample_rate)
+        websocket._audio_writer = writer
+        websocket._audio_path = str(audio_path)
+        websocket.app.state.meeting_repo.update(
+            meeting_id,
+            audio_path=str(audio_path),
+        )
+    writer.writeframesraw(pcm_bytes)
+
+
+def _close_live_audio(websocket: WebSocket) -> None:
+    writer = getattr(websocket, "_audio_writer", None)
+    if writer is not None:
+        writer.close()
+        websocket._audio_writer = None
+
+
+def _make_audio_queue_item(websocket: WebSocket, pcm_bytes: bytes) -> tuple[int, bytes]:
+    """为音频帧附加完整录音中的绝对 sample offset。
+
+    WebSocket 二进制协议仍然只接收 PCM bytes；offset 仅存在于服务端队列中。
+    因此即使有界队列丢弃旧帧，后续帧的时间也不会被压缩。
+    """
+    current_offset = getattr(websocket, "_received_audio_samples", 0)
+    sample_offset = current_offset if isinstance(current_offset, int) else 0
+    websocket._received_audio_samples = sample_offset + len(pcm_bytes) // 2
+    return sample_offset, pcm_bytes
+
+
+def _unpack_audio_queue_item(item, fallback_offset: int) -> tuple[int, bytes]:
+    """读取带 offset 的新队列条目，并兼容内部测试/旧调用直接传 bytes。"""
+    if (
+        isinstance(item, tuple)
+        and len(item) == 2
+        and isinstance(item[0], int)
+        and isinstance(item[1], bytes)
+    ):
+        return item
+    return fallback_offset, item
 
 
 # 状态机常量(模块级,供测试 import)
@@ -69,6 +152,8 @@ SILENCE_THRESHOLD_FRAMES = 8  # bug-fix: 3 帧 (384ms) 太短,自然换气就切
                                           # 8 帧 ≈ 1024ms 允许 1 秒停顿不切(用户感受:响应延迟略增,但完整)
                                           # 保持模块级常量,便于 WebSocket 状态机测试直接覆盖。
 LOUD_RMS_THRESHOLD = 0.005    # bug-fix: 0.015 偏高,某些帧瞬时 RMS 跌到这个值就被判静音 → buffer 不累积。原 0.015。
+SILENCE_THRESHOLD_SECONDS = 0.8
+PROCESSOR_DRAIN_TIMEOUT_SECONDS = 30.0
 
 
 def classify_frame(chunk: np.ndarray, asr_engine_obj) -> bool:
@@ -102,6 +187,8 @@ def should_emit_segment(
     sample_rate: int,
     max_segment_seconds: float,
     silence_threshold: int = SILENCE_THRESHOLD_FRAMES,
+    *,
+    silence_samples: int | None = None,
 ) -> bool:
     """判断当前帧后是否应该触发 ASR 识别
 
@@ -111,7 +198,12 @@ def should_emit_segment(
     """
     if state != STATE_SPEECH:
         return False
-    if silence_count >= silence_threshold:
+    silence_reached = (
+        silence_samples >= int(sample_rate * SILENCE_THRESHOLD_SECONDS)
+        if silence_samples is not None
+        else silence_count >= silence_threshold
+    )
+    if silence_reached:
         return True
     max_buffer = int(sample_rate * max_segment_seconds)
     if buffer_len >= max_buffer:
@@ -211,6 +303,78 @@ def _offset_words(words, offset: float):
     return shifted or None
 
 
+def _words_for_incremental_text(words, full_text: str, incremental_text: str):
+    """仅在能精确证明 word 序列对应增量文本时保留时间戳。
+
+    ASR 的重叠窗口通常返回完整文本，而产品只输出新增后缀。若无法在 word
+    边界精确切出该后缀，宁可丢弃 words，也不能保存与文本不一致的时间戳。
+    """
+    if not words or not incremental_text:
+        return None
+    if incremental_text == full_text:
+        return words
+    if not full_text.endswith(incremental_text):
+        return None
+
+    prefix = full_text[: -len(incremental_text)]
+    consumed = ""
+    for index, item in enumerate(words):
+        if not isinstance(item, dict):
+            return None
+        token = item.get("text", item.get("word"))
+        if not isinstance(token, str):
+            return None
+        consumed += token
+        if consumed == prefix:
+            suffix = words[index + 1 :]
+            suffix_text = "".join(
+                str(word.get("text", word.get("word", "")))
+                for word in suffix
+                if isinstance(word, dict)
+            )
+            return suffix if suffix and suffix_text == incremental_text else None
+        if not prefix.startswith(consumed):
+            return None
+    return None
+
+
+def _engine_device(engine: object) -> str:
+    value = getattr(engine, "device", None)
+    if value is None:
+        value = getattr(engine, "_device", None)
+    return str(value or "unknown").lower()
+
+
+def can_run_engine_pair_in_parallel(asr: object, speaker: object) -> bool:
+    """Parallelize only when adapters explicitly declare compatible devices."""
+    asr_device = _engine_device(asr)
+    speaker_device = _engine_device(speaker)
+    if "unknown" in {asr_device, speaker_device}:
+        return False
+    if "cpu" in {asr_device, speaker_device}:
+        return True
+    return asr_device != speaker_device
+
+
+async def _run_live_engines(engines: EngineSnapshot, audio_data: np.ndarray):
+    """Run independent ASR and speaker providers without early slot release."""
+    async def call_asr():
+        try:
+            return await engines.asr.run_asr(audio_data, use_preprocessing=True)
+        except Exception as exc:
+            return exc
+
+    async def call_speaker():
+        try:
+            return await asyncio.to_thread(engines.speaker.extract_feat, audio_data)
+        except Exception as exc:
+            return exc
+
+    if can_run_engine_pair_in_parallel(engines.asr, engines.speaker):
+        return await asyncio.gather(call_asr(), call_speaker())
+    return await call_asr(), await call_speaker()
+
+
 def _current_asr_type() -> str:
     try:
         from engine.asr import get_asr_engine_info
@@ -276,6 +440,8 @@ async def audio_processor(
     - 语音结束时（检测到静音）：触发 ASR 识别
     - 缓冲区达到上限：强制识别（保留部分上下文）
     """
+    engines = _engine_snapshot(websocket)
+
     # 检查配置
     try:
         sample_rate = config.audio.sample_rate
@@ -299,6 +465,7 @@ async def audio_processor(
 
     # 静音帧计数（用于判断语音结束）
     silence_frame_count = 0
+    silence_sample_count = 0
 
     # 超时追踪
     last_active_time = time.time()
@@ -308,8 +475,10 @@ async def audio_processor(
     skipped_frames = 0
     samples_seen = 0
     speech_start_sample = 0
+    last_processed_end_sample = None
 
-    while not stop_event.is_set():
+    # Once receiving stops, drain every frame the server already accepted.
+    while not stop_event.is_set() or not queue.empty():
         # 跳帧策略(纯函数 compute_skip_count 算要跳的帧数)
         queue_size = queue.qsize()
         frames_to_skip = compute_skip_count(queue_size, skip_frame_threshold)
@@ -322,7 +491,7 @@ async def audio_processor(
         
         # 获取数据
         try:
-            data = await asyncio.wait_for(queue.get(), timeout=1.0)
+            item = await asyncio.wait_for(queue.get(), timeout=0.1 if stop_event.is_set() else 1.0)
         except asyncio.TimeoutError:
             # 超时且有待处理的语音，强制识别
             if len(speech_buffer) > 0:
@@ -332,20 +501,47 @@ async def audio_processor(
                 )
                 speech_buffer = np.array([], dtype=np.float32)
                 ctx.last_full_text = ""  # 超时后重置上下文
+                state = STATE_SILENCE
+                silence_frame_count = 0
+                silence_sample_count = 0
+                scope = getattr(websocket, "_speaker_scope", client_id)
+                engines.speaker.reset_buffer(scope)
+            if stop_event.is_set() and queue.empty():
+                break
             continue
         except asyncio.CancelledError:
             break
         
         total_frames += 1
 
-        # 转换音频格式
+        # 转换音频格式。新队列条目携带完整已保存音频中的绝对 offset；
+        # fallback 只用于兼容直接向处理器传 bytes 的内部调用。
+        chunk_start_sample, data = _unpack_audio_queue_item(item, samples_seen)
         chunk = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
-        chunk_start_sample = samples_seen
-        chunk_end_sample = samples_seen + len(chunk)
-        samples_seen = chunk_end_sample
+        chunk_end_sample = chunk_start_sample + len(chunk)
+        samples_seen = max(samples_seen, chunk_end_sample)
+
+        # 队列降载会造成绝对时间轴上的缺口。不能把缺口两侧的语音拼成连续
+        # buffer，否则后续段的开始时间和保存的完整 WAV 会错位。
+        if (
+            last_processed_end_sample is not None
+            and chunk_start_sample > last_processed_end_sample
+        ):
+            if state == STATE_SPEECH and len(speech_buffer) > sample_rate * 0.1:
+                await _process_speech_segment(
+                    websocket, ctx, speech_buffer, client_id, sample_rate,
+                    segment_start_time=speech_start_sample / sample_rate,
+                )
+            state = STATE_SILENCE
+            speech_buffer = np.array([], dtype=np.float32)
+            silence_frame_count = 0
+            silence_sample_count = 0
+            ctx.last_full_text = ""
+            engines.speaker.reset_buffer(getattr(websocket, "_speaker_scope", client_id))
+        last_processed_end_sample = chunk_end_sample
 
         # 调用纯函数 classify_frame(单帧 VAD 判定)
-        is_speech_chunk = classify_frame(chunk, asr_engine)
+        is_speech_chunk = classify_frame(chunk, engines.asr)
 
         # 状态机处理
         if state == STATE_SILENCE:
@@ -355,6 +551,7 @@ async def audio_processor(
                 speech_buffer = chunk.copy()
                 speech_start_sample = chunk_start_sample
                 silence_frame_count = 0
+                silence_sample_count = 0
                 logger.debug(f"[PROCESSOR] {client_id} 语音开始")
                 # 推 transcribing 占位消息(纯函数判定: 仅 SILENCE→SPEECH 触发)
                 if should_push_transcribing(STATE_SILENCE, state):
@@ -368,6 +565,7 @@ async def audio_processor(
             else:
                 # 持续静音
                 silence_frame_count += 1
+                silence_sample_count += len(chunk)
                 
                 # 超时断开
                 if time.time() - last_active_time > timeout_seconds:
@@ -387,12 +585,14 @@ async def audio_processor(
                 # 持续语音：累积
                 speech_buffer = np.concatenate([speech_buffer, chunk])
                 silence_frame_count = 0
+                silence_sample_count = 0
                 last_active_time = time.time()
 
                 # 缓冲区达到上限：强制识别
                 if should_emit_segment(
                     state, silence_frame_count, len(speech_buffer),
                     sample_rate, max_segment_seconds,
+                    silence_samples=silence_sample_count,
                 ):
                     logger.debug(f"[PROCESSOR] {client_id} 达到上限，强制识别")
                     await _process_speech_segment(
@@ -410,11 +610,13 @@ async def audio_processor(
                 # 之前把静音帧也加到 buffer,导致 ASR 看到"语音+静音"混合
                 # 在短音频(0.5-1s)上经常识别空(text="")
                 silence_frame_count += 1
+                silence_sample_count += len(chunk)
 
                 # 连续静音帧达到阈值：语音结束
                 if should_emit_segment(
                     state, silence_frame_count, len(speech_buffer),
                     sample_rate, max_segment_seconds,
+                    silence_samples=silence_sample_count,
                 ):
                     logger.debug(f"[PROCESSOR] {client_id} 语音结束，开始识别")
                     
@@ -429,8 +631,9 @@ async def audio_processor(
                     state = STATE_SILENCE
                     speech_buffer = np.array([], dtype=np.float32)
                     silence_frame_count = 0
+                    silence_sample_count = 0
                     ctx.last_full_text = ""  # 语音段结束，重置上下文
-                    get_speaker_engine().reset_buffer(client_id)
+                    engines.speaker.reset_buffer(getattr(websocket, "_speaker_scope", client_id))
                     logger.info(f"[RESET] {client_id} 语义重置（语音段结束）")
 
     # Bug-01: 退出前 flush 残余 buffer,避免短音频(<1.5s)在 close 时被丢
@@ -467,19 +670,34 @@ async def _process_speech_segment(
     audio_duration = len(audio_data) / sample_rate
     segment_end_time = segment_start_time + audio_duration
     
-    # 并行执行 ASR 和声纹提取
-    async with inference_lock:
+    engines = _engine_snapshot(websocket)
+    runtime = _runtime_for(websocket)
+    inference_slot = runtime.inference.live()
+
+    # Cancellation of asyncio.to_thread does not stop its worker. Shield the
+    # pair and wait for it before releasing the inference slot so a subsequent
+    # job cannot run over a still-active model call.
+    async with inference_slot:
+        inference_task = asyncio.create_task(_run_live_engines(engines, audio_data))
         try:
-            asr_task = asr_engine.run_asr(audio_data, use_preprocessing=True)
-            spk_task = asyncio.to_thread(get_speaker_engine().extract_feat, audio_data)
-            asr_result, emb_result = await asyncio.gather(asr_task, spk_task)
-        except Exception as e:
-            logger.error(f"[ENGINE ERROR] {e}")
-            return
+            asr_result, emb_result = await asyncio.shield(inference_task)
+        except asyncio.CancelledError:
+            await inference_task
+            raise
+
+    if isinstance(asr_result, Exception):
+        logger.error("[ASR ERROR] %s", asr_result)
+        return
+    from engine.asr.contracts import normalize_asr_result
+
+    asr_result = normalize_asr_result(asr_result, audio_duration=audio_duration)
+    if not asr_result["is_final"]:
+        logger.debug("[ASR] 忽略 non-final 结果；当前协议只持久化 finalized utterance")
+        return
 
     # run_asr 现在返回 dict {text, words}
-    full_text = asr_result.get("text", "") if isinstance(asr_result, dict) else (asr_result or "")
-    seg_words = asr_result.get("words") if isinstance(asr_result, dict) else None
+    full_text = asr_result["text"]
+    seg_words = asr_result["words"]
     # diag: 打印 ASR 原始输出 + 音频时长,排查"很多话没转录"问题
     logger.info(f"[DIAG-ASR] {client_id} duration={audio_duration:.2f}s full_text={full_text!r}")
 
@@ -490,31 +708,60 @@ async def _process_speech_segment(
         logger.info(f"[DIAG-ASR] {client_id} 跳过短段 {audio_duration:.2f}s (< 0.5s, Qwen3-ASR 返空)")
         return
 
-    # 处理声纹提取结果（extract_feat 现在返回 tuple）
-    if isinstance(emb_result, tuple):
-        embedding, _ = emb_result  # 忽略返回的时长，使用我们计算的
+    embedding = None
+    if isinstance(emb_result, Exception):
+        logger.warning("[SPEAKER ERROR] 声纹不可用，转写降级为匿名: %s", emb_result)
+    elif isinstance(emb_result, tuple) and len(emb_result) == 2:
+        embedding = emb_result[0]
     else:
-        embedding = emb_result  # 兼容旧版引擎
+        logger.warning("[ENGINE CONTRACT] 声纹返回无效，转写降级为匿名")
 
     # 处理识别结果
     if full_text and full_text.strip():
-        # Bug-12: 过滤常见填充词/语气词,避免实时字幕被噪音淹没
-        full_text = _strip_filler_words(full_text)
-        if not full_text or not full_text.strip():
-            logger.info(f"[DIAG-ASR] {client_id} 全是填充词,过滤后空")
-            return  # 过滤后空,不发
-
         # 调用 compare_and_identify，传递音频时长
         # 整改: 用 client_id 当默认名 (SessionContext 没 session_title 属性, 简化用 client_id)
-        _default_name = ctx.client_id
+        meeting_id = await _ensure_live_meeting(websocket, client_id)
+        speaker_scope = meeting_id
+        websocket._speaker_scope = speaker_scope
+        _default_name = "Speaker"
         # compare_and_identify 现在返回 (spk_id, score) — 把置信度也透出给前端做可视化
-        spk_id, spk_score = get_speaker_engine().compare_and_identify(
-            embedding,
-            ctx.client_id,
-            audio_duration,
-            default_name=_default_name,
-        )
+        spk_id, spk_score = "Spk_unknown", 0.0
+        if embedding is not None:
+            try:
+                spk_id, spk_score = engines.speaker.compare_and_identify(
+                    embedding,
+                    speaker_scope,
+                    audio_duration,
+                    default_name=_default_name,
+                )
+            except Exception as exc:
+                logger.warning("[SPEAKER ERROR] 聚类失败，转写降级为匿名: %s", exc)
         incr_text = ctx.get_incremental_text(full_text)
+        incremental_words = _words_for_incremental_text(
+            seg_words, full_text, incr_text
+        )
+        absolute_words = (
+            incremental_words
+            if asr_result["timestamp_origin"] == "stream"
+            else _offset_words(incremental_words, segment_start_time)
+        )
+        result_start = segment_start_time
+        result_end = segment_end_time
+        if absolute_words:
+            result_start = min(float(word["start"]) for word in absolute_words)
+            result_end = max(float(word["end"]) for word in absolute_words)
+        elif asr_result["segments"]:
+            native_start = min(
+                float(segment["start"]) for segment in asr_result["segments"]
+            )
+            native_end = max(
+                float(segment["end"]) for segment in asr_result["segments"]
+            )
+            if asr_result["timestamp_origin"] == "stream":
+                result_start, result_end = native_start, native_end
+            else:
+                result_start = segment_start_time + native_start
+                result_end = segment_start_time + native_end
         # diag: 看增量合并把什么过滤掉了
         if not incr_text:
             logger.info(f"[DIAG-ASR] {client_id} 增量合并返回空 (full_text={full_text!r} last={ctx.last_full_text!r})")
@@ -530,59 +777,100 @@ async def _process_speech_segment(
                     "text": incr_text,
                     "time": time.strftime("%H:%M:%S"),
                     "seq": seq,
+                    "start": result_start,
+                    "end": result_end,
+                    "timebase": "meeting",
+                    "is_final": True,
+                    "speaker_state": (
+                        "unknown" if spk_id == "Spk_unknown" else "provisional"
+                    ),
                 }
                 # 字级时间戳:在 incr_text 上做近似对齐(整体偏移到 segment 起始时间 0)
                 # 真实精确对齐需要 segment 累积时间偏移,留作 v0.3.x 增量
-                if seg_words:
-                    msg["words"] = seg_words
+                if incremental_words:
+                    msg["words"] = absolute_words
                 await websocket.send_json(msg)
                 logger.info(f"[{client_id} | {spk_id}]: {incr_text}")
             except Exception as e:
                 logger.debug(f"[PROCESSOR] 发送结果失败: {e}")
 
-        # Bug-10: 自动存档 — 有 segment 累积就存档,不再要求 rename 才创建
-        if config.storage.history_enabled and full_text:
-            # 懒创建 session(用 client_id + 时间为默认 title)
-            session_id = getattr(websocket, "_session_id", None)
-            if session_id is None:
-                try:
-                    repo = websocket.app.state.transcript_repo
-                    default_title = f"{ctx.client_id}-{time.strftime('%H%M%S')}"
-                    session_id = repo.create_session(
-                        source="websocket",
-                        title=default_title,
-                        client_id=ctx.client_id,
-                        asr_engine=_current_asr_type(),
-                        speaker_engine=_current_speaker_type(),
-                        diarization_source="realtime-speaker-engine",
-                    )
-                    websocket._session_id = session_id
-                    logger.info(f"[WS] {client_id} 自动创建会话: {session_id} ({default_title})")
-                except Exception as e:
-                    logger.warning(f"[WS] 创建 session 失败: {e}")
-                    session_id = None
+        # 实时结果直接进入产品会议模型，与上传任务共享校正/搜索/导出链路。
+        if incr_text:
+            try:
+                websocket.app.state.meeting_repo.append_live_segment(
+                    meeting_id,
+                    text=incr_text,
+                    start_time=result_start,
+                    end_time=result_end,
+                    speaker_label=spk_id,
+                    confidence=spk_score,
+                    words=absolute_words,
+                )
+            except Exception as e:
+                logger.warning(f"[WS] 实时会议存档失败: {e}")
 
-            if session_id:
-                try:
-                    repo = websocket.app.state.transcript_repo
-                    segs = repo.list_segments(session_id)
-                    import json as _json
-                    archive_words = _offset_words(seg_words, segment_start_time)
-                    words_json = _json.dumps(archive_words, ensure_ascii=False) if archive_words else None
-                    repo.insert_segment(
-                        session_id,
-                        segment_index=len(segs),
-                        text=full_text,
-                        start_time=segment_start_time,
-                        end_time=segment_end_time,
-                        speaker_id=spk_id,
-                        words_json=words_json,
-                        asr_engine=_current_asr_type(),
-                        speaker_engine=_current_speaker_type(),
-                        diarization_source="realtime-speaker-engine",
-                    )
-                except Exception as e:
-                    logger.warning(f"[WS] 存档失败: {e}")
+
+async def _finalize_live_session(websocket: WebSocket, client_id: str) -> None:
+    """Finalize persistence and speaker state after the processor owns no work."""
+    meeting_id = getattr(websocket, "_meeting_id", None)
+    if meeting_id:
+        notification = {
+            "type": "meeting_finalized",
+            "meeting_id": meeting_id,
+            "refinement_status": "ready",
+        }
+        try:
+            meeting = websocket.app.state.meeting_repo.get(meeting_id)
+            audio_path = Path(meeting.get("audio_path") or "") if meeting else None
+            if audio_path is not None and audio_path.is_file():
+                job_id, created = websocket.app.state.job_repo.enqueue_refinement(meeting_id)
+                if created:
+                    websocket.app.state.job_runner.notify()
+                notification.update(job_id=job_id, refinement_status="queued")
+            else:
+                websocket.app.state.meeting_repo.finalize_live(meeting_id)
+        except Exception as exc:
+            logger.warning("[WS] 实时会议精修排队失败，保留实时文稿: %s", exc)
+            websocket.app.state.meeting_repo.finalize_live(meeting_id)
+            notification["refinement_status"] = "unavailable"
+        try:
+            await websocket.send_json(notification)
+        except Exception:
+            pass
+    speaker_scope = getattr(websocket, "_speaker_scope", None)
+    if speaker_scope:
+        _engine_snapshot(websocket).speaker.cleanup_client(speaker_scope)
+    logger.info("[WS] 用户 %s 连接已释放", client_id)
+
+
+async def _finish_deferred_processor(
+    websocket: WebSocket, client_id: str, processor_task: asyncio.Task
+) -> None:
+    """Keep ownership of an uninterruptible model call without blocking WS close."""
+    try:
+        await asyncio.shield(processor_task)
+    except Exception:
+        logger.warning("[WS] %s 后台 processor 异常", client_id, exc_info=True)
+    finally:
+        await _finalize_live_session(websocket, client_id)
+
+
+def _track_background_task(websocket: WebSocket, task: asyncio.Task) -> None:
+    tasks = getattr(websocket.app.state, "ws_background_tasks", None)
+    if tasks is None:
+        tasks = set()
+        websocket.app.state.ws_background_tasks = tasks
+    tasks.add(task)
+    task.add_done_callback(tasks.discard)
+
+
+async def _wait_for_processor(task: asyncio.Task, timeout: float) -> bool:
+    """Return on deadline without cancelling an uninterruptible model owner."""
+    try:
+        await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
+        return True
+    except asyncio.TimeoutError:
+        return False
 
 
 @router.websocket("/ws/v1/stream/{client_id}")
@@ -596,68 +884,17 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
     
     # 检查引擎是否初始化
     try:
-        check_engines()
+        check_engines(websocket)
     except RuntimeError as e:
         logger.error(f"[WS] {e}")
         await websocket.close(code=1011, reason=str(e))
         return
     
+    _engine_snapshot(websocket)
     await websocket.accept()
 
-    # Bug-89 (审核 #8): WebSocket 鉴权 — 接受后等首条 JSON {"action":"auth","token":"..."}
-    # 5s 内没收到或鉴权失败, close(4401)
-    # 测试模式绕过 (TEST_AUTH_BYPASS=1, 跟 HTTP 中间件同款)
-    import os as _os
-    if _os.environ.get("TEST_AUTH_BYPASS") == "1":
-        logger.info(f"[WS] {client_id} 测试模式 bypass 鉴权")
-    else:
-        try:
-            auth_msg = await asyncio.wait_for(websocket.receive(), timeout=5.0)
-            auth_payload = json.loads(auth_msg.get("text", "{}"))
-            if not (isinstance(auth_payload, dict) and auth_payload.get("action") == "auth"):
-                logger.warning(f"[WS] {client_id} 首条消息不是 auth action")
-                await websocket.close(code=4401, reason="需要 auth")
-                return
-            token = auth_payload.get("token", "")
-            if not token:
-                logger.warning(f"[WS] {client_id} 缺 token")
-                await websocket.close(code=4401, reason="缺 token")
-                return
-            # 校验 token
-            auth_service = websocket.app.state.auth_service
-            decoded = auth_service.decode_token(token)
-            if not decoded:
-                logger.warning(f"[WS] {client_id} token 无效")
-                await websocket.close(code=4401, reason="token 无效")
-                return
-            # 校验 pwd_iat (Bug-88 同款)
-            try:
-                user_id = int(decoded["sub"])
-                user_row = auth_service.get_user(user_id)
-                if not user_row or not user_row.get("is_active"):
-                    await websocket.close(code=4401, reason="用户不存在/禁用")
-                    return
-                if user_row.get("must_change_password"):
-                    await websocket.close(code=4403, reason="首次登录必须先修改默认密码")
-                    return
-                token_pwd_iat = float(decoded.get("pwd_iat", 0))
-                current_pwd_iat = float(user_row.get("password_changed_at") or 0)
-                if current_pwd_iat > token_pwd_iat:
-                    await websocket.close(code=4401, reason="密码已修改, 请重新登录")
-                    return
-            except (ValueError, TypeError, KeyError):
-                await websocket.close(code=4401, reason="token 格式错")
-                return
-            logger.info(f"[WS] {client_id} 鉴权通过 (user_id={user_id})")
-        except asyncio.TimeoutError:
-            logger.warning(f"[WS] {client_id} 5s 内没发 auth, 关闭")
-            await websocket.close(code=4401, reason="auth 超时")
-            return
-        except json.JSONDecodeError:
-            logger.warning(f"[WS] {client_id} 首条消息不是 JSON")
-            await websocket.close(code=4401, reason="auth 格式错")
-            return
-    # end TEST_AUTH_BYPASS else
+    if not await authenticate_websocket(websocket, client_id):
+        return
 
     # 创建有界队列
     try:
@@ -707,43 +944,44 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                     try:
                         cmd = json.loads(message["text"])
                         if isinstance(cmd, dict) and cmd.get("action") == "rename":
-                            new_title = cmd.get("title")
-                            if not hasattr(websocket, "_session_id"):
-                                # 第一次命名：创建会话
-                                repo = websocket.app.state.transcript_repo
-                                sid = repo.create_session(
-                                    source="websocket",
-                                    title=new_title,
-                                    client_id=client_id,
-                                    asr_engine=_current_asr_type(),
-                                    speaker_engine=_current_speaker_type(),
-                                    diarization_source="realtime-speaker-engine",
+                            new_title = str(cmd.get("title") or "").strip()
+                            meeting_id = await _ensure_live_meeting(
+                                websocket, client_id, notify=False
+                            )
+                            if new_title:
+                                websocket.app.state.meeting_repo.update(
+                                    meeting_id, title=new_title[:200]
                                 )
-                                websocket._session_id = sid
-                                logger.info(f"[WS] {client_id} 命名会话: {sid} ({new_title})")
                             else:
-                                websocket.app.state.transcript_repo.update_session(
-                                    websocket._session_id, title=new_title
-                                )
-                                logger.info(f"[WS] {client_id} 重命名: {new_title}")
-                            await websocket.send_json({"type": "renamed", "title": new_title})
+                                new_title = websocket.app.state.meeting_repo.get(
+                                    meeting_id
+                                )["title"]
+                            await websocket.send_json({
+                                "type": "renamed", "title": new_title[:200],
+                                "meeting_id": meeting_id,
+                            })
                     except (json.JSONDecodeError, KeyError, AttributeError) as e:
                         logger.debug(f"[WS] 文本命令解析失败: {e}")
                     continue  # 跳过后续 bytes 处理
 
                 if "bytes" in message:
                     data = message["bytes"]
+                    try:
+                        await _append_live_audio(websocket, client_id, data)
+                    except Exception as exc:
+                        logger.warning("[WS] 实时音频保存失败: %s", exc)
                 else:
                     continue
 
                 # 尝试放入队列
+                queue_item = _make_audio_queue_item(websocket, data)
                 try:
-                    queue.put_nowait(data)
+                    queue.put_nowait(queue_item)
                 except asyncio.QueueFull:
                     # 队列满，丢弃最旧的数据
                     try:
                         queue.get_nowait()
-                        queue.put_nowait(data)
+                        queue.put_nowait(queue_item)
                         logger.debug("[RECEIVER] 队列满，丢弃旧数据")
                     except asyncio.QueueEmpty:
                         pass
@@ -765,17 +1003,18 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
         # 设置停止信号
         stop_event.set()
 
-        # Bug-01: 给 processor 2s 自然退出,让它执行残余 buffer flush(短音频)
-        # 不立刻 cancel,避免打断短音频的最后一次 ASR 识别
+        # ASR can legitimately take longer than two seconds. A bounded graceful
+        # drain is safer than cancelling a worker thread that keeps running.
+        deferred = False
         try:
-            await asyncio.wait_for(asyncio.shield(processor_task), timeout=2.0)
-        except asyncio.TimeoutError:
-            logger.warning(f"[WS] {client_id} processor 2s 内未退出,强制 cancel")
-            processor_task.cancel()
-            try:
-                await processor_task
-            except asyncio.CancelledError:
-                pass
+            deferred = not await _wait_for_processor(
+                processor_task, PROCESSOR_DRAIN_TIMEOUT_SECONDS
+            )
+            if deferred:
+                logger.warning(
+                    "[WS] %s processor 30s 内未退出；转为后台持有推理槽并延后 finalize",
+                    client_id,
+                )
         except Exception as e:
             logger.warning(f"[WS] {client_id} processor 异常: {e}")
 
@@ -785,6 +1024,12 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
         except asyncio.CancelledError:
             pass
 
-        # 清理客户端资源，防止内存泄漏
-        get_speaker_engine().cleanup_client(client_id)
-        logger.info(f"[WS] 用户 {client_id} 连接已释放")
+        # The WAV writer is independent of model inference and can close now.
+        _close_live_audio(websocket)
+        if deferred:
+            task = asyncio.create_task(
+                _finish_deferred_processor(websocket, client_id, processor_task)
+            )
+            _track_background_task(websocket, task)
+        else:
+            await _finalize_live_session(websocket, client_id)

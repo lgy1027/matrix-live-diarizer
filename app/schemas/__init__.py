@@ -1,20 +1,5 @@
-"""响应数据模型"""
-from app.schemas.response import (
-    UploadResponse,
-    ModelsResponse,
-    EngineInfo,
-    ASRInfo,
-    SegmentResult,
-    SpeakerInfo,
-    SpeakerResponse,
-    SpeakerListResponse,
-    SpeakerUpdateRequest,
-    SpeakerDeleteResponse,
-    SpeakerImpactResponse,
-)
+"""Application schemas."""
 
-__all__ = [
-    'UploadResponse', 'ModelsResponse', 'EngineInfo', 'ASRInfo', 'SegmentResult',
-    'SpeakerInfo', 'SpeakerResponse', 'SpeakerListResponse', 'SpeakerUpdateRequest',
-    'SpeakerDeleteResponse', 'SpeakerImpactResponse',
-]
+from app.schemas.response import EngineSwitchRequest, EngineSwitchResponse, EnginesListResponse
+
+__all__ = ["EngineSwitchRequest", "EngineSwitchResponse", "EnginesListResponse"]

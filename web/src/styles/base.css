@@ -1,4 +1,4 @@
-/* 全局 reset + 滚动条 (从旧 web/index.html 内联抽出) */
+/* 全局 reset 与页面基础布局 */
 *,
 *::before,
 *::after {
@@ -34,6 +34,20 @@ textarea {
   border: none;
   outline: none;
 }
+/* Native select popups are rendered by the OS on Windows. Declare the dark
+   scheme and explicit option colors so they never inherit a dark parent color
+   or fall back to an unreadable light-theme palette. */
+select {
+  color-scheme: dark;
+}
+select option,
+select optgroup {
+  color: var(--text);
+  background-color: var(--ink-2);
+}
+select option:disabled {
+  color: var(--text-3);
+}
 a {
   color: inherit;
   text-decoration: none;
@@ -52,3 +66,22 @@ a {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-3);
 }
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+}
+.product-page { padding: 36px 48px 60px; max-width: 1280px; width: 100%; margin: 0 auto; }
+.page-head { display:flex; justify-content:space-between; align-items:flex-end; gap:24px; margin-bottom:30px; padding-bottom:24px; border-bottom:1px solid var(--border); }
+.page-head h1 { font: 42px/1.1 var(--serif); margin:7px 0; }
+.page-head p { color:var(--text-2); }
+.eyebrow { color:var(--amber); font:10px var(--mono); letter-spacing:.16em; }
+.primary-action { background:var(--amber); color:#160d09; padding:10px 17px; border-radius:7px; font-weight:700; }
+.empty-state { padding:50px 20px; text-align:center; color:var(--text-3); border:1px dashed var(--border); border-radius:10px; }
+@media(max-width:700px){.product-page{padding:26px 20px 50px}.page-head{align-items:flex-start;flex-direction:column}}

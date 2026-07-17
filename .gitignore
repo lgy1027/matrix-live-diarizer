@@ -47,9 +47,6 @@ models/
 *.mp3
 *.flac
 
-# ChromaDB
-engine/speaker/speaker_db/
-
 # Uploads
 uploads/
 
@@ -73,6 +70,9 @@ docs/superpowers/
 docs/plans/
 docs/specs/
 docs/QA_REPORT.md
+docs/PRODUCT_STRATEGY.md
+docs/adr/
+tests/**/*.md
 skills-lock.json
 AGENTS.md
 # 本地数据

@@ -3,12 +3,14 @@ import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useLiveStore } from '../stores/live'
+import { useAuthStore } from '../stores/auth'
 import LangSwitch from './LangSwitch.vue'
 import UserMenu from './UserMenu.vue'
 
 const route = useRoute()
 const { t } = useI18n()
 const live = useLiveStore()
+const auth = useAuthStore()
 
 // SPA v3: 顶栏左侧 只在 Live 录音且有 sessionTitle 时显示 (取代之前的"实时 · 实时转写"重复 crumb)
 // 其他 view 顶栏左侧留空 (侧栏 4 个图标已是导航)
@@ -27,7 +29,7 @@ const sub = computed(() => {
       </span>
     </div>
     <div class="right">
-      <UserMenu />
+      <UserMenu v-if="auth.isLoggedIn" />
       <LangSwitch />
     </div>
   </header>

@@ -44,7 +44,6 @@ const showChrome = computed(() => route.name !== 'login')
 }
 .col {
   display: grid;
-  grid-template-rows: auto 1fr auto;
   grid-template-rows: auto minmax(0, 1fr) auto;
   min-width: 0;
   height: 100vh;
@@ -62,4 +61,8 @@ const showChrome = computed(() => route.name !== 'login')
 }
 .view-enter-from { opacity: 0; transform: translateY(6px); }
 .view-leave-to { opacity: 0; transform: translateY(-6px); }
+@media (max-width: 700px) {
+  .app { grid-template-columns: 1fr; padding-bottom: 58px; }
+  .col { height: calc(100vh - 58px); }
+}
 </style>

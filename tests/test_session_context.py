@@ -70,13 +70,13 @@ def test_completely_different_returns_new_text():
     assert out == "明天会下雨"
 
 
-def test_similar_high_ratio_no_output():
-    """SequenceMatcher > 0.6 但无重叠 → ASR 修正,静默更新不输出"""
+def test_similar_text_without_exact_overlap_is_not_silently_lost():
+    """没有精确重叠时不能凭相似度吞掉一条可能的 ASR 修正。"""
     ctx = SessionContext("c1")
     ctx.get_incremental_text("今天天气非常的好")
     # 相似但内容变了: "今天天气非常好"(少一个"的很")
     out = ctx.get_incremental_text("今天天气非常好")
-    assert out == "", f"高相似度应不输出,实际 {out!r}"
+    assert out == "今天天气非常好"
 
 
 def test_repeat_last_output_returns_empty():

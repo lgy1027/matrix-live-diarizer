@@ -5,14 +5,10 @@ import { useLiveStore } from '../stores/live'
 import { useDialog } from '../composables/useDialog'
 import { useRouter } from 'vue-router'
 import { spkColor } from '../utils/spk'
-import { fmtClock, fmtRel } from '../utils/format'
-import { uploadAudio } from '../api/speakers'
+import { fmtClock } from '../utils/format'
 import { getModels, type ModelsInfo } from '../api/engines'
 import SpeakerLabel from '../components/SpeakerLabel.vue'
-import SpeakerMenu from '../components/SpeakerMenu.vue'
 import EmText from '../components/EmText.vue'
-import type { LiveSegment } from '../stores/live'
-type UploadResp = Awaited<ReturnType<typeof uploadAudio>>
 
 const { t } = useI18n()
 const live = useLiveStore()
@@ -20,10 +16,8 @@ const dialog = useDialog()
 const router = useRouter()
 
 const waveCanvas = ref<HTMLCanvasElement | null>(null)
-const dropActive = ref(false)
 const models = ref<ModelsInfo | null>(null)
-
-let dragCounter = 0
+const plannedTitle = ref('')
 
 function fmtTime(sec: number) {
   return fmtClock(sec)
@@ -60,9 +54,12 @@ function drawWave() {
 
 async function toggleRec() {
   if (live.rec) {
+    const meetingId = live.sessionId
     live.stopRec()
+    if (meetingId) router.push({ name: 'meeting-detail', params: { id: meetingId } })
   } else {
     await live.startRec()
+    if (plannedTitle.value.trim() && live.rec) live.rename(plannedTitle.value.trim())
   }
 }
 
@@ -85,56 +82,6 @@ async function clearTranscript() {
   if (ok) live.clearTranscript()
 }
 
-async function onFile(file: File) {
-  if (!file) return
-  try {
-    window.toast?.(t('upload.processing') || '处理中…', 'info')
-    const r: UploadResp = await uploadAudio(file, { enable_diarization: true })
-    window.toast?.(t('upload.done') || '上传完成', 'ok')
-    if (r.session_id) {
-      router.push({ path: '/library', query: { open: r.session_id } })
-    }
-  } catch (e) {
-    window.toast?.(`${t('upload.error')}: ${e instanceof Error ? e.message : e}`, 'error')
-  }
-}
-
-function onDragEnter(e: DragEvent) {
-  e.preventDefault()
-  dragCounter++
-  if (e.dataTransfer?.types.includes('Files')) dropActive.value = true
-}
-function onDragLeave() {
-  dragCounter--
-  if (dragCounter <= 0) { dropActive.value = false; dragCounter = 0 }
-}
-function onDragOver(e: DragEvent) { e.preventDefault() }
-function onDrop(e: DragEvent) {
-  e.preventDefault()
-  dropActive.value = false
-  dragCounter = 0
-  const file = e.dataTransfer?.files?.[0]
-  if (file) onFile(file)
-}
-
-function onPickFile() {
-  const inp = document.createElement('input')
-  inp.type = 'file'
-  inp.accept = 'audio/wav,audio/mpeg,audio/mp4,audio/flac,.wav,.mp3,.m4a,.flac'
-  inp.onchange = () => { if (inp.files?.[0]) onFile(inp.files[0]) }
-  inp.click()
-}
-
-function onSpeakerClick(seg: LiveSegment) {
-  menuSeg.value = seg
-}
-
-function closeSpeakerMenu() {
-  menuSeg.value = null
-}
-
-const menuSeg = ref<LiveSegment | null>(null)
-
 let rafId: number | null = null
 function tick() {
   drawWave()
@@ -143,31 +90,13 @@ function tick() {
 
 onMounted(() => {
   rafId = requestAnimationFrame(tick)
-  document.addEventListener('dragenter', onDragEnter)
-  document.addEventListener('dragleave', onDragLeave)
-  document.addEventListener('dragover', onDragOver)
-  document.addEventListener('drop', onDrop)
   // 加载 recent
   // (简化: 留给 library view 加载)
 })
 onBeforeUnmount(() => {
   if (rafId !== null) cancelAnimationFrame(rafId)
-  document.removeEventListener('dragenter', onDragEnter)
-  document.removeEventListener('dragleave', onDragLeave)
-  document.removeEventListener('dragover', onDragOver)
-  document.removeEventListener('drop', onDrop)
   live.stopRec()
 })
-
-async function loadRecent() {
-  // 简化: 复用 listHistory 拉最近 5 条
-  try {
-    const { listHistory } = await import('../api/history')
-    const r = await listHistory({ page: 1, page_size: 5 })
-    live.recent = r.items
-  } catch { /* noop */ }
-}
-onMounted(loadRecent)
 
 async function loadModels() {
   try {
@@ -183,19 +112,28 @@ onMounted(loadModels)
   <section class="live-wrap">
     <div class="live-grid">
       <div class="live-main">
-        <h1 class="page-title"><EmText :text="t('view.live.title')" /></h1>
+        <div class="live-heading">
+          <div>
+            <div class="eyebrow">{{ t('product.live.eyebrow') }}</div>
+            <h1 class="page-title"><EmText :text="t('view.live.title')" /></h1>
+          </div>
+          <label class="session-name">
+            <span>{{ t('product.live.sessionName') }}</span>
+            <input v-if="!live.rec" v-model="plannedTitle" maxlength="200" :placeholder="t('product.live.sessionPlaceholder')">
+            <button v-else type="button" @click="rename">{{ live.sessionTitle || t('product.live.untitled') }} <i>✎</i></button>
+          </label>
+        </div>
         <div class="live-meta">
-          <span><span>{{ t('view.live.meta.room') }}</span> <b>A</b></span>
           <template v-if="live.rec">
-            <span class="sep">·</span>
             <span><span>{{ t('view.live.meta.started') }}</span> <b>{{ fmtTime(live.recTimer) }}</b></span>
+            <span class="sep">·</span>
           </template>
           <span class="sep">·</span>
           <span><span>{{ t('view.live.meta.asr') }}</span> <b>{{ models?.asr?.name || 'ASR' }}</b></span>
           <span class="sep">·</span>
           <span><span>{{ t('view.live.meta.speaker') }}</span> <b>{{ models?.speakers?.[models.current]?.name || models?.current || '—' }}</b></span>
         </div>
-        <div class="wave-wrap" :class="{ 'drop-active': dropActive }">
+        <div class="wave-wrap">
           <canvas ref="waveCanvas" />
           <div v-if="!live.rec" class="placeholder">
             <b>◌</b><span>{{ t('view.live.wavePH') }}</span>
@@ -215,13 +153,9 @@ onMounted(loadModels)
             <span class="dot" :class="{ live: live.rec }" />
             <span>{{ live.rec ? (t('view.live.status.recording') || '录制中') : (t('view.live.status.ready') || 'Ready') }}</span>
             <span style="margin-left: 14px" v-if="live.rec">{{ fmtTime(live.recTimer) }}</span>
-            <span style="margin-left: 14px" v-else-if="live.wsState === 'reconnecting'">{{ t('live.reconnecting') || 'reconnecting…' }}</span>
+            <span style="margin-left: 14px" v-else-if="live.wsState === 'disconnected'">{{ t('live.disconnected') }}</span>
           </div>
           <div style="margin-left: auto; display: flex; gap: 6px; align-items: center">
-            <button v-if="live.rec" class="btn ghost" type="button" :title="t('view.live.renameBtn.title')" @click="rename">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" /></svg>
-              <span>{{ t('view.live.renameBtn') || '命名' }}</span>
-            </button>
             <button v-if="live.rec || live.segments.length > 0" class="btn ghost" type="button" :title="t('view.live.clearBtn.title')" @click="clearTranscript">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
               <span>{{ t('view.live.clearBtn') || '清空' }}</span>
@@ -248,13 +182,6 @@ onMounted(loadModels)
                 </div>
               </div>
               <div class="tip">
-                <span class="tip-icon">📁</span>
-                <div>
-                  <b>{{ t('view.live.tip2Title') || '上传音频' }}</b>
-                  <small>{{ t('view.live.tip2Body') || '拖入或点击右侧 "快速导入" 区, 支持 WAV/MP3 等格式' }}</small>
-                </div>
-              </div>
-              <div class="tip">
                 <span class="tip-icon">✎</span>
                 <div>
                   <b>{{ t('view.live.tip3Title') || '命名会话' }}</b>
@@ -278,50 +205,25 @@ onMounted(loadModels)
               <span class="time">{{ seg.time }}</span>
             </template>
             <template v-else>
-              <SpeakerLabel :speaker="live.getDisplayName(seg)" :score="seg.score" @click="onSpeakerClick(seg)" />
+              <SpeakerLabel :speaker="live.getDisplayName(seg)" :score="seg.score" />
               <span class="text">{{ seg.displayed }}<span v-if="seg.typewriterId" class="cursor">▍</span></span>
               <span class="time">{{ seg.time }}</span>
             </template>
           </div>
         </div>
-        <div class="dropzone" @click="onPickFile">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" />
-          </svg>
-          <b>{{ t('view.live.dropzone.title') }}</b>
-          <small>{{ t('view.live.dropzone.hint') }}</small>
-        </div>
       </div>
-      <aside class="live-side">
-        <div class="side-block">
-          <div class="h-mono">
-            <span>{{ t('view.live.recent') }}</span>
-            <span class="act" @click="router.push('/library')">{{ t('view.live.seeAll') }}</span>
-          </div>
-          <div class="recent">
-            <div v-if="live.recent.length === 0" class="empty">{{ t('view.live.recentEmpty') }}</div>
-            <div v-for="it in live.recent" :key="it.id" class="rec-row" @click="router.push({ path: '/library', query: { open: it.id } })">
-              <div class="rec-title">{{ it.title || it.original_filename || (t('library.untitled') || '未命名') }}</div>
-              <div class="rec-meta">
-                <span class="src-tag" :class="it.source">{{ it.source === 'websocket' ? (t('view.library.source.live') || 'Live') : (t('view.library.source.upload') || 'Upload') }}</span>
-                · {{ fmtTime(it.duration_sec || 0) }} · {{ live.spkCount || 0 }} {{ t('voice.card.samples') || 'voices' }} · {{ fmtRel(it.created_at) }}
-              </div>
-            </div>
-          </div>
-        </div>
-      </aside>
     </div>
-    <SpeakerMenu :seg="menuSeg" :visible="menuSeg !== null" @close="closeSpeakerMenu" />
   </section>
 </template>
 
 <style scoped>
 .live-wrap { padding: 32px 48px 48px; }  /* 整改: 删 max-width, 让内容平铺整页 */
-.live-grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 48px; align-items: stretch; min-height: calc(100vh - 88px); }
+.live-grid { display: grid; grid-template-columns: minmax(0, 1fr); align-items: stretch; min-height: calc(100vh - 88px); max-width: 1100px; margin: 0 auto; }
 .live-main { min-width: 0; display: flex; flex-direction: column; }
+.live-heading{display:flex;justify-content:space-between;align-items:flex-end;gap:24px}.session-name{width:min(320px,40%);display:flex;flex-direction:column;gap:7px}.session-name>span{font:10px var(--mono);letter-spacing:.1em;color:var(--text-3);text-transform:uppercase}.session-name input,.session-name button{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:7px;background:var(--ink-2);text-align:left}.session-name input:focus{border-color:var(--amber);box-shadow:0 0 0 3px var(--amber-soft)}.session-name button{color:var(--amber);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.session-name i{float:right;font-style:normal}
 .live-main > .transcript { flex: 1; min-height: 200px; }
 /* 整改 1: 改用 .page-title (components.css) 工具类; 保留 min-width 防止 reflow */
-.page-title { min-width: 420px; display: inline-block; }
+.page-title { display: inline-block; }
 .live-meta {
   display: flex;
   flex-wrap: wrap;
@@ -535,6 +437,8 @@ onMounted(loadModels)
   text-transform: uppercase;
   letter-spacing: 0.1em;
 }
-.src-tag.websocket { color: var(--amber); background: var(--amber-soft); }
+.src-tag.websocket,.src-tag.live { color: var(--amber); background: var(--amber-soft); }
 .src-tag.upload { color: var(--teal); background: var(--teal-soft); }
+@media(max-width:980px){.live-grid{grid-template-columns:1fr;gap:28px}.live-side{border-top:1px solid var(--border);padding-top:24px}.live-heading{align-items:flex-start;flex-direction:column}.session-name{width:100%}}
+@media(max-width:700px){.live-wrap{padding:26px 20px 48px}.live-meta{gap:10px}.controls{flex-wrap:wrap}.empty-tips{grid-template-columns:1fr}}
 </style>

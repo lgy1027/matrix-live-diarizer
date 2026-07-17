@@ -17,7 +17,12 @@ ENGINE_CONFIG = {
         "params": "7.2M",
         "speed": "快",
         "speed_en": "Fast",
-        "embedding_dim": 192
+        "embedding_dim": 192,
+        "model_revision": os.environ.get("CAMPPLUS_MODEL_REVISION", "v2.0.2"),
+        "embedding_contract_version": "1",
+        "normalization": "l2",
+        "person_match_threshold": 0.78,
+        "person_match_margin": 0.03,
     },
     "eres2net": {
         "name": "ERes2NetV2",
@@ -29,7 +34,12 @@ ENGINE_CONFIG = {
         "params": "17.8M",
         "speed": "中等",
         "speed_en": "Medium",
-        "embedding_dim": 192
+        "embedding_dim": 192,
+        "model_revision": os.environ.get("ERES2NET_MODEL_REVISION", "v1.0.2"),
+        "embedding_contract_version": "1",
+        "normalization": "l2",
+        "person_match_threshold": 0.78,
+        "person_match_margin": 0.03,
     },
     "wespeaker": {
         "name": "ResNet34",
@@ -41,21 +51,107 @@ ENGINE_CONFIG = {
         "params": "6.34M",
         "speed": "快",
         "speed_en": "Fast",
-        "embedding_dim": 256
+        "embedding_dim": 256,
+        "model_revision": os.environ.get(
+            "WESPEAKER_MODEL_REVISION",
+            "89de0177e452fd9770ce2d4b26085de46dae65a0",
+        ),
+        "embedding_contract_version": "1",
+        "normalization": "l2",
+        "person_match_threshold": 0.78,
+        "person_match_margin": 0.03,
     }
-}
-
-ASR_CONFIG = {
-    "name": "Qwen3-ASR",
-    "model": "Qwen/Qwen3-ASR-0.6B",
-    "description": "阿里通义语音识别模型",
-    "description_en": "Alibaba Qwen speech recognition model",
-    "languages": "52种语言/方言",
-    "languages_en": "52 languages / dialects"
 }
 
 # 有效引擎类型
 VALID_ENGINE_TYPES = set(ENGINE_CONFIG.keys())
+
+_ENGINE_ALIASES = {
+    "campplus": "campplus",
+    "camplus": "campplus",
+    "eres2net": "eres2net",
+    "eres2netv2": "eres2net",
+    "wespeaker": "wespeaker",
+    "resnet34": "wespeaker",
+}
+
+
+def engine_type_for(identifier: object) -> str | None:
+    """Resolve a configured engine without importing heavyweight model modules."""
+    if not isinstance(identifier, str):
+        explicit = getattr(identifier, "engine_type", None)
+        if isinstance(explicit, str):
+            identifier = explicit
+        else:
+            identifier = getattr(identifier, "_model_name", identifier.__class__.__name__)
+    raw_identifier = str(identifier).strip()
+    for engine_type, info in ENGINE_CONFIG.items():
+        if raw_identifier.startswith(f"modelscope:{info['model']}?"):
+            return engine_type
+    normalized = raw_identifier.lower().replace("-", "").replace("_", "")
+    for alias, engine_type in _ENGINE_ALIASES.items():
+        if normalized == alias.replace("_", ""):
+            return engine_type
+    return None
+
+
+def embedding_model_id(engine: object, embedding_dim: int | None = None) -> str:
+    """Return the stable compatibility identity of an embedding vector.
+
+    This is deliberately stricter than a display name: changing the upstream
+    model revision, vector dimension or normalization contract creates a new
+    identity and prevents accidental cross-model cosine comparisons.
+    """
+    engine_type = engine_type_for(engine)
+    if engine_type is None:
+        # Third-party engines keep their explicit identifier for backwards
+        # compatibility. Integrators should expose ``model_id`` themselves.
+        descriptor = vars(type(engine)).get("model_id") if not isinstance(engine, str) else None
+        explicit = (
+            descriptor.__get__(engine, type(engine))
+            if hasattr(descriptor, "__get__")
+            else descriptor
+        )
+        if isinstance(explicit, str) and explicit.strip():
+            return explicit.strip()
+        return str(
+            engine
+            if isinstance(engine, str)
+            else getattr(engine, "_model_name", engine.__class__.__name__)
+        )
+    info = ENGINE_CONFIG[engine_type]
+    dimension = int(embedding_dim or info["embedding_dim"])
+    return (
+        f"modelscope:{info['model']}?revision={info['model_revision']}"
+        f"&contract={info['embedding_contract_version']}"
+        f"&dim={dimension}&normalization={info['normalization']}"
+    )
+
+
+def resolve_embedding_model_id(
+    stored_identifier: str | None,
+    embedding_dim: int | None,
+) -> str | None:
+    """Resolve legacy ``model_name`` values, rejecting incompatible vectors."""
+    if not stored_identifier or not embedding_dim:
+        return None
+    engine_type = engine_type_for(stored_identifier)
+    if engine_type is None:
+        return stored_identifier
+    expected_dim = int(ENGINE_CONFIG[engine_type]["embedding_dim"])
+    if int(embedding_dim) != expected_dim:
+        return None
+    return embedding_model_id(engine_type, expected_dim)
+
+
+def person_match_defaults(model_identifier: object) -> tuple[float, float]:
+    """Return the independently calibratable threshold and runner-up margin."""
+    engine_type = engine_type_for(model_identifier)
+    info = ENGINE_CONFIG.get(engine_type or "", {})
+    return (
+        float(info.get("person_match_threshold", 0.78)),
+        float(info.get("person_match_margin", 0.03)),
+    )
 
 
 class SpeakerEngineManager:
@@ -81,7 +177,7 @@ class SpeakerEngineManager:
                 return
             
             self._engine_cache: Dict[str, Any] = {}
-            self._current_type: str = get_engine_type()
+            self._current_type: str = _configured_engine_type()
             self._current_engine: Optional[Any] = None
             self._switch_lock = threading.Lock()
             self._max_cache = 2  # 最多缓存 2 个引擎实例,避免多引擎切换 OOM
@@ -131,6 +227,7 @@ class SpeakerEngineManager:
         engine_type = engine_type.lower().strip()
         previous_type = self._current_type
         previous_dim = ENGINE_CONFIG.get(previous_type, {}).get("embedding_dim", 0)
+        previous_model_id = embedding_model_id(previous_type)
         
         if engine_type not in VALID_ENGINE_TYPES:
             error_msg = f"Invalid engine type: {engine_type}. Valid types: {VALID_ENGINE_TYPES}"
@@ -159,6 +256,8 @@ class SpeakerEngineManager:
                 
                 new_dim = ENGINE_CONFIG.get(engine_type, {}).get("embedding_dim", 0)
                 dim_changed = (previous_dim != new_dim)
+                new_model_id = embedding_model_id(engine_type)
+                model_id_changed = previous_model_id != new_model_id
                 
                 result = {
                     "success": True,
@@ -166,12 +265,18 @@ class SpeakerEngineManager:
                     "engine_info": self._get_engine_info(engine_type),
                     "previous_type": previous_type,
                     "embedding_dim_changed": dim_changed,
+                    "embedding_model_changed": model_id_changed,
                     "previous_dim": previous_dim,
-                    "new_dim": new_dim
+                    "new_dim": new_dim,
+                    "previous_model_id": previous_model_id,
+                    "new_model_id": new_model_id,
                 }
                 
-                if dim_changed:
-                    result["warning"] = f"Embedding dimension changed from {previous_dim} to {new_dim}. Existing speaker data may not be compatible."
+                if model_id_changed:
+                    result["warning"] = (
+                        "Embedding model changed. Existing voice samples from the "
+                        "previous model will stay stored but will not be compared."
+                    )
                 
                 logger.info(f"[EngineManager] 切换成功: {previous_type} -> {engine_type}")
                 return result
@@ -190,6 +295,7 @@ class SpeakerEngineManager:
         """获取引擎信息"""
         info = ENGINE_CONFIG.get(engine_type, {}).copy()
         info["type"] = engine_type
+        info["model_id"] = embedding_model_id(engine_type)
         return info
     
     @property
@@ -221,10 +327,8 @@ class SpeakerEngineManager:
             cls._initialized = False
 
 
-# ========== 兼容旧 API ==========
-
-def get_engine_type() -> str:
-    """获取当前引擎类型"""
+def _configured_engine_type() -> str:
+    """读取启动时配置的默认声纹引擎。"""
     return os.environ.get("SPEAKER_ENGINE", "campplus").lower()
 
 
@@ -241,21 +345,15 @@ def get_engine_info() -> dict:
 
 
 def get_all_engines() -> dict:
-    """获取所有引擎信息"""
+    """返回当前 ASR 和声纹模型目录。"""
     manager = SpeakerEngineManager()
     info = manager.get_all_engines_info()
-    try:
-        from engine.asr import get_all_asr_engines, get_asr_engine_info
-        asr_current = get_asr_engine_info()
-        asr_engines = get_all_asr_engines()
-    except Exception:
-        # 兼容旧测试/旧环境: ASR 工厂不可用时仍返回旧字段
-        asr_current = ASR_CONFIG
-        asr_engines = {"current": "qwen3", "engines": {"qwen3": ASR_CONFIG}}
+    from engine.asr import get_all_asr_engines, get_asr_engine_info
+
     return {
         "current": info["current"],
-        "asr": asr_current,
-        "asr_engines": asr_engines,
+        "asr": get_asr_engine_info(),
+        "asr_engines": get_all_asr_engines(),
         "speakers": info["engines"]
     }
 

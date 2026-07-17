@@ -49,6 +49,16 @@ def test_dockerfile_uses_non_root_user():
     assert "USER " in content, "应以非 root 用户运行"
 
 
+def test_dockerfile_pins_torch_family_versions():
+    content = DOCKERFILE.read_text(encoding="utf-8")
+    assert "ARG TORCH_VERSION=2.11.0" in content
+    assert "ARG TORCHVISION_VERSION=0.26.0" in content
+    assert "ARG TORCHAUDIO_VERSION=2.11.0" in content
+    assert '"torch==${TORCH_VERSION}"' in content
+    assert '"torchvision==${TORCHVISION_VERSION}"' in content
+    assert '"torchaudio==${TORCHAUDIO_VERSION}"' in content
+
+
 def test_dockerfile_has_healthcheck():
     content = DOCKERFILE.read_text(encoding="utf-8")
     assert "HEALTHCHECK" in content, "需要健康检查"
@@ -121,4 +131,4 @@ def test_dockerignore_excludes_data():
     content = DOCKERIGNORE.read_text(encoding="utf-8")
     assert "data/" in content
     assert "uploads/" in content
-    assert "engine/speaker/speaker_db/" in content
+    assert "engine/speaker/speaker_db/" not in content

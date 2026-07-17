@@ -1,6 +1,5 @@
 """会话上下文管理器"""
 import numpy as np
-from difflib import SequenceMatcher
 from app.constants import PUNCTUATION_CHARS
 
 
@@ -73,17 +72,8 @@ class SessionContext:
                 return incremental
             return ""
         
-        # 情况4：没有重叠，可能是新话题或 ASR 识别变化
-        # 使用 SequenceMatcher 计算相似度
-        similarity = SequenceMatcher(None, norm_old, norm_new).ratio()
-        
-        if similarity > 0.6:
-            # 高相似度但无重叠，可能是 ASR 修正
-            # 直接更新，不输出（避免输出修正内容）
-            self.last_full_text = new_text
-            return ""
-        
-        # 低相似度，认为是新话题
+        # 没有可证明的精确重叠时，宁可输出一个新段，也不能因为“看起来
+        # 相似”就吞掉 ASR 修正。真正的 partial revision 需要独立协议。
         # 检查是否是上一次输出的重复
         if normalize(new_text) == normalize(self.last_output_text):
             return ""

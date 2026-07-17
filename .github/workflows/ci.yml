@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
       - uses: actions/checkout@v4
@@ -24,19 +24,13 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        # 不装 torch / modelscope — conftest.py 的 fake 注入绕过
-        # (CI 体积小、跑得快)
-        # 必须包含 summa(test_extractive_summary 用)+ setuptools<81 + 隐式依赖
+        shell: bash
         run: |
           python -m pip install --upgrade pip
-          pip install 'fastapi' 'uvicorn>=0.23.0' 'python-multipart>=0.0.6' \
-                      'transformers>=4.30.0' 'chromadb' 'pydantic>=2.0.0' \
-                      'python-dotenv>=1.0.0' 'pytest' 'pytest-asyncio' 'pytest-timeout' 'httpx' \
-                      'numpy' 'soundfile' 'tinycss2' 'summa==1.2.0' \
-                      'PyJWT>=2.8.0' 'werkzeug>=3.0.0' \
-                      'setuptools<81' 'addict' 'simplejson' 'sortedcontainers' 'cffi'
+          pip install -r requirements-ci.txt
 
       - name: Run tests
+        shell: bash
         env:
           SPEAKER_ENGINE: campplus
           STORAGE_DB_PATH: ./data/test.db
@@ -47,6 +41,7 @@ jobs:
           pytest tests/ -v --tb=short --ignore=tests/test_smoke_boot.py
 
       - name: Privacy audit
+        shell: bash
         run: |
           pytest tests/test_privacy_audit.py -v
 
@@ -68,7 +63,14 @@ jobs:
         working-directory: web
         run: |
           npm run typecheck
+      - name: Check i18n dictionaries
+        working-directory: web
+        run: npm run check:i18n
       - name: Build frontend
         working-directory: web
         run: |
           npm run build
+
+      - name: Audit production dependencies
+        working-directory: web
+        run: npm audit --omit=dev --audit-level=high

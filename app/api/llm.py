@@ -3,6 +3,7 @@ import importlib
 import logging
 import os
 from dataclasses import replace
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
@@ -18,6 +19,41 @@ router = APIRouter()
 
 
 LLM_SETTING_PREFIX = "llm."
+
+
+def _llm_config_fingerprint(cfg: LLMConfig) -> tuple:
+    """Identify the non-secret settings a connection test applies to."""
+    return (
+        cfg.enabled,
+        cfg.endpoint.rstrip("/"),
+        cfg.model,
+        cfg.mock,
+        cfg.allow_public,
+    )
+
+
+def _recent_probe(request: Request, cfg: LLMConfig) -> dict | None:
+    result = getattr(request.app.state, "llm_probe_result", None)
+    if not result or result.get("fingerprint") != _llm_config_fingerprint(cfg):
+        return None
+    return result
+
+
+def _store_probe(
+    request: Request,
+    cfg: LLMConfig,
+    *,
+    available: bool,
+    error: str | None = None,
+) -> dict:
+    result = {
+        "fingerprint": _llm_config_fingerprint(cfg),
+        "available": available,
+        "last_tested_at": datetime.now(timezone.utc).isoformat(),
+        "error": error,
+    }
+    request.app.state.llm_probe_result = result
+    return result
 
 
 def _env_llm_cfg():
@@ -58,18 +94,13 @@ def _effective_llm_cfg(repo=None) -> tuple[LLMConfig, str, Optional[str]]:
     if not has_override:
         return base, "env", provider
 
-    api_key = repo.get(f"{LLM_SETTING_PREFIX}api_key")
-    if api_key is None:
-        api_key = base.api_key
-    elif api_key == "":
-        api_key = None
-
     cfg = replace(
         base,
         enabled=_to_bool(repo.get(f"{LLM_SETTING_PREFIX}enabled"), base.enabled),
         endpoint=repo.get(f"{LLM_SETTING_PREFIX}endpoint") or base.endpoint,
         model=repo.get(f"{LLM_SETTING_PREFIX}model") or base.model,
-        api_key=api_key,
+        # Secrets are environment-owned and are never loaded from SQLite.
+        api_key=base.api_key,
         timeout_sec=_to_int(repo.get(f"{LLM_SETTING_PREFIX}timeout_sec"), base.timeout_sec),
         max_input_tokens=_to_int(repo.get(f"{LLM_SETTING_PREFIX}max_input_tokens"), base.max_input_tokens),
         mock=_to_bool(repo.get(f"{LLM_SETTING_PREFIX}mock"), base.mock),
@@ -117,11 +148,6 @@ def _is_authenticated_status_request(request: Request) -> bool:
     return current_pwd_iat <= token_pwd_iat
 
 
-class SummarizeRequest(BaseModel):
-    session_id: str
-    max_words: int = 200
-
-
 class LLMSettingsRequest(BaseModel):
     provider: str = Field("ollama", max_length=40)
     enabled: bool = False
@@ -158,22 +184,13 @@ async def llm_status(request: Request):
             "auth_required": True,
         }
 
-    error = None
-    try:
-        gw = LLMGateway(cfg)
-    except EndpointSecurityError as e:
-        gw = None
-        error = str(e)
-
-    if gw is None or not gw.enabled:
-        available = False
-    elif cfg.mock:
-        available = True
-    else:
-        available = await gw.is_available()
+    # Status is intentionally passive. It must never trigger DNS resolution or
+    # an external LLM request just because a page was opened.
+    probe = _recent_probe(request, cfg)
     return {
         "enabled": cfg.enabled,
-        "available": available,
+        "available": probe["available"] if probe else None,
+        "last_tested_at": probe["last_tested_at"] if probe else None,
         "endpoint": cfg.endpoint if cfg.enabled else None,
         "model": cfg.model if cfg.enabled else None,
         "mock": cfg.mock,
@@ -183,8 +200,55 @@ async def llm_status(request: Request):
         "max_input_tokens": cfg.max_input_tokens,
         "has_api_key": bool(cfg.api_key),
         "config_source": source,
-        "error": error,
+        "error": probe["error"] if probe else None,
         "fallback": "extractive-textrank",  # 🆕 永远可用的兜底
+    }
+
+
+@router.post("/v1/llm/test")
+async def test_llm_connection(request: Request):
+    """Explicitly test the saved LLM configuration once.
+
+    This is the only settings/status endpoint allowed to call the configured
+    ``/chat/completions`` service.
+    """
+    cfg, source, provider = _effective_llm_cfg(_settings_repo(request))
+    error = None
+    if not cfg.enabled:
+        available = False
+        error = "LLM 未启用"
+    elif cfg.mock:
+        available = True
+    else:
+        try:
+            available = await LLMGateway(cfg).is_available()
+            if not available:
+                error = "LLM 连接测试失败"
+        except EndpointSecurityError as exc:
+            available = False
+            error = str(exc)
+
+    probe = _store_probe(
+        request,
+        cfg,
+        available=available,
+        error=error,
+    )
+    return {
+        "enabled": cfg.enabled,
+        "available": probe["available"],
+        "last_tested_at": probe["last_tested_at"],
+        "endpoint": cfg.endpoint if cfg.enabled else None,
+        "model": cfg.model if cfg.enabled else None,
+        "mock": cfg.mock,
+        "provider": provider or "custom",
+        "allow_public": cfg.allow_public,
+        "timeout_sec": cfg.timeout_sec,
+        "max_input_tokens": cfg.max_input_tokens,
+        "has_api_key": bool(cfg.api_key),
+        "config_source": source,
+        "error": probe["error"],
+        "fallback": "extractive-textrank",
     }
 
 
@@ -211,6 +275,12 @@ def update_llm_settings(body: LLMSettingsRequest, request: Request):
     if repo is None:
         raise HTTPException(status_code=500, detail="settings repository unavailable")
 
+    if body.api_key and body.api_key.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="API Key 不写入数据库，请通过 LLM_API_KEY 环境变量配置",
+        )
+
     repo.set(f"{LLM_SETTING_PREFIX}provider", body.provider)
     repo.set(f"{LLM_SETTING_PREFIX}enabled", str(body.enabled).lower())
     repo.set(f"{LLM_SETTING_PREFIX}endpoint", body.endpoint)
@@ -219,8 +289,11 @@ def update_llm_settings(body: LLMSettingsRequest, request: Request):
     repo.set(f"{LLM_SETTING_PREFIX}timeout_sec", str(body.timeout_sec))
     repo.set(f"{LLM_SETTING_PREFIX}max_input_tokens", str(body.max_input_tokens))
     repo.set(f"{LLM_SETTING_PREFIX}mock", str(body.mock).lower())
-    if body.api_key is not None:
-        repo.set(f"{LLM_SETTING_PREFIX}api_key", body.api_key.strip())
+    # Remove plaintext keys left by pre-release builds.
+    repo.delete(f"{LLM_SETTING_PREFIX}api_key")
+    # A result for the previous endpoint/model must not survive a save. Saving
+    # is passive; a new result is created only by POST /v1/llm/test.
+    request.app.state.llm_probe_result = None
 
     return get_llm_settings(request)
 
@@ -228,7 +301,6 @@ def update_llm_settings(body: LLMSettingsRequest, request: Request):
 @router.get("/v1/llm/prompts")
 def get_prompts():
     return PROMPTS
-
 
 @router.put("/v1/llm/prompts")
 def update_prompts(payload: dict, request: Request):
@@ -246,42 +318,3 @@ def update_prompts(payload: dict, request: Request):
         if k in PROMPTS:
             PROMPTS[k] = v
     return PROMPTS
-
-
-@router.post("/v1/llm/summarize")
-async def summarize(body: SummarizeRequest, request: Request):
-    repo = request.app.state.transcript_repo
-    if repo.get_session(body.session_id) is None:
-        raise HTTPException(status_code=404, detail="会话不存在")
-    segments = repo.list_segments(body.session_id)
-    gw = _get_gateway(request)
-    text, source = await gw._generate("summarize", segments, max_words=body.max_words)
-    return {"text": text, "source": source}
-
-
-@router.post("/v1/llm/action-items")
-async def action_items(body: SummarizeRequest, request: Request):
-    repo = request.app.state.transcript_repo
-    if repo.get_session(body.session_id) is None:
-        raise HTTPException(status_code=404, detail="会话不存在")
-    segments = repo.list_segments(body.session_id)
-    gw = _get_gateway(request)
-    text, source = await gw._generate("action_items", segments)
-    if source == "llm":
-        # LLM 返回是 "line1\nline2" 字符串,拆成 list
-        items = [line.strip("-* ").strip() for line in text.split("\n") if line.strip()]
-    else:
-        # 降级路径直接返 list
-        items = gw._extractive_fallback_action_items(segments)
-    return {"items": items, "source": source}
-
-
-@router.post("/v1/llm/minutes")
-async def minutes(body: SummarizeRequest, request: Request):
-    repo = request.app.state.transcript_repo
-    if repo.get_session(body.session_id) is None:
-        raise HTTPException(status_code=404, detail="会话不存在")
-    segments = repo.list_segments(body.session_id)
-    gw = _get_gateway(request)
-    text, source = await gw._generate("minutes", segments)
-    return {"text": text, "source": source}

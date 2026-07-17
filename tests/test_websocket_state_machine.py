@@ -119,6 +119,15 @@ def test_should_emit_custom_threshold():
     assert should_emit_segment(STATE_SPEECH, 5, 100, 16000, 5.0, silence_threshold=5) is True
 
 
+def test_silence_endpoint_uses_duration_not_browser_frame_count():
+    assert should_emit_segment(
+        STATE_SPEECH, 1, 100, 16000, 5.0, silence_samples=12799
+    ) is False
+    assert should_emit_segment(
+        STATE_SPEECH, 99, 100, 16000, 5.0, silence_samples=12800
+    ) is True
+
+
 # ========== next_state ==========
 
 def test_next_state_silence_to_speech():

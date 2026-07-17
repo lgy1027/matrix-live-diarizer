@@ -1,0 +1,34 @@
+name: Bug report
+description: Report a reproducible local-product problem without sensitive data.
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Never attach private audio, transcripts, API keys, database files, or voice embeddings.
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What happened?
+      description: Include expected and actual behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction
+      description: Provide minimal steps using non-sensitive sample data.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Python version, device, ASR engine, and speaker engine.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Redacted logs
+      render: shell

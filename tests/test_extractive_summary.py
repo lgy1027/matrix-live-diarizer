@@ -71,6 +71,40 @@ def test_handles_empty_segments():
     assert "议题" in summarizer.generate_minutes([])
 
 
+def test_short_transcript_returns_honest_nonempty_summary():
+    summarizer = ExtractiveSummarizer()
+
+    summary = summarizer.summarize([{"text": "请登录控制面板，输入。"}])
+
+    assert "本地摘要不可用" not in summary
+    assert "请登录控制面板" in summary
+    assert "文稿内容较少" in summary
+
+
+def test_minutes_do_not_repeat_topic_as_an_invented_decision():
+    summarizer = ExtractiveSummarizer()
+
+    minutes = summarizer.generate_minutes([{"text": "请登录控制面板，输入。"}])
+
+    assert minutes.count("请登录控制面板") == 1
+    assert "未识别到明确决议" in minutes
+    assert "未识别到明确行动项" in minutes
+
+
+def test_minutes_extract_explicit_decision_only():
+    summarizer = ExtractiveSummarizer()
+    segments = [
+        {"text": "今天讨论发布计划。"},
+        {"text": "会议决定周五发布。"},
+        {"text": "小王负责准备发布说明。"},
+    ]
+
+    minutes = summarizer.generate_minutes(segments)
+
+    assert "会议决定周五发布" in minutes
+    assert "小王负责准备发布说明" in minutes
+
+
 # ========== 回归测试: summa 1.2.0 API 兼容 ==========
 
 def test_summarize_works_with_summa_words_api(monkeypatch):

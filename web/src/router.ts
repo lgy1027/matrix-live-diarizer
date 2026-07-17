@@ -1,10 +1,10 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
-import { useAuthStore } from './stores/auth'
 
 const routes: RouteRecordRaw[] = [
   {
     path: '/',
-    redirect: '/live',
+    name: 'home',
+    component: () => import('./views/HomeView.vue'),
   },
   {
     path: '/live',
@@ -12,17 +12,15 @@ const routes: RouteRecordRaw[] = [
     component: () => import('./views/LiveView.vue'),
     meta: { crumb: 'nav.live' },
   },
+  { path: '/tasks', redirect: '/meetings' },
   {
-    path: '/library',
-    name: 'library',
-    component: () => import('./views/LibraryView.vue'),
-    meta: { crumb: 'nav.library' },
+    path: '/meetings', name: 'meetings', component: () => import('./views/MeetingsView.vue'),
   },
   {
-    path: '/voice',
-    name: 'voice',
-    component: () => import('./views/VoiceView.vue'),
-    meta: { crumb: 'nav.voice' },
+    path: '/meetings/:id', name: 'meeting-detail', component: () => import('./views/MeetingDetailView.vue'),
+  },
+  {
+    path: '/people', name: 'people', component: () => import('./views/PeopleView.vue'),
   },
   {
     path: '/settings',
@@ -37,8 +35,7 @@ const routes: RouteRecordRaw[] = [
     component: () => import('./views/LoginView.vue'),
   },
   {
-    path: '/:pathMatch(.*)*',
-    redirect: '/live',
+    path: '/:pathMatch(.*)*', redirect: '/',
   },
 ]
 
@@ -50,10 +47,4 @@ export const router = createRouter({
   },
 })
 
-// 鉴权守卫: 无 token 跳 /login
-router.beforeEach((to) => {
-  const auth = useAuthStore()
-  if (to.name !== 'login' && !auth.isLoggedIn) {
-    return { name: 'login', query: { next: to.fullPath } }
-  }
-})
+// 本机默认可直接使用；远程访问由 API 的 401 响应统一引导到登录页。

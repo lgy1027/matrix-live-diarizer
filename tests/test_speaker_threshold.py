@@ -10,6 +10,7 @@
 import os
 import sys
 import numpy as np
+import pytest
 from unittest.mock import MagicMock
 
 # conftest.py 注入假 engine.speaker.*,本测试要测真实现,需直接导入
@@ -76,11 +77,17 @@ def test_classify_boundary_05s():
 # ========== compare_and_identify 行为(mock 引擎) ==========
 
 def _make_engine_mock():
-    """Mock CamPlusEngine 不调用 __new__(避免加载真模型)"""
+    """构造不加载模型、但运行期状态完整的 CamPlusEngine。"""
+    from collections import defaultdict
+
     eng = CamPlusEngine.__new__(CamPlusEngine)
     eng.model = MagicMock()
     eng.collection = MagicMock()
     eng.chroma_client = MagicMock()
+    eng.emb_buffer = defaultdict(list)
+    eng.pending_speakers = defaultdict(list)
+    eng.EMB_BUFFER_SIZE = 5
+    eng.PENDING_THRESHOLD = 3
     return eng
 
 

@@ -11,6 +11,7 @@ import logging
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
+from app.middleware.security import is_trusted_browser_origin
 
 logger = logging.getLogger("Matrix_Auth_MW")
 
@@ -48,8 +49,23 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # OPTIONS 预检放行(CORS)
         if request.method == "OPTIONS":
             return await call_next(request)
-        # 提取 Bearer token
         auth_header = request.headers.get("authorization", "")
+        # 可信本机允许无 token 使用产品；如果显式提供了 token，仍需验签并
+        # 注入 request.state，供改密和账户接口使用。
+        from app.config import config
+        client_host = request.client.host if request.client else ""
+        local_bypass = (
+            config.deployment.mode == "local"
+            and config.auth.local_auth_disabled
+            and client_host in {"127.0.0.1", "::1", "localhost"}
+            and is_trusted_browser_origin(
+                request.headers.get("origin"), config.cors.allowed_origins
+            )
+        )
+        if local_bypass and not auth_header:
+            return await call_next(request)
+
+        # 提取 Bearer token
         if not auth_header.lower().startswith("bearer "):
             return JSONResponse(
                 status_code=401,

@@ -5,16 +5,20 @@
 //     [1] JSON: {action: "rename", title: "..."}
 //     [2] 二进制: Int16LE 16kHz mono PCM frame
 //   服务端 → 客户端:
-//     {speaker, text, time, words?} | {type: "renamed", title} | {speaker: "SYSTEM", text: "LINK_IDLE_TIMEOUT"}
+//     finalized meeting-time utterance | control event | system event
 //   close(4401) = 鉴权失败
 
+export type FinalUtterance = { speaker: string; text: string; time?: string; start: number; end: number; timebase: 'meeting'; is_final: true; speaker_state: 'unknown'|'provisional'|'final'; words?: { text: string; start: number; end: number }[]; score?: number; seq?: number }
+
 export type AsrMessage =
-  | { speaker: string; text: string; time?: string; words?: { text: string; start: number; end: number }[]; score?: number; seq?: number }
-  | { type: 'renamed'; title: string }
+  | FinalUtterance
+  | { type: 'renamed'; title: string; meeting_id?: string }
+  | { type: 'meeting'; title: string; meeting_id: string }
+  | { type: 'meeting_finalized'; meeting_id: string; job_id?: string; refinement_status: 'queued'|'ready'|'unavailable' }
   | { type: 'transcribing'; seq: number }
   | { speaker: 'SYSTEM'; text: string; time?: never; words?: never }
 
-export type WsState = 'idle' | 'connecting' | 'live' | 'reconnecting' | 'auth-failed'
+export type WsState = 'idle' | 'connecting' | 'live' | 'disconnected' | 'auth-failed'
 
 export interface LiveWsOpts {
   clientId: string
@@ -33,26 +37,23 @@ function wsBase(): string {
 export class LiveWs {
   private ws: WebSocket | null = null
   private opts: LiveWsOpts
-  private shouldReconnect = false
-  private attempts = 0
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private intentionalClose = false
 
   constructor(opts: LiveWsOpts) {
     this.opts = opts
   }
 
   connect() {
-    this.shouldReconnect = true
+    this.intentionalClose = false
     this.openSocket()
   }
 
   private openSocket() {
-    this.opts.onState(this.attempts === 0 ? 'connecting' : 'reconnecting')
+    this.opts.onState('connecting')
     const url = `${wsBase()}/ws/v1/stream/${encodeURIComponent(this.opts.clientId)}`
     this.ws = new WebSocket(url)
     this.ws.binaryType = 'arraybuffer'
     this.ws.onopen = () => {
-      this.attempts = 0
       this.sendJson({ action: 'auth', token: this.opts.token })
       this.opts.onState('live')
     }
@@ -70,16 +71,8 @@ export class LiveWs {
         this.opts.onState('auth-failed')
         return
       }
-      if (!this.shouldReconnect) return
-      // 指数退避 1/2/4/8/16s, 最多 5 次
-      if (this.attempts >= 5) {
-        this.opts.onState('reconnecting')
-        return
-      }
-      const delay = 1000 * Math.pow(2, this.attempts)
-      this.attempts++
-      this.opts.onState('reconnecting')
-      this.reconnectTimer = setTimeout(() => this.openSocket(), delay)
+      this.ws = null
+      if (!this.intentionalClose) this.opts.onState('disconnected')
     }
     this.ws.onerror = () => {
       // onclose 会处理重连, 这里只记
@@ -103,9 +96,7 @@ export class LiveWs {
   }
 
   close() {
-    this.shouldReconnect = false
-    if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
-    this.reconnectTimer = null
+    this.intentionalClose = true
     if (this.ws) {
       this.ws.close(1000)
       this.ws = null

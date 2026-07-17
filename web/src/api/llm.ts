@@ -3,7 +3,8 @@ import { call } from './client'
 export async function getLlmStatus() {
   return call<{
     enabled: boolean
-    available: boolean
+    available: boolean | null
+    last_tested_at?: string | null
     endpoint?: string
     model?: string
     mock: boolean
@@ -16,6 +17,13 @@ export async function getLlmStatus() {
     error?: string | null
     fallback: string
   }>({ url: '/v1/llm/status' })
+}
+
+export async function testLlmConnection() {
+  return call<Awaited<ReturnType<typeof getLlmStatus>>>({
+    url: '/v1/llm/test',
+    method: 'POST',
+  })
 }
 
 export interface LlmSettings {
@@ -44,29 +52,5 @@ export async function saveLlmSettings(data: LlmSettingsPayload) {
     url: '/v1/llm/settings',
     method: 'PUT',
     data,
-  })
-}
-
-export async function llmSummarize(session_id: string, max_words = 200) {
-  return call<{ text: string; source: string }>({
-    url: '/v1/llm/summarize',
-    method: 'POST',
-    data: { session_id, max_words },
-  })
-}
-
-export async function llmActionItems(session_id: string) {
-  return call<{ items: string[]; source: string }>({
-    url: '/v1/llm/action-items',
-    method: 'POST',
-    data: { session_id },
-  })
-}
-
-export async function llmMinutes(session_id: string) {
-  return call<{ text: string; source: string }>({
-    url: '/v1/llm/minutes',
-    method: 'POST',
-    data: { session_id },
   })
 }

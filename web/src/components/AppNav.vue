@@ -1,17 +1,17 @@
 <script setup lang="ts">
 import { useRoute, useRouter } from 'vue-router'
-import { useI18n } from 'vue-i18n'
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 const route = useRoute()
 const router = useRouter()
 const { t } = useI18n()
-
 const items = [
-  { name: 'live', icon: 'mic', label: t('nav.live') },
-  { name: 'library', icon: 'lib', label: t('nav.library') },
-  { name: 'voice', icon: 'voice', label: t('nav.voice') },
+  { name: 'home', icon: 'home', labelKey: 'product.nav.home' },
+  { name: 'meetings', icon: 'lib', labelKey: 'product.nav.meetings' },
+  { name: 'people', icon: 'voice', labelKey: 'product.nav.people' },
 ] as const
+const activeName = computed(() => route.name === 'meeting-detail' ? 'meetings' : route.name)
 
 function go(name: string) {
   if (route.name !== name) router.push({ name })
@@ -20,7 +20,7 @@ function go(name: string) {
 
 <template>
   <aside class="nav">
-    <div class="brand" :title="t('app.name')">
+    <div class="brand" title="Matrix">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <circle cx="12" cy="12" r="9" />
         <path d="M3 12h18M12 3v18M5.6 5.6l12.8 12.8M18.4 5.6L5.6 18.4" />
@@ -30,15 +30,14 @@ function go(name: string) {
       v-for="it in items"
       :key="it.name"
       class="nav-item"
-      :class="{ active: route.name === it.name }"
+      :class="{ active: activeName === it.name }"
       :data-view="it.name"
-      :title="it.label"
-      :aria-label="it.label"
+      :title="t(it.labelKey)"
+      :aria-label="t(it.labelKey)"
       @click="go(it.name)"
     >
-      <svg v-if="it.icon === 'mic'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" />
-        <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3" />
+      <svg v-if="it.icon === 'home'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M3 11 12 3l9 8v9a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z" />
       </svg>
       <svg v-else-if="it.icon === 'lib'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
@@ -55,8 +54,8 @@ function go(name: string) {
       class="nav-item"
       :class="{ active: route.name === 'settings' }"
       data-view="settings"
-      :title="t('nav.settings')"
-      :aria-label="t('nav.settings')"
+      :title="t('product.nav.settings')"
+      :aria-label="t('product.nav.settings')"
       @click="go('settings')"
     >
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -115,4 +114,46 @@ function go(name: string) {
 }
 .nav-item svg { width: 18px; height: 18px; }
 .spacer { flex: 1; }
+
+@media (max-width: 700px) {
+  .nav {
+    position: fixed;
+    inset: auto 0 0;
+    height: 58px;
+    flex-direction: row;
+    align-items: stretch;
+    padding: 0;
+    gap: 0;
+    border-right: 0;
+    border-top: 1px solid var(--border-soft);
+    z-index: 50;
+  }
+  .brand,
+  .spacer { display: none; }
+  .nav-item {
+    width: auto;
+    height: auto;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    border-radius: 0;
+    font-size: 9px;
+  }
+  .nav-item::after {
+    content: attr(aria-label);
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .nav-item.active::before {
+    left: 50%;
+    top: 0;
+    width: 24px;
+    height: 2px;
+    transform: translateX(-50%);
+    border-radius: 0 0 2px 2px;
+  }
+}
 </style>

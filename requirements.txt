@@ -4,11 +4,11 @@ uvicorn>=0.23.0,<1.0.0
 python-multipart>=0.0.9,<1.0.0
 
 # 深度学习
-# 锁住 torch/torchvision/torchaudio 配套版本 — 不同步会 RuntimeError
-# (torchvision::nms does not exist 等) — 必须三方一致
-torch>=2.3.0,<3.0.0
-torchvision>=0.18.0,<1.0.0
-torchaudio>=2.3.0,<3.0.0
+# Torch 二进制组件必须按官方版本矩阵成套安装，不能使用彼此独立的范围。
+# CUDA 用户应先按 pytorch.org 的命令安装对应 CUDA wheel，再装本文件。
+torch==2.11.0
+torchaudio==2.11.0
+torchvision==0.26.0
 transformers>=4.30.0,<5
 
 # transformers 间接依赖(隐式,不写会报 import error)
@@ -30,7 +30,9 @@ qwen-asr>=0.0.6,<0.1.0
 funasr>=1.2.0,<2.0.0; python_version >= "3.10" and python_version < "3.13"
 
 # 声纹向量库
-chromadb>=0.4.0,<1.0.0
+chromadb>=0.6.3,<0.7.0
+# Chroma 0.6 使用旧版 positional capture API；PostHog 3+ 已移除该接口。
+posthog>=2.4.0,<3.0.0
 
 # 音频处理
 librosa>=0.10.0,<1.0.0
@@ -60,10 +62,11 @@ cffi>=1.16.0,<2.0.0
 # 摘要 (TextRank 兜底) — LLM 不可用时本地提取
 summa==1.2.0
 
-# 离线高准确度说话人识别 (pyannote 3.1)
-# 用于: 上传文件 ?diarization=pyannote (Diarization Error Rate ~18%)
-# 需要:
-#   1. brew install ffmpeg (macOS) 或 apt install ffmpeg (Linux)
-#   2. HF_TOKEN 环境变量 + https://huggingface.co/pyannote/segmentation-3.0 接受用户条款
-# 详细: docs/SPEAKER_DIARIZATION.md
-pyannote.audio>=3.1.0,<4.0.0
+# 离线高准确度说话人识别 (pyannote Community-1)
+# 用于: 上传文件 ?diarization=pyannote (DER 随会议数据集和录音条件变化)
+# 需要 HF_TOKEN 环境变量 + 接受 Community-1 模型条款。
+# 本项目向 pyannote 传入内存 waveform，不强制依赖 TorchCodec/FFmpeg；
+# FFmpeg 仍建议安装，用于 librosa/soundfile 不能直接读取的压缩格式。
+# 若自行安装 TorchCodec，必须按其官方兼容表匹配 Torch 与 FFmpeg。
+# 会议模式未配置 HF_TOKEN 时会保留匿名文稿并报告 diarization unavailable
+pyannote.audio>=4.0.4,<5.0.0

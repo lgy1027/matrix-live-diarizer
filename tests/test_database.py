@@ -13,9 +13,9 @@ def test_init_creates_tables(tmp_path):
             "SELECT name FROM sqlite_master WHERE type='table'"
         ).fetchall()
     table_names = {t[0] for t in tables}
-    assert "sessions" in table_names
-    assert "segments" in table_names
-    assert "speaker_aliases" in table_names
+    assert "meetings" in table_names
+    assert "transcript_segments" in table_names
+    assert "people" in table_names
     assert "settings" in table_names
 
 
@@ -33,6 +33,19 @@ def test_connect_returns_connection_with_row_factory(tmp_path):
     db = Database(db_path)
     db.init_schema()
     with db.connect() as conn:
-        conn.execute("INSERT INTO sessions (id, source) VALUES (?, ?)", ("s1", "websocket"))
-        row = conn.execute("SELECT id FROM sessions").fetchone()
-    assert row["id"] == "s1"
+        conn.execute(
+            "INSERT INTO meetings (id, source, title) VALUES (?, ?, ?)",
+            ("m1", "live", "test"),
+        )
+        row = conn.execute("SELECT id FROM meetings").fetchone()
+    assert row["id"] == "m1"
+
+
+def test_default_admin_can_be_disabled(tmp_path):
+    db = Database(str(tmp_path / "no-admin.db"), create_default_admin=False)
+    db.init_schema()
+
+    with db.connect() as conn:
+        count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+
+    assert count == 0

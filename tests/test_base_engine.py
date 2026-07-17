@@ -1,5 +1,6 @@
 """声纹引擎基类测试 - TDD"""
 import pytest
+import inspect
 from abc import ABC, abstractmethod
 import numpy as np
 from pathlib import Path
@@ -26,15 +27,15 @@ class TestSpeakerEngineBaseClass:
         abstract_methods = BaseSpeakerEngine.__abstractmethods__
         assert 'extract_feat' in abstract_methods
 
-    def test_base_class_has_shared_methods(self):
-        """测试基类有共享方法"""
+    def test_base_class_has_runtime_cluster_methods_only(self):
+        """基类只暴露运行期聚类能力，不承担持久化人物 CRUD。"""
         from engine.speaker.base_engine import BaseSpeakerEngine
-        
-        # 这些方法应该有默认实现
-        assert hasattr(BaseSpeakerEngine, 'list_speakers')
-        assert hasattr(BaseSpeakerEngine, 'get_speaker')
-        assert hasattr(BaseSpeakerEngine, 'rename_speaker')
-        assert hasattr(BaseSpeakerEngine, 'delete_speaker')
+
+        assert hasattr(BaseSpeakerEngine, 'query_session_candidates')
+        assert hasattr(BaseSpeakerEngine, 'cleanup_client')
+        for removed in ('list_speakers', 'get_speaker', 'rename_speaker',
+                        'delete_speaker', 'add_speaker', 'merge_speakers'):
+            assert not hasattr(BaseSpeakerEngine, removed)
 
     def test_campplus_inherits_base(self):
         """测试 CamPlus 引擎继承基类"""
@@ -63,27 +64,71 @@ class TestSpeakerEngineBaseClass:
 class TestBaseEngineSharedMethods:
     """测试基类共享方法"""
 
-    def test_list_speakers_signature(self):
-        """测试 list_speakers 方法签名"""
+    def test_query_candidates_is_scoped_to_current_meeting(self):
+        """Chroma 查询必须只命中当前会议的匿名聚类。"""
+        from unittest.mock import MagicMock
         from engine.speaker.base_engine import BaseSpeakerEngine
-        import inspect
-        
-        sig = inspect.signature(BaseSpeakerEngine.list_speakers)
-        params = list(sig.parameters.keys())
-        
-        assert 'self' in params
-        assert 'session_id' in params
 
-    def test_get_speaker_signature(self):
-        """测试 get_speaker 方法签名"""
+        class FakeEngine(BaseSpeakerEngine):
+            def extract_feat(self, audio_data):
+                return audio_data, 1.0
+
+            def compare_and_identify(
+                self, current_emb, client_id, audio_duration=0,
+                use_buffer=True, default_name=None,
+            ):
+                return "Unknown", 0.0
+
+            @property
+            def _model_name(self):
+                return "Fake"
+
+        engine = FakeEngine()
+        engine.collection = MagicMock()
+
+        expected = {
+            "ids": [["Spk_session"]],
+            "distances": [[0.22]],
+            "metadatas": [[{"session_id": "meeting-1", "count": 2}]],
+        }
+        engine.collection.query.return_value = expected
+
+        result = engine.query_session_candidates([0.1, 0.2], "meeting-1")
+
+        assert result == expected
+        engine.collection.query.assert_called_once_with(
+            query_embeddings=[[0.1, 0.2]],
+            n_results=3,
+            where={"session_id": "meeting-1"},
+        )
+
+    def test_cleanup_deletes_ephemeral_clusters_for_meeting(self):
+        from collections import defaultdict
+        from unittest.mock import MagicMock
         from engine.speaker.base_engine import BaseSpeakerEngine
-        import inspect
-        
-        sig = inspect.signature(BaseSpeakerEngine.get_speaker)
-        params = list(sig.parameters.keys())
-        
-        assert 'self' in params
-        assert 'speaker_id' in params
+
+        class FakeEngine(BaseSpeakerEngine):
+            def extract_feat(self, audio_data):
+                return audio_data, 1.0
+
+            def compare_and_identify(self, current_emb, client_id, audio_duration=0,
+                                     use_buffer=True, default_name=None):
+                return "Unknown", 0.0
+
+            @property
+            def _model_name(self):
+                return "Fake"
+
+        engine = FakeEngine()
+        engine.collection = MagicMock()
+        engine.emb_buffer = defaultdict(list, {"meeting-1": [[0.1]]})
+
+        engine.cleanup_client("meeting-1")
+
+        assert "meeting-1" not in engine.emb_buffer
+        engine.collection.delete.assert_called_once_with(
+            where={"session_id": "meeting-1"}
+        )
 
 
 @pytest.mark.parametrize(
@@ -123,8 +168,10 @@ def test_compare_and_identify_returns_tuple_with_score(engine_cls):
     # campplus / eres2net / wespeaker 共享这些 buffer 属性 — defaultdict 让新 client_id 自动建空 list
     from collections import defaultdict
     engine.emb_buffer = defaultdict(list)
+    engine.pending_speakers = defaultdict(list)
     engine.match_history = defaultdict(list)
     engine.EMB_BUFFER_SIZE = 5
+    engine.PENDING_THRESHOLD = 3
     engine.HISTORY_SIZE = 3
     emb = np.zeros(192, dtype=np.float32)
     client_id = f"test_client_returns_tuple_{engine_cls}"
@@ -139,6 +186,29 @@ def test_compare_and_identify_returns_tuple_with_score(engine_cls):
     finally:
         if hasattr(engine, "cleanup_client"):
             engine.cleanup_client(client_id)
+
+
+@pytest.mark.parametrize(
+    "engine_cls",
+    ["CamPlusEngine", "ERes2NetEngine", "WespeakerEngine"],
+)
+def test_compare_and_identify_supports_common_contract(engine_cls):
+    """所有可热切换引擎必须接受上传路径使用的公共参数。"""
+    from engine.speaker.campplus_engine import CamPlusEngine
+    from engine.speaker.eres2net_engine import ERes2NetEngine
+    from engine.speaker.wespeaker_engine import WespeakerEngine
+
+    target_cls = {
+        "CamPlusEngine": CamPlusEngine,
+        "ERes2NetEngine": ERes2NetEngine,
+        "WespeakerEngine": WespeakerEngine,
+    }[engine_cls]
+    parameters = inspect.signature(target_cls.compare_and_identify).parameters
+
+    assert "use_buffer" in parameters
+    assert parameters["use_buffer"].default is True
+    assert "default_name" in parameters
+    assert parameters["default_name"].default is None
 
 
 if __name__ == "__main__":

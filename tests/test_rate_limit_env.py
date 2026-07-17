@@ -23,11 +23,12 @@ def _reload_clean_app(monkeypatch, env: dict):
     return create_app()
 
 
-def test_rate_limit_uses_config_not_hardcoded_default(monkeypatch):
+def test_rate_limit_uses_config_not_hardcoded_default(monkeypatch, tmp_path):
     """app 工厂必须把 config.rate_limit 传给中间件,不能写死 100"""
     app = _reload_clean_app(monkeypatch, {
         "RATE_LIMIT_REQUESTS_PER_MINUTE": "5",
         "RATE_LIMIT_REQUESTS_PER_HOUR": "50",
+        "STORAGE_DB_PATH": str(tmp_path / "rate.db"),
     })
 
     from app.middleware.rate_limit import RateLimitMiddleware
@@ -47,9 +48,12 @@ def test_rate_limit_uses_config_not_hardcoded_default(monkeypatch):
     assert mw.kwargs.get("enabled") is True
 
 
-def test_rate_limit_can_be_disabled(monkeypatch):
+def test_rate_limit_can_be_disabled(monkeypatch, tmp_path):
     """RATE_LIMIT_ENABLED=false 时中间件 enabled=False"""
-    app = _reload_clean_app(monkeypatch, {"RATE_LIMIT_ENABLED": "false"})
+    app = _reload_clean_app(monkeypatch, {
+        "RATE_LIMIT_ENABLED": "false",
+        "STORAGE_DB_PATH": str(tmp_path / "disabled.db"),
+    })
 
     from app.middleware.rate_limit import RateLimitMiddleware
     mw = None

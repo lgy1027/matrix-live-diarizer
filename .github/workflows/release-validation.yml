@@ -1,0 +1,35 @@
+name: Release validation
+
+on:
+  workflow_dispatch:
+
+jobs:
+  docker-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build release image
+        run: docker build --tag matrix-live-diarizer:release-check .
+      - name: Start container
+        run: |
+          docker run --detach --name matrix-release-check \
+            --publish 8000:8000 \
+            --env HOST=0.0.0.0 \
+            matrix-live-diarizer:release-check
+      - name: Wait for real models and readiness
+        run: |
+          for attempt in $(seq 1 90); do
+            if curl --fail --silent http://127.0.0.1:8000/ready > ready.json; then
+              cat ready.json
+              python -c 'import json; data=json.load(open("ready.json")); assert data["asr"] and data["speaker"]'
+              curl --fail --silent http://127.0.0.1:8000/ > /dev/null
+              exit 0
+            fi
+            sleep 10
+          done
+          docker logs matrix-release-check
+          exit 1
+      - name: Show logs on failure
+        if: failure()
+        run: docker logs matrix-release-check

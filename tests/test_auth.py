@@ -32,6 +32,9 @@ def _install_fake_engines():
     fake_speaker_pkg.__path__ = []
     fake_speaker_pkg.get_speaker_engine = MagicMock(return_value=MagicMock())
     fake_speaker_pkg.get_engine_info = MagicMock(return_value={"name": "Mock", "model": "mock"})
+    fake_speaker_pkg.get_all_engines = MagicMock(
+        return_value={"current": "mock", "engines": {}}
+    )
 
     fake_base = types.ModuleType("engine.speaker.base_engine")
     fake_base.BaseSpeakerEngine = MagicMock
@@ -43,19 +46,34 @@ def _install_fake_engines():
     fake_factory.get_engine_info = MagicMock(return_value={"name": "Mock", "model": "mock"})
     fake_factory.get_all_engines = MagicMock(return_value={"current": "mock", "asr": {}, "speakers": {}})
     fake_factory.ENGINE_CONFIG = {}
-    fake_factory.ASR_CONFIG = {}
     fake_factory.get_engine_manager = MagicMock(return_value=MagicMock())
 
     sys.modules["engine.speaker"] = fake_speaker_pkg
     sys.modules["engine.speaker.speaker_factory"] = fake_factory
 
 
-_install_fake_engines()
+@pytest.fixture(autouse=True)
+def _fake_engine_modules():
+    names = (
+        "engine.asr_engine",
+        "engine.speaker",
+        "engine.speaker.base_engine",
+        "engine.speaker.speaker_factory",
+    )
+    previous = {name: sys.modules.get(name) for name in names}
+    _install_fake_engines()
+    yield
+    for name, module in previous.items():
+        if module is None:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = module
 
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 
-def _make_client(monkeypatch):
+def _make_client(monkeypatch, client_host="testclient"):
     """建 TestClient (不走 conftest 的 TEST_AUTH_BYPASS fixture,走真鉴权)"""
     tmp = tempfile.mkdtemp()
     os.environ["STORAGE_DB_PATH"] = os.path.join(tmp, "test.db")
@@ -67,7 +85,7 @@ def _make_client(monkeypatch):
     importlib.reload(cfg_mod)
     app_mod = importlib.import_module("app")
     importlib.reload(app_mod)
-    return TestClient(app_mod.create_app())
+    return TestClient(app_mod.create_app(), client=(client_host, 50000))
 
 
 def test_auth_bypass_rejected_in_lan_mode_even_when_debug(monkeypatch, tmp_path):
@@ -242,16 +260,42 @@ def test_whitelist_ready_no_auth(monkeypatch):
 
 
 def test_whitelist_models_no_auth(monkeypatch):
-    """/v1/models 不需鉴权"""
+    """模型目录供启动页使用，不要求登录。"""
     client = _make_client(monkeypatch)
     r = client.get("/v1/models")
     assert r.status_code == 200
 
 
+def test_local_bypass_rejects_untrusted_browser_origin(monkeypatch):
+    client = _make_client(monkeypatch)
+    r = client.get("/v1/meetings", headers={"Origin": "https://evil.example"})
+    assert r.status_code == 401
+
+
+def test_security_headers_are_present(monkeypatch):
+    client = _make_client(monkeypatch)
+    r = client.get("/health")
+    assert r.headers["x-content-type-options"] == "nosniff"
+    assert r.headers["x-frame-options"] == "DENY"
+    assert "default-src 'self'" in r.headers["content-security-policy"]
+
+
+def test_local_websocket_bypass_rejects_untrusted_origin(monkeypatch):
+    client = _make_client(monkeypatch)
+    with pytest.raises(WebSocketDisconnect) as caught:
+        with client.websocket_connect(
+            "/ws/v1/stream/origin_test",
+            headers={"Origin": "https://evil.example"},
+        ) as ws:
+            ws.send_json({"action": "rename", "title": "not auth"})
+            ws.receive_json()
+    assert caught.value.code == 4401
+
+
 def test_protected_endpoint_no_token_returns_401(monkeypatch):
     """受保护端点无 token 返 401"""
     client = _make_client(monkeypatch)
-    r = client.get("/v1/speakers")
+    r = client.get("/v1/meetings")
     assert r.status_code == 401
     assert "未登录" in r.json()["detail"]
 
@@ -259,7 +303,7 @@ def test_protected_endpoint_no_token_returns_401(monkeypatch):
 def test_protected_endpoint_invalid_token_returns_401(monkeypatch):
     """错 token 返 401"""
     client = _make_client(monkeypatch)
-    r = client.get("/v1/speakers", headers={"Authorization": "Bearer garbage.token.here"})
+    r = client.get("/v1/meetings", headers={"Authorization": "Bearer garbage.token.here"})
     assert r.status_code == 401
 
 
@@ -268,7 +312,7 @@ def test_default_password_token_requires_password_change(monkeypatch):
     client = _make_client(monkeypatch)
     lr = client.post("/v1/auth/login", json={"username": "admin", "password": "admin"})
     token = lr.json()["token"]
-    r = client.get("/v1/speakers", headers={"Authorization": f"Bearer {token}"})
+    r = client.get("/v1/meetings", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 403
     assert "修改默认密码" in r.json()["detail"]
 
@@ -284,7 +328,7 @@ def test_protected_endpoint_valid_token_returns_200_after_password_change(monkey
         headers={"Authorization": f"Bearer {token}"},
     )
     token = changed.json()["token"]
-    r = client.get("/v1/speakers", headers={"Authorization": f"Bearer {token}"})
+    r = client.get("/v1/meetings", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 200
 
 
@@ -320,6 +364,24 @@ def test_change_password_full_flow(monkeypatch):
     lr3 = client.post("/v1/auth/login", json={"username": "admin", "password": "newsecret123"})
     assert lr3.status_code == 200
     assert lr3.json()["user"]["must_change_password"] is False
+
+
+def test_loopback_bypass_still_authenticates_explicit_bearer_token(monkeypatch):
+    """本机免登录不能跳过显式 token 的用户状态注入。"""
+    client = _make_client(monkeypatch, client_host="127.0.0.1")
+    logged_in = client.post(
+        "/v1/auth/login", json={"username": "admin", "password": "admin"}
+    )
+    token = logged_in.json()["token"]
+
+    changed = client.post(
+        "/v1/auth/change-password",
+        json={"old_password": "admin", "new_password": "newsecret123"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert changed.status_code == 200
+    assert changed.json()["user"]["must_change_password"] is False
 
 
 def test_change_password_wrong_old_returns_400(monkeypatch):
@@ -358,7 +420,7 @@ def test_logout_endpoint(monkeypatch):
 def test_options_request_passes(monkeypatch):
     """OPTIONS 预检放行(无 token)"""
     client = _make_client(monkeypatch)
-    r = client.options("/v1/speakers")
+    r = client.options("/v1/meetings")
     # FastAPI 默认 CORS middleware 处理 OPTIONS,可能 200 或 405 — 只要不是 401
     assert r.status_code != 401
 
@@ -381,8 +443,8 @@ def test_login_rate_limit_blocks_brute_force(monkeypatch):
             assert "Retry-After" in r.headers
 
 
-def test_change_password_weak_password_returns_401(monkeypatch):
-    """审核 #5: 弱密码(< 8 字符)返 401 模糊错误"""
+def test_change_password_weak_password_returns_400_without_invalidating_session(monkeypatch):
+    """已登录用户的弱密码是输入错误，不得伪装成鉴权失败。"""
     client = _make_client(monkeypatch)
     lr = client.post("/v1/auth/login", json={"username": "admin", "password": "admin"})
     token = lr.json()["token"]
@@ -392,13 +454,14 @@ def test_change_password_weak_password_returns_401(monkeypatch):
         json={"old_password": "admin", "new_password": "abc"},
         headers={"Authorization": f"Bearer {token}"},
     )
-    assert r.status_code == 401
-    # 不暴露具体校验规则
-    assert "登录信息格式错误" in r.json()["detail"]
+    assert r.status_code == 400
+    assert "字母" in r.json()["detail"] and "数字" in r.json()["detail"]
+    me = client.get("/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert me.status_code == 200
 
 
-def test_change_password_no_letter_returns_401(monkeypatch):
-    """审核 #5: 纯数字(8 字符)返 401"""
+def test_change_password_no_letter_returns_400(monkeypatch):
+    """纯数字新密码返回可修正的输入错误。"""
     client = _make_client(monkeypatch)
     lr = client.post("/v1/auth/login", json={"username": "admin", "password": "admin"})
     token = lr.json()["token"]
@@ -407,11 +470,11 @@ def test_change_password_no_letter_returns_401(monkeypatch):
         json={"old_password": "admin", "new_password": "12345678"},
         headers={"Authorization": f"Bearer {token}"},
     )
-    assert r.status_code == 401
+    assert r.status_code == 400
 
 
-def test_change_password_no_digit_returns_401(monkeypatch):
-    """审核 #5: 纯字母(8 字符)返 401"""
+def test_change_password_no_digit_returns_400(monkeypatch):
+    """纯字母新密码返回可修正的输入错误。"""
     client = _make_client(monkeypatch)
     lr = client.post("/v1/auth/login", json={"username": "admin", "password": "admin"})
     token = lr.json()["token"]
@@ -420,7 +483,28 @@ def test_change_password_no_digit_returns_401(monkeypatch):
         json={"old_password": "admin", "new_password": "abcdefgh"},
         headers={"Authorization": f"Bearer {token}"},
     )
-    assert r.status_code == 401
+    assert r.status_code == 400
+
+
+def test_change_password_rejects_reusing_current_password(monkeypatch):
+    client = _make_client(monkeypatch)
+    service = client.app.state.auth_service
+    user = service.authenticate("admin", "admin")
+    assert user is not None
+    assert service.change_password(user["id"], "current123")
+    logged_in = client.post(
+        "/v1/auth/login", json={"username": "admin", "password": "current123"}
+    )
+    token = logged_in.json()["token"]
+
+    response = client.post(
+        "/v1/auth/change-password",
+        json={"old_password": "current123", "new_password": "current123"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]
 
 
 def test_change_password_strong_password_works(monkeypatch):

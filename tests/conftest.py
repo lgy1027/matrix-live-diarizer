@@ -165,8 +165,9 @@ def _install_fake_heavy_deps():
     _make("scipy", submodules=["signal"])
 
 
-# 在 conftest 加载时(早于任何 test module)立即注入
-_install_fake_heavy_deps()
+# 常规单元测试使用轻量替身；真实冒烟测试必须显式退出替身模式。
+if os.environ.get("MATRIX_TEST_REAL_DEPENDENCIES") != "1":
+    _install_fake_heavy_deps()
 
 
 _FAKE_MODULES = (

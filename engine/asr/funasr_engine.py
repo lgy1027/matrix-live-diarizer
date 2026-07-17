@@ -7,7 +7,8 @@ from typing import Any
 
 import numpy as np
 
-from .common import evaluate_audio_quality, filter_hallucinations, rms_is_silent
+from .common import evaluate_audio_quality, rms_is_silent
+from .contracts import ASRResult, ASRSegment, ASRWord, empty_asr_result, make_asr_result
 
 logger = logging.getLogger("ASR_Engine")
 
@@ -105,19 +106,18 @@ class FunASREngine:
 
     async def run_asr(self, audio_data, use_preprocessing=True):
         if audio_data is None or len(audio_data) < 1600:
-            return {"text": "", "words": None}
+            return empty_asr_result()
         quality = self.evaluate_audio_quality(audio_data)
         if quality["score"] < 30:
             logger.warning(f"[ASR] 音频质量较差: {quality}")
-            return {"text": "", "words": None}
+            return empty_asr_result()
         if self.is_silent(audio_data):
-            return {"text": "", "words": None}
+            return empty_asr_result()
 
         loop = asyncio.get_event_loop()
-        text = await loop.run_in_executor(None, self._transcribe_sync, audio_data)
-        return {"text": filter_hallucinations(text), "words": None}
+        return await loop.run_in_executor(None, self._transcribe_sync, audio_data)
 
-    def _transcribe_sync(self, audio_data: np.ndarray) -> str:
+    def _transcribe_sync(self, audio_data: np.ndarray) -> ASRResult:
         kwargs: dict[str, Any] = {"input": audio_data.astype(np.float32)}
         if self.kind == "sensevoice":
             kwargs.update({
@@ -143,13 +143,141 @@ class FunASREngine:
             })
 
         res = self.model.generate(**kwargs)
-        text = self._extract_text(res)
-        if self.kind == "sensevoice" and self._postprocess is not None:
+        result = self._normalize_result(res)
+        if (
+            self.kind == "sensevoice"
+            and self._postprocess is not None
+            and not result.get("words")
+            and not result.get("segments")
+        ):
             try:
-                text = self._postprocess(text)
+                result["text"] = self._postprocess(result["text"])
             except Exception:
                 logger.debug("[ASR] SenseVoice rich postprocess failed", exc_info=True)
-        return text.strip()
+        result["text"] = result["text"].strip()
+        return result
+
+    @classmethod
+    def _normalize_result(cls, result: Any) -> ASRResult:
+        """Normalize portable fields while retaining FunASR-specific metadata.
+
+        FunASR timestamps are milliseconds. Pair-only timestamp arrays are kept in
+        provider metadata because assigning them to text tokens would require a
+        provider tokenizer and guessing here would corrupt alignment.
+        """
+        if not result:
+            return empty_asr_result()
+        items = result if isinstance(result, list) else [result]
+        text_parts: list[str] = []
+        words: list[ASRWord] = []
+        segments: list[ASRSegment] = []
+        language: str | None = None
+        native_items: list[dict[str, Any]] = []
+
+        for raw_item in items:
+            if not isinstance(raw_item, dict):
+                text_parts.append(str(raw_item or ""))
+                continue
+            item_text = str(raw_item.get("text", "") or "")
+            text_parts.append(item_text)
+            if language is None and raw_item.get("language"):
+                language = str(raw_item["language"])
+
+            item_words = cls._explicit_words(raw_item.get("timestamp"))
+            words.extend(item_words)
+            sentence_info = raw_item.get("sentence_info")
+            if isinstance(sentence_info, list):
+                for sentence in sentence_info:
+                    segment = cls._sentence_segment(sentence)
+                    if segment is not None:
+                        segments.append(segment)
+            elif all(key in raw_item for key in ("start", "end")) and item_text:
+                segments.append(cls._segment_from_values(raw_item, item_text, item_words))
+
+            preserved = {
+                key: cls._to_builtin(raw_item[key])
+                for key in (
+                    "key", "timestamp", "sentence_info", "speaker", "spk", "language"
+                )
+                if key in raw_item
+            }
+            if preserved:
+                native_items.append(preserved)
+
+        metadata = {"provider": "funasr", "items": native_items} if native_items else None
+        return make_asr_result(
+            "".join(text_parts),
+            words=words or None,
+            segments=segments or None,
+            language=language,
+            provider_metadata=metadata,
+        )
+
+    @classmethod
+    def _sentence_segment(cls, value: Any) -> ASRSegment | None:
+        if not isinstance(value, dict):
+            return None
+        text = str(value.get("text", "") or "")
+        if not text or "start" not in value or "end" not in value:
+            return None
+        return cls._segment_from_values(
+            value, text, cls._explicit_words(value.get("timestamp"))
+        )
+
+    @classmethod
+    def _segment_from_values(
+        cls, value: dict[str, Any], text: str, words: list[ASRWord]
+    ) -> ASRSegment:
+        speaker = value.get("speaker", value.get("spk"))
+        return {
+            "text": text,
+            "start": cls._milliseconds_to_seconds(value.get("start")),
+            "end": cls._milliseconds_to_seconds(value.get("end")),
+            "speaker": str(speaker) if speaker is not None else None,
+            "words": words or None,
+        }
+
+    @classmethod
+    def _explicit_words(cls, timestamps: Any) -> list[ASRWord]:
+        if not isinstance(timestamps, (list, tuple)):
+            return []
+        words: list[ASRWord] = []
+        for item in timestamps:
+            text: Any = None
+            start: Any = None
+            end: Any = None
+            if isinstance(item, dict):
+                text = item.get("text", item.get("word", item.get("token")))
+                start, end = item.get("start"), item.get("end")
+            elif isinstance(item, (list, tuple)) and len(item) >= 3 and isinstance(item[0], str):
+                text, start, end = item[0], item[1], item[2]
+            if text is None or start is None or end is None:
+                continue
+            words.append({
+                "text": str(text),
+                "start": cls._milliseconds_to_seconds(start),
+                "end": cls._milliseconds_to_seconds(end),
+            })
+        return words
+
+    @staticmethod
+    def _milliseconds_to_seconds(value: Any) -> float:
+        try:
+            return float(value) / 1000.0
+        except (TypeError, ValueError):
+            return 0.0
+
+    @classmethod
+    def _to_builtin(cls, value: Any) -> Any:
+        if isinstance(value, dict):
+            return {str(key): cls._to_builtin(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [cls._to_builtin(item) for item in value]
+        if isinstance(value, np.ndarray):
+            return value.tolist()
+        if isinstance(value, np.generic):
+            return value.item()
+        return value
 
     @staticmethod
     def _extract_text(result: Any) -> str:
