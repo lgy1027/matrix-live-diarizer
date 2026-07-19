@@ -111,13 +111,17 @@ class ASREngine:
         for device in order:
             logger.info(f"[ASR] 尝试加载到 {device}（超时 {timeout}s）")
             t0 = time.time()
-            result: dict = {"ok": False, "err": None, "asr_model": None}
+            result: dict = {"ok": False, "err": None, "asr_model": None, "cancelled": False}
 
             def _worker():
                 try:
+                    if result["cancelled"]:
+                        return
                     model_dir = snapshot_download(
                         "Qwen/Qwen3-ASR-0.6B", revision=QWEN_ASR_REVISION
                     )
+                    if result["cancelled"]:
+                        return
                     dtype = torch.bfloat16 if device in ("cuda", "mps") else torch.float32
                     # 可选加载 forced aligner (Qwen3-ForcedAligner-0.6B, ~600MB)
                     # ⚠️ qwen_asr 的 Qwen3ASRModel.from_pretrained 把 forced_aligner 当 str(repo id) 处理
@@ -126,15 +130,23 @@ class ASREngine:
                     # (否则会触发 "Repo id must use alphanumeric chars" 错误)
                     forced_aligner_id = None
                     if self.config.asr_word_timestamps:
+                        if result["cancelled"]:
+                            return
                         logger.info("[ASR] 加载 forced aligner (Qwen3-ForcedAligner-0.6B)")
                         forced_aligner_id = snapshot_download(
                             "Qwen/Qwen3-ForcedAligner-0.6B",
                             revision=QWEN_ALIGNER_REVISION,
                         )
+                    if result["cancelled"]:
+                        return
                     result["asr_model"] = Qwen3ASRModel.from_pretrained(
                         model_dir, dtype=dtype, device_map=device,
                         forced_aligner=forced_aligner_id,
                     )
+                    if result["cancelled"]:
+                        # 已被取消:刚加载的模型无人持有,清引用让 GC 回收
+                        result["asr_model"] = None
+                        return
                     result["ok"] = True
                 except Exception as e:
                     result["err"] = e
@@ -148,7 +160,10 @@ class ASREngine:
                 logger.warning(
                     f"[ASR] {device} 加载超时 ({elapsed:.0f}s > {timeout}s)，放弃此设备"
                 )
-                # daemon=True 会随主进程退出；这里尽力释放 worker 内部引用
+                # M5: 置 cancel flag,daemon worker 在下一个阶段边界会主动 return,
+                # 减少与下一个设备加载线程并发占显存/内存(daemon=True 随主进程退出,
+                # 但服务长跑时仍值得尽早收尾)。
+                result["cancelled"] = True
                 if result.get("asr_model") is not None:
                     result["asr_model"] = None
                 continue

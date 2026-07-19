@@ -117,11 +117,12 @@ def test_compare_zero_duration_returns_unknown():
 
 
 def test_compare_none_embedding_returns_unknown():
-    """embedding=None 返 ('Unknown', 0.0)"""
+    """embedding=None 返 ('Spk_unknown', 0.0) — L4: 用 Spk_unknown 而非 'Unknown',
+    保持 ^Spk_ 格式一致(与下游默认值 / speaker_id 校验 pattern 对齐)。"""
     eng = _make_engine_mock()
     result = eng.compare_and_identify(None, client_id="test", audio_duration=5.0)
     assert isinstance(result, tuple) and len(result) == 2
-    assert result[0] == "Unknown"
+    assert result[0] == "Spk_unknown"
     assert result[1] == 0.0
 
 
