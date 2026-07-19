@@ -182,12 +182,14 @@ class CamPlusEngine(BaseSpeakerEngine):
         Returns:
             tuple[str, float]: (说话人ID, 置信度 0.0-1.0)
                 - 短段(<MIN_USABLE_DURATION) → ("Spk_unknown", 0.0)
-                - embedding=None → ("Unknown", 0.0)
+                - embedding=None → ("Spk_unknown", 0.0)
                 - 命中已有 Spk(高/边缘阈值) → (spk_id, 1.0 - best_dist)
                 - 新建 Spk → (new_id, 1.0 - best_dist)  (新 Spk 通常置信度较低)
         """
         if current_emb is None:
-            return "Unknown", 0.0
+            # L4: 用 Spk_unknown(符合 ^Spk_ 格式),与下游默认值及
+            # speaker_id 校验 pattern 一致,避免 "Unknown" 不匹配格式。
+            return "Spk_unknown", 0.0
 
         # Bug-68: 用纯函数分类段类型(supports testable + 复用)
         segment_class = self._classify_segment_duration(audio_duration)

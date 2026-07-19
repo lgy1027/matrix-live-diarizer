@@ -81,3 +81,38 @@ def test_log_injection_payload_neutralized():
     # [ ] space 都被替换为 _
     # 预期: "alice_ERROR__fake_log_entry"
     assert out == "alice_ERROR__fake_log_entry"
+
+
+# ========== L5: WebSocket 连接速率限制 ==========
+
+def test_ws_rate_limit_blocks_after_threshold():
+    """L5: 同一 IP 在窗口内连接数超阈值后被限流。"""
+    from app.services import realtime_auth
+    realtime_auth._ws_connect_log.clear()
+    host = "203.0.113.7"
+    # 阈值 = _WS_CONNECT_MAX,前 N 次放行,第 N+1 次被限
+    for i in range(realtime_auth._WS_CONNECT_MAX):
+        assert realtime_auth._ws_rate_limited(host) is False, f"第 {i+1} 次不应限流"
+    # 第 MAX+1 次触发
+    assert realtime_auth._ws_rate_limited(host) is True
+    realtime_auth._ws_connect_log.clear()
+
+
+def test_ws_rate_limit_empty_host_skipped():
+    """L5: 空客户端 host 不限流(不阻塞无 client 信息的情况)。"""
+    from app.services import realtime_auth
+    realtime_auth._ws_connect_log.clear()
+    assert realtime_auth._ws_rate_limited("") is False
+    realtime_auth._ws_connect_log.clear()
+
+
+def test_ws_rate_limit_per_ip_independent():
+    """L5: 不同 IP 计数独立,A 被限不影响 B。"""
+    from app.services import realtime_auth
+    realtime_auth._ws_connect_log.clear()
+    a, b = "203.0.113.7", "198.51.100.9"
+    for _ in range(realtime_auth._WS_CONNECT_MAX):
+        realtime_auth._ws_rate_limited(a)
+    assert realtime_auth._ws_rate_limited(a) is True
+    assert realtime_auth._ws_rate_limited(b) is False  # B 未超
+    realtime_auth._ws_connect_log.clear()

@@ -108,19 +108,34 @@ def diagnose_audio_dependencies() -> AudioDependencyReport:
 
 
 class InferenceCoordinator:
-    """Serialize shared-device inference while giving live audio first access."""
+    """Serialize shared-device inference while giving live audio first access.
+
+    公平性(M2):live 享有优先权,但持续涌入的 live 会无限期饿死已排队的
+    offline(refinement job)。offline 等待超过 _OFFLINE_STARVE_TIMEOUT 秒后
+    放宽进入条件为 `not active`(不再要求"无 live 在排队"),这样 live 运行
+    完释放槽的瞬间,等了很久的 offline 能抢到。live 的实时优先权在常规情况
+    下不受影响(只有 offline 饿了很久才让步一次)。
+    """
+
+    # offline 饿死超时:超过后放宽进入条件,保证 refinement job 终被调度
+    _OFFLINE_STARVE_TIMEOUT = 30.0
 
     def __init__(self) -> None:
         self._condition = asyncio.Condition()
         self._active = False
         self._live_waiters = 0
+        # 有 offline 已过饿死超时、正等待让位。live 见此会谦让一次,
+        # 保证 starved offline 在下一个槽释放时优先进入。
+        self._offline_starving = False
 
     @asynccontextmanager
     async def live(self):
         async with self._condition:
             self._live_waiters += 1
             try:
-                await self._condition.wait_for(lambda: not self._active)
+                await self._condition.wait_for(
+                    lambda: not self._active and not self._offline_starving
+                )
                 self._active = True
             finally:
                 self._live_waiters -= 1
@@ -132,9 +147,23 @@ class InferenceCoordinator:
     @asynccontextmanager
     async def offline(self):
         async with self._condition:
-            await self._condition.wait_for(
-                lambda: not self._active and self._live_waiters == 0
-            )
+            starved = False  # 是否已过饿死超时,过则放宽进入条件
+            while True:
+                # 常规条件:无运行 + 无 live 排队(让 live 优先)
+                if not self._active and self._live_waiters == 0:
+                    break
+                # 已饿死:放宽为仅"无运行",并置 starving 标志让 live 谦让
+                if starved and not self._active:
+                    break
+                # 单层 wait_for 超时:仅首次用饿死超时,标记 starved 后转为
+                # 无超时等待 live 释放(避免 wait_for 嵌套 wait_for 的锁陷阱)
+                timeout = self._OFFLINE_STARVE_TIMEOUT if not starved else None
+                try:
+                    await asyncio.wait_for(self._condition.wait(), timeout=timeout)
+                except asyncio.TimeoutError:
+                    starved = True
+                    self._offline_starving = True
+            self._offline_starving = False
             self._active = True
         try:
             yield

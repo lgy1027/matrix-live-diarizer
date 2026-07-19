@@ -476,3 +476,63 @@ def test_audio_processor_drains_accepted_frames_after_stop(monkeypatch):
 
     assert queue.empty()
     assert len(process_segment.await_args.args[2]) == 4000
+
+
+def test_timeout_flush_does_not_reset_last_full_text(monkeypatch):
+    """M4: 超时只是"队列暂空"非"语音段结束"。flush 出去的文本已入库,
+    超时后不应清空 ctx.last_full_text —— 否则下一段 ASR 返回的含旧前缀
+    文本会因基准清空被当增量重发 → 前端重复字。
+
+    通过 patch SessionContext 构造器注入共享 ctx,驱动超时分支后断言
+    last_full_text 不被清空。
+    """
+    import app.api.websocket as ws_mod
+
+    asr = MagicMock()
+    asr.is_silent.return_value = False  # classify_frame 判语音 → 累积 SPEECH
+    speaker = MagicMock()
+    shared_ctx = ws_mod.SessionContext("test_user")
+
+    class DummyWebSocket:
+        def __init__(self):
+            self._engine_snapshot = ws_mod.EngineSnapshot(asr=asr, speaker=speaker)
+            self._speaker_scope = "test_user"
+            self.sent = []
+
+        async def send_json(self, msg):
+            self.sent.append(msg)
+
+    websocket = DummyWebSocket()
+    queue = asyncio.Queue()
+    loud_pcm = (np.ones(2000, dtype=np.int16) * 10000).tobytes()
+
+    async def fake_process(ws, c, audio, cid, sr, *, segment_start_time=0.0):
+        # 模拟真实 ASR 流程设置上下文基准
+        c.last_full_text = "你好世界"
+
+    monkeypatch.setattr(ws_mod, "_process_speech_segment", fake_process)
+    # 让 audio_processor 内部用我们的 shared_ctx
+    monkeypatch.setattr(ws_mod, "SessionContext", lambda cid: shared_ctx)
+    monkeypatch.setattr(ws_mod.config.audio, "skip_frame_threshold", 100)
+    monkeypatch.setattr(ws_mod.config.audio, "timeout_seconds", 100)
+    monkeypatch.setattr(ws_mod.config.audio, "max_segment_seconds", 5)
+
+    # 一帧语音进队列 → SILENCE→SPEECH, buffer 累积;之后队列空 + stop_event
+    # 触发 0.1s 超时分支(len(speech_buffer) > 0 → flush)。
+    queue.put_nowait((0, loud_pcm))
+    stop_event = asyncio.Event()
+
+    async def run_processor():
+        task = asyncio.create_task(
+            ws_mod.audio_processor(websocket, queue, "test_user", stop_event)
+        )
+        while not queue.empty():
+            await asyncio.sleep(0)
+        stop_event.set()  # 设 stop → 下次 get timeout=0.1s,触发超时分支
+        await task
+
+    asyncio.run(run_processor())
+
+    assert shared_ctx.last_full_text == "你好世界", (
+        "超时分支不应重置 last_full_text,否则下一段含旧前缀文本会重发"
+    )

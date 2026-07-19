@@ -241,3 +241,20 @@ def _enable_auth_test_bypass():
     os.environ["TEST_AUTH_BYPASS"] = "1"
     yield
     os.environ.pop("TEST_AUTH_BYPASS", None)
+
+
+@pytest.fixture(autouse=True)
+def _reset_ws_connect_rate_limit():
+    """清理 realtime_auth 的进程级 WS 连接限流计数器,防跨测试污染
+    (大量 WS 测试共用 'testclient' host 会累积触发限流)。"""
+    try:
+        from app.services import realtime_auth
+        realtime_auth._ws_connect_log.clear()
+    except Exception:
+        pass
+    yield
+    try:
+        from app.services import realtime_auth
+        realtime_auth._ws_connect_log.clear()
+    except Exception:
+        pass

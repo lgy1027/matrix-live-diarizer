@@ -127,7 +127,8 @@ class WespeakerEngine(BaseSpeakerEngine):
             tuple[str, float]: (说话人ID, 置信度 0.0-1.0)
         """
         if current_emb is None:
-            return "Unknown", 0.0
+            # L4: Spk_unknown 符合 ^Spk_ 格式,与下游默认值一致
+            return "Spk_unknown", 0.0
 
         # 判断是否为可靠样本
         is_reliable = audio_duration >= 1.5
