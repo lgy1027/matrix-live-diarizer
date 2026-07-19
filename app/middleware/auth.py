@@ -101,9 +101,13 @@ class AuthMiddleware(BaseHTTPMiddleware):
         try:
             user_row = auth_service.get_user(user_id)
             if not user_row:
-                raise HTTPException(status_code=401, detail="用户不存在")
+                return JSONResponse(
+                    status_code=401, content={"detail": "用户不存在"}
+                )
             if not user_row.get("is_active"):
-                raise HTTPException(status_code=401, detail="账户已禁用")
+                return JSONResponse(
+                    status_code=401, content={"detail": "账户已禁用"}
+                )
             token_pwd_iat = float(payload.get("pwd_iat", 0))
             current_pwd_iat = float(user_row.get("password_changed_at") or 0)
             if current_pwd_iat > token_pwd_iat:

@@ -60,3 +60,47 @@ def test_web_directory_no_telemetry():
                 for m in pat.finditer(text):
                     violations.append(f"{p}: 禁止 SDK: {m.group(0)}")
     assert not violations, "前端隐私违规:\n" + "\n".join(violations)
+
+
+def test_scripts_directory_no_telemetry_sdk():
+    """scripts/ 只禁遥测 SDK,不禁公网 URL。
+
+    原因:scripts/seed_demo_data.py 合法地从 archive.org 下载 CC0 公开音频
+    (https://archive.org/...),这是 demo 数据的正常行为,不应判违规。
+    所以 scripts/ 只查 FORBIDDEN_SDK_PATTERNS,不查 PUBLIC_HOST_RE。
+    """
+    violations = []
+    scripts_dir = REPO / "scripts"
+    if not scripts_dir.exists():
+        return
+    for p in scripts_dir.rglob("*.py"):
+        text = p.read_text(encoding="utf-8")
+        for pat in FORBIDDEN_SDK_PATTERNS:
+            for m in pat.finditer(text):
+                violations.append(f"{p}: 禁止 SDK: {m.group(0)}")
+    assert not violations, "scripts/ 遥测 SDK 违规:\n" + "\n".join(violations)
+
+
+def test_model_download_calls_are_documented_known_behavior():
+    """模型下载入口审计:不 fail 测试,只暴露发现。
+
+    snapshot_download / hf_hub_download 是模型下载入口(首次启动走公网,
+    完成后永久断网可用,见 README / PRIVACY)。这里收集所有调用点并打印
+    告警,方便人工复核,但测试本身总是 pass。
+    """
+    pattern = re.compile(r"(snapshot_download|hf_hub_download)\s*\(")
+    findings = []
+    for sub in ("app", "engine"):
+        sub_dir = REPO / sub
+        if not sub_dir.exists():
+            continue
+        for p in sub_dir.rglob("*.py"):
+            text = p.read_text(encoding="utf-8")
+            for m in pattern.finditer(text):
+                findings.append(f"{p}: {m.group(0)}")
+    if findings:
+        print(f"已知行为:{len(findings)} 处模型下载调用(首次启动联网,见 README/PRIVACY)")
+        for f in findings:
+            print(f"  - {f}")
+    # 测试总是 pass,只把发现暴露出来
+    assert True

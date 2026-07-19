@@ -6,8 +6,6 @@
 """
 import sys
 
-sys.path.insert(0, "/Users/lgy/python/github.com/lgy1027/matrix-live-diarizer")
-
 from app.api.websocket import (
     STATE_SILENCE,
     STATE_SPEECH,

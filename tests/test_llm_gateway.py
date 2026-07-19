@@ -320,15 +320,42 @@ def test_socket_patch_install_uninstall():
     orig = _socket.getaddrinfo
     LLMGateway._install_socket_patch("https://api.edgefn.net/v1", "198.18.0.51")
     assert LLMGateway._socket_patch_active is True
-    assert LLMGateway._pinned_target_host == "api.edgefn.net"
-    assert LLMGateway._pinned_target_ip == "198.18.0.51"
+    assert LLMGateway._pinned_map["api.edgefn.net"] == ("198.18.0.51", 443)
     # getaddrinfo 应被替换
     assert _socket.getaddrinfo is not orig
-    
+
     LLMGateway._uninstall_socket_patch()
     assert LLMGateway._socket_patch_active is False
-    assert LLMGateway._pinned_target_host is None
-    assert LLMGateway._pinned_target_ip is None
+    assert LLMGateway._pinned_map == {}
+    assert _socket.getaddrinfo is orig
+
+
+def test_socket_patch_supports_multiple_hosts_concurrently():
+    """M3: 多 host 可同时 pin,互不覆盖。旧单 host 实现第二个 host 会被跳过。"""
+    from app.services.llm_gateway import LLMGateway
+    import socket as _socket
+
+    LLMGateway._uninstall_socket_patch()  # 确保干净起点
+    orig = _socket.getaddrinfo
+    LLMGateway._install_socket_patch("https://one.example/v1", "10.0.0.1")
+    # 第二个 host 安装时 _socket_patch_active 已 True,旧实现会 return 跳过
+    LLMGateway._install_socket_patch("https://two.example/v1", "10.0.0.2")
+    try:
+        assert LLMGateway._pinned_map["one.example"] == ("10.0.0.1", 443)
+        assert LLMGateway._pinned_map["two.example"] == ("10.0.0.2", 443)
+        # 两个 host 都应解析到各自 pin 的 IP
+        r1 = _socket.getaddrinfo("one.example", 443, type=_socket.SOCK_STREAM)
+        r2 = _socket.getaddrinfo("two.example", 443, type=_socket.SOCK_STREAM)
+        assert {s[0] for _, _, _, _, s in r1} == {"10.0.0.1"}
+        assert {s[0] for _, _, _, _, s in r2} == {"10.0.0.2"}
+        # 移除 one 后,two 仍应被 pin(旧实现会一并还原 getaddrinfo 导致 two 失效)
+        LLMGateway._remove_socket_pin("https://one.example/v1")
+        assert "one.example" not in LLMGateway._pinned_map
+        assert LLMGateway._socket_patch_active is True  # two 还在,patch 仍装着
+        r2b = _socket.getaddrinfo("two.example", 443, type=_socket.SOCK_STREAM)
+        assert {s[0] for _, _, _, _, s in r2b} == {"10.0.0.2"}
+    finally:
+        LLMGateway._uninstall_socket_patch()
     assert _socket.getaddrinfo is orig
 
 

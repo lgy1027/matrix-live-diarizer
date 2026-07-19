@@ -15,8 +15,6 @@ import tempfile
 import pytest
 from unittest.mock import MagicMock
 
-sys.path.insert(0, "/Users/lgy/python/github.com/lgy1027/matrix-live-diarizer")
-
 # 临时关掉 conftest 的 TEST_AUTH_BYPASS,让真鉴权跑
 @pytest.fixture(autouse=True)
 def _disable_auth_bypass(monkeypatch):
@@ -307,6 +305,38 @@ def test_security_headers_are_present(monkeypatch):
     assert r.headers["x-content-type-options"] == "nosniff"
     assert r.headers["x-frame-options"] == "DENY"
     assert "default-src 'self'" in r.headers["content-security-policy"]
+
+
+def test_csp_connect_src_tightened_with_explicit_origins(monkeypatch):
+    """L2: 显式 ALLOWED_ORIGINS → connect-src 收紧到具体 ws/wss host,
+    不再放行任意 ws 服务器(降低 XSS 经 WS 外泄)。"""
+    monkeypatch.setenv("ALLOWED_ORIGINS", "http://127.0.0.1:8000,http://localhost:8000")
+    client = _make_client(monkeypatch)
+    r = client.get("/health")
+    csp = r.headers["content-security-policy"]
+    assert "ws://127.0.0.1:*" in csp
+    assert "ws://localhost:*" in csp
+    # 不应再出现通配形式 'ws: wss:'
+    assert "ws: wss:" not in csp
+
+
+def test_csp_connect_src_falls_back_to_wildcard_when_star(monkeypatch):
+    """L2: ALLOWED_ORIGINS=* 时无法枚举具体 host,回退 ws: wss:(不改现状)。"""
+    monkeypatch.setenv("ALLOWED_ORIGINS", "*")
+    client = _make_client(monkeypatch)
+    r = client.get("/health")
+    csp = r.headers["content-security-policy"]
+    assert "connect-src 'self' ws: wss:;" in csp
+
+
+def test_csp_connect_src_includes_lan_origin_when_configured(monkeypatch):
+    """L2: LAN 部署设了具体 origin → CSP 包含该 host 的 ws/wss,不误伤同源 WS。"""
+    monkeypatch.setenv("ALLOWED_ORIGINS", "http://192.168.1.50:8000")
+    client = _make_client(monkeypatch)
+    r = client.get("/health")
+    csp = r.headers["content-security-policy"]
+    assert "ws://192.168.1.50:*" in csp
+    assert "ws: wss:" not in csp
 
 
 def test_local_websocket_bypass_rejects_untrusted_origin(monkeypatch):

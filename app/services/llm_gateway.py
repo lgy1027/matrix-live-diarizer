@@ -332,8 +332,11 @@ class LLMGateway:
     _socket_patch_lock = threading.Lock()
     _base_getaddrinfo = socket.getaddrinfo
     _original_getaddrinfo = None
-    _pinned_target_host: Optional[str] = None
-    _pinned_target_ip: Optional[str] = None
+    # M3: 多 host pin 映射 host -> (ip, default_port)。替代单 host 的
+    # _pinned_target_host/_ip,避免:并发/重入时第二个 host 的 pin 被跳过
+    # (旧代码 _socket_patch_active=True 就 return),或卸载时把第一个 host
+    # 的 pin 一起清掉(旧 _uninstall 无条件还原 getaddrinfo)。
+    _pinned_map: dict = {}
 
     @classmethod
     @asynccontextmanager
@@ -346,7 +349,9 @@ class LLMGateway:
             cls._install_socket_patch(url, pinned_ip)
             yield
         finally:
-            cls._uninstall_socket_patch()
+            # M3: 只移除本 context 注册的 host,不清空其他并发 context 的 pin。
+            # map 空时才还原 getaddrinfo。
+            cls._remove_socket_pin(url)
             cls._socket_patch_lock.release()
 
     def _resolve_pinned_ip(self, url: str) -> Optional[str]:
@@ -385,9 +390,14 @@ class LLMGateway:
 
     @classmethod
     def _install_socket_patch(cls, url: str, pinned_ip: str) -> None:
+        """把 (host -> ip, default_port) 加入 _pinned_map,并按需安装 patched getaddrinfo。
+
+        M3: 多 host 累积。已安装 patched fn 时不重复安装(读 map 即可),
+        避免"第二个 host 因 _socket_patch_active=True 被跳过导致没 pin"。
+        """
         parsed = urlparse(url)
         host = parsed.hostname
-        if not host or cls._socket_patch_active:
+        if not host:
             return
         # 已是 IP literal 时,patch 没意义(URL 里的 host 就是 IP,getaddrinfo 不会被以 host 调用)
         try:
@@ -395,33 +405,45 @@ class LLMGateway:
             return
         except ValueError:
             pass
-        cls._pinned_target_host = host
-        cls._pinned_target_ip = pinned_ip
+        default_port = parsed.port or 443
+        cls._pinned_map[host] = (pinned_ip, default_port)
         if cls._original_getaddrinfo is None:
             cls._original_getaddrinfo = socket.getaddrinfo
-
-        _pinned_host = host
-        _pinned_ip = pinned_ip
-        _default_port = parsed.port or 443
+        if cls._socket_patch_active:
+            return  # patched fn 已装,新 host 进 map 即生效
         _orig = cls._original_getaddrinfo
 
         def _patched_getaddrinfo(h, port, *a, **kw):
-            if h == _pinned_host:
+            entry = cls._pinned_map.get(h)
+            if entry is not None:
+                pin_ip, default_port = entry
                 try:
-                    port_int = int(port) if port is not None else _default_port
+                    port_int = int(port) if port is not None else default_port
                 except (TypeError, ValueError):
-                    port_int = _default_port
-                return _orig(_pinned_ip, port_int, *a, **kw)
+                    port_int = default_port
+                return _orig(pin_ip, port_int, *a, **kw)
             return _orig(h, port, *a, **kw)
 
         socket.getaddrinfo = _patched_getaddrinfo
         cls._socket_patch_active = True
 
     @classmethod
+    def _remove_socket_pin(cls, url: str) -> None:
+        """M3: 只移除本 context 注册的 host;map 空时才还原 getaddrinfo。"""
+        parsed = urlparse(url)
+        host = parsed.hostname
+        if host:
+            cls._pinned_map.pop(host, None)
+        if not cls._pinned_map and cls._original_getaddrinfo is not None:
+            socket.getaddrinfo = cls._original_getaddrinfo
+            cls._original_getaddrinfo = None
+            cls._socket_patch_active = False
+
+    @classmethod
     def _uninstall_socket_patch(cls) -> None:
+        """全量重置(测试与兜底用):清空 map 并还原 getaddrinfo。"""
         if cls._original_getaddrinfo is not None:
             socket.getaddrinfo = cls._original_getaddrinfo
         cls._original_getaddrinfo = None
-        cls._pinned_target_host = None
-        cls._pinned_target_ip = None
+        cls._pinned_map.clear()
         cls._socket_patch_active = False

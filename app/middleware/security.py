@@ -34,6 +34,40 @@ def is_trusted_browser_origin(origin: str | None, allowed_origins=()) -> bool:
     return parsed.scheme in {"http", "https"} and parsed.hostname in LOOPBACK_HOSTS
 
 
+def _connect_src_csp() -> str:
+    """L2: 动态构建 connect-src。
+
+    前端 WebSocket 用 window.location.host(同源),所以 WS host = 页面 host。
+    - 默认 CORS 通配("*"):无法枚举具体 host,只能保留 `ws: wss:`(不改现状,
+      避免误伤;通配模式本就信任任意来源)。
+    - 显式 ALLOWED_ORIGINS(硬化部署 / LAN 模式):派生 ws/wss host,
+      收紧到"同源 + 显式放行的 host",不再放行任意 ws 服务器,
+      降低 XSS 经 WS 外泄的风险。
+
+    loopback(127.0.0.1 / localhost)始终放行,保证本地 SPA 即便未配 origin 也能连。
+    """
+    from app.config import config
+    try:
+        origins = config.cors.allowed_origins
+    except AttributeError:
+        origins = ()
+    if not origins or "*" in origins:
+        return "connect-src 'self' ws: wss:;"
+    ws_hosts = {"127.0.0.1", "localhost"}
+    for origin in origins:
+        try:
+            parsed = urlsplit(origin)
+        except ValueError:
+            continue
+        if parsed.hostname:
+            ws_hosts.add(parsed.hostname)
+    parts = ["'self'"]
+    for host in sorted(ws_hosts):
+        parts.append(f"ws://{host}:*")
+        parts.append(f"wss://{host}:*")
+    return "connect-src " + " ".join(parts) + ";"
+
+
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
@@ -43,7 +77,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers.setdefault(
             "Content-Security-Policy",
             "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data:; media-src 'self' blob:; connect-src 'self' ws: wss:; "
-            "frame-ancestors 'none'; base-uri 'self'",
+            "img-src 'self' data:; media-src 'self' blob:; " + _connect_src_csp() +
+            " frame-ancestors 'none'; base-uri 'self'",
         )
         return response

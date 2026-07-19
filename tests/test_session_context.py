@@ -8,7 +8,6 @@
 对应 app/services/session.py
 """
 import sys
-sys.path.insert(0, "/Users/lgy/python/github.com/lgy1027/matrix-live-diarizer")
 
 from app.services.session import SessionContext
 
