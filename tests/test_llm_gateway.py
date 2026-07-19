@@ -278,6 +278,40 @@ def test_minutes_falls_back():
 
 # ========== 回归测试: socket-level DNS pinning ==========
 
+def test_rejects_dns_rebind_between_init_and_request(monkeypatch):
+    """H1: init 时刻 DNS 返回私网 IP(通过校验),请求时刻 rebind 到公网 IP。
+    pinning 应锁死到 init 缓存的私网 IP,且 _assert_no_dns_rebind 检测到
+    不一致后拒绝调用(降级到 extractive),绝不连到攻击者 rebind 出的公网。
+    """
+    calls = {"n": 0}
+
+    def fake_gethostbyname(h):
+        calls["n"] += 1
+        # 第 1 次(init 校验 + 缓存):私网 → 通过;后续 rebind 到公网
+        return "127.0.0.1" if calls["n"] == 1 else "8.8.8.8"
+
+    monkeypatch.setattr(socket, "gethostbyname", fake_gethostbyname)
+    cfg = LLMConfig(enabled=True, endpoint="http://evil.example:80/v1")
+    gw = LLMGateway(cfg)
+    assert gw._pinned_ip == "127.0.0.1"  # 缓存了 init 时的私网 IP
+    # 请求时 rebind:当前解析 8.8.8.8 != 缓存 127.0.0.1 → 拒绝
+    with pytest.raises(EndpointSecurityError):
+        asyncio.run(gw._call_llm("hi"))
+
+
+def test_no_rebind_check_for_allow_public(monkeypatch):
+    """allow_public=True 不做 rebinding 校验(用户已显式接受公网)。"""
+    monkeypatch.setattr(socket, "gethostbyname", lambda h: "8.8.8.8")
+    cfg = LLMConfig(
+        enabled=True, endpoint="https://api.example/v1",
+        allow_public=True, api_key="sk-test",
+    )
+    gw = LLMGateway(cfg)
+    # 不应抛 EndpointSecurityError
+    gw._assert_no_dns_rebind()
+    assert gw._pinned_ip is None  # allow_public 不缓存
+
+
 def test_socket_patch_install_uninstall():
     """_install_socket_patch / _uninstall_socket_patch 不污染全局"""
     from app.services.llm_gateway import LLMGateway

@@ -47,10 +47,13 @@ async def authenticate_websocket(websocket, client_id: str) -> bool:
         except Exception:
             pass
         return False
+    # 注意:loopback 集合只含真实本机地址。"testclient"(Starlette TestClient
+    # 的固定 host)不得放进生产鉴权路径 —— 那等于为测试开后门,真实客户端
+    # 不会用它。WS 测试如需 bypass,走 TEST_AUTH_BYPASS=1 或带真实 token。
     local_bypass = (
         config.deployment.mode == "local"
         and config.auth.local_auth_disabled
-        and client_host in ("127.0.0.1", "::1", "localhost", "testclient")
+        and client_host in ("127.0.0.1", "::1", "localhost")
         and is_trusted_browser_origin(
             websocket.headers.get("origin"), config.cors.allowed_origins
         )
