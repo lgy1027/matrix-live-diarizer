@@ -181,12 +181,32 @@ class ASREngine:
                 self.device = device
                 self.asr_model = result["asr_model"]
                 # 加载 Silero VAD
+                # 优先从本地 torch.hub 缓存加载(source='local'),避开
+                # torch.hub 的 GitHub API 调用。后者在 GitHub 限流(403)时会触发
+                # torch 2.11 hub.py 的 _validate_not_a_forked_repo KeyError bug
+                # (掩盖真实 403),且违反项目"断网可用"原则(每次启动都重新
+                # 校验 GitHub)。缓存存在则离线加载,无缓存才回退在线下载。
                 try:
-                    self.vad_model, utils = torch.hub.load(
-                        repo_or_dir=f'snakers4/silero-vad:{SILERO_VAD_REVISION}',
-                        model='silero_vad',
-                        trust_repo=True,
+                    import glob as _glob
+                    _hub_root = os.path.expanduser("~/.cache/torch/hub")
+                    _vad_cache = os.path.join(
+                        _hub_root, f"snakers4_silero-vad_{SILERO_VAD_REVISION}"
                     )
+                    if not os.path.isdir(_vad_cache):
+                        _cands = sorted(
+                            _glob.glob(os.path.join(_hub_root, "snakers4_silero-vad_*"))
+                        )
+                        _vad_cache = _cands[0] if _cands else None
+                    if _vad_cache and os.path.isdir(_vad_cache):
+                        self.vad_model, utils = torch.hub.load(
+                            repo_or_dir=_vad_cache, model='silero_vad',
+                            source='local', trust_repo=True,
+                        )
+                    else:
+                        self.vad_model, utils = torch.hub.load(
+                            repo_or_dir=f'snakers4/silero-vad:{SILERO_VAD_REVISION}',
+                            model='silero_vad', trust_repo=True,
+                        )
                     self.get_speech_timestamps = utils[0]
                     self.vad_model.eval()
                     self.sample_rate = 16000
