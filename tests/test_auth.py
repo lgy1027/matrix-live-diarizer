@@ -272,6 +272,35 @@ def test_local_bypass_rejects_untrusted_browser_origin(monkeypatch):
     assert r.status_code == 401
 
 
+def test_local_bypass_allows_trusted_browser_origin(monkeypatch):
+    """可信本机 Origin(浏览器 SPA 同源)无 token 仍放行。"""
+    client = _make_client(monkeypatch, client_host="127.0.0.1")
+    r = client.get("/v1/meetings", headers={"Origin": "http://127.0.0.1:8000"})
+    assert r.status_code == 200
+
+
+def test_local_bypass_allows_no_origin_for_browser_compat(monkeypatch):
+    """无 Origin 视为可信是**有意为之**:部分浏览器(Firefox)对同源 fetch
+    不携带 Origin,本地 SPA 靠这个放行。该行为是文档化的威胁模型,不是 bug。
+    真正的本机隔离请用 DEPLOYMENT_MODE=lan / LOCAL_AUTH_DISABLED=false。
+    """
+    client = _make_client(monkeypatch, client_host="127.0.0.1")
+    r = client.get("/v1/meetings")
+    assert r.status_code == 200
+
+
+def test_websocket_bypass_no_longer_accepts_testclient_host(monkeypatch):
+    """H2: 'testclient'(Starlette TestClient host)不得作为本机来源放行 WS。
+    删除后,testclient 来源无 auth 消息应被拒(4401),证明后门已堵。
+    """
+    client = _make_client(monkeypatch)  # client_host 默认 "testclient"
+    with pytest.raises(WebSocketDisconnect) as caught:
+        with client.websocket_connect("/ws/v1/stream/no_backdoor") as ws:
+            ws.send_json({"action": "rename", "title": "should be rejected"})
+            ws.receive_json()
+    assert caught.value.code == 4401
+
+
 def test_security_headers_are_present(monkeypatch):
     client = _make_client(monkeypatch)
     r = client.get("/health")

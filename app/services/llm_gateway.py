@@ -31,18 +31,25 @@ class LLMModelMissingError(LLMUnavailableError):
     pass
 
 
-def _validate_endpoint(endpoint: str, allowed_hosts: tuple, allow_public: bool = False) -> None:
-    """解析 endpoint 并校验 host 是私有/本地地址
-    allow_public=True 时跳过 IP 校验（用户已显式开公网）。
+def _validate_endpoint(
+    endpoint: str, allowed_hosts: tuple, allow_public: bool = False
+) -> Optional[str]:
+    """解析 endpoint 并校验 host 是私有/本地地址。
+
+    返回 init 时刻解析到的 IP(供 DNS pinning 缓存,防 init→request 之间的
+    DNS rebinding)。返回 None 表示:命中 allowed_hosts / allow_public=True /
+    host 是 IP literal — 这些情况不需要缓存 IP 做 pinning 基准。
+
+    allow_public=True 时跳过 IP 校验(用户已显式开公网)。
     """
     parsed = urlparse(endpoint)
     host = parsed.hostname
     if not host:
         raise EndpointSecurityError(f"无法解析 endpoint: {endpoint}")
     if host in allowed_hosts:
-        return
+        return None
     if allow_public:
-        return
+        return None
     try:
         ip = ipaddress.ip_address(socket.gethostbyname(host))
     except (socket.gaierror, ValueError) as e:
@@ -54,12 +61,37 @@ def _validate_endpoint(endpoint: str, allowed_hosts: tuple, allow_public: bool =
             f"如确实需要,设置环境变量 LLM_ALLOW_PUBLIC=true 显式开公网,"
             f"并通过 LLM_API_KEY 配置 Bearer token。"
         )
+    return str(ip)
 
 
 class LLMGateway:
     def __init__(self, config: LLMConfig):
+        # DNS rebinding 防御基准:host 与 IP 在 init 时刻就被校验并缓存,
+        # 请求时 pin 到这个缓存 IP(而非每次重新解析),并在请求前再校验
+        # 一次当前 DNS 与缓存一致(见 _assert_no_dns_rebind)。
+        self._pinned_host: Optional[str] = None
+        self._pinned_ip: Optional[str] = None
         if config.enabled:
-            _validate_endpoint(config.endpoint, config.allowed_hosts, config.allow_public)
+            validated_ip = _validate_endpoint(
+                config.endpoint, config.allowed_hosts, config.allow_public
+            )
+            parsed = urlparse(config.endpoint)
+            host = parsed.hostname
+            self._pinned_host = host
+            if validated_ip is not None:
+                # strict 私网模式:init 已解析出私网 IP,缓存作为 pinning 基准。
+                self._pinned_ip = validated_ip
+            elif not config.allow_public and host is not None:
+                # allowed_hosts 里的域名(如 "localhost"):validate 没解析,
+                # 这里补一次解析用于 pinning。IP literal 不需要 pin。
+                try:
+                    ipaddress.ip_address(host)
+                except ValueError:
+                    try:
+                        self._pinned_ip = socket.gethostbyname(host)
+                    except socket.gaierror:
+                        self._pinned_ip = None
+                # allow_public=True 不缓存 → 请求时跟随 DNS 轮询,无 rebinding 威胁
         self.config = config
         self._available_cache: Optional[bool] = None
         self._cache_time: float = 0.0
@@ -246,6 +278,30 @@ class LLMGateway:
         except httpx.HTTPError as e:
             raise LLMUnavailableError(f"LLM HTTP 错误: {e}") from e
 
+    def _assert_no_dns_rebind(self) -> None:
+        """请求前再校验一次:当前 DNS 解析结果与 init 缓存的 IP 是否一致。
+
+        仅 strict 私网模式(有缓存 IP 且未开 allow_public)生效。allow_public
+        用户已显式接受公网,无 rebinding 威胁,跟随 DNS 轮询即可。
+        不一致 → 抛 EndpointSecurityError,调用方降级到 extractive 兜底,
+        绝不把连接重定向到攻击者 rebind 出的公网 IP。
+        """
+        if self.config.allow_public:
+            return
+        if not self._pinned_host or not self._pinned_ip:
+            return
+        try:
+            fresh = socket.gethostbyname(self._pinned_host)
+        except socket.gaierror:
+            # DNS 暂时不可用:pinning 仍用缓存 IP(安全默认),不阻断
+            return
+        if fresh != self._pinned_ip:
+            raise EndpointSecurityError(
+                f"DNS rebinding 检测: {self._pinned_host} 启动时解析为 "
+                f"{self._pinned_ip},当前解析为 {fresh}。"
+                f"拒绝 LLM 调用,降级到本地摘要。"
+            )
+
     async def _post_with_dns_guard(
         self,
         url: str,
@@ -260,6 +316,8 @@ class LLMGateway:
         in a worker thread so concurrent async callers do not block the event
         loop, and the context manager always restores the socket function.
         """
+        # 先做 rebinding 校验(可能抛 EndpointSecurityError → 调用方降级)
+        self._assert_no_dns_rebind()
         pinned_ip = self._resolve_pinned_ip(url)
         async with self._dns_pin_guard(url, pinned_ip):
             async with httpx.AsyncClient(timeout=timeout) as client:
@@ -291,9 +349,17 @@ class LLMGateway:
             cls._uninstall_socket_patch()
             cls._socket_patch_lock.release()
 
-    @classmethod
-    def _resolve_pinned_ip(cls, url: str) -> Optional[str]:
-        """从 URL 解析域名,提前解析成 IP 备用。返回 None 表示跳过 pinning。"""
+    def _resolve_pinned_ip(self, url: str) -> Optional[str]:
+        """返回用于 socket pinning 的 IP。None 表示跳过 pinning。
+
+        - IP literal host:不需要 pin(URL 里的 host 就是 IP)
+        - allow_public=True:跟随当前 DNS(用户显式开公网,无 rebinding 威胁,
+          且公网 endpoint 常做 DNS 轮询/CDN,固定 IP 反而会连不上)
+        - strict 私网模式:返回 init 时缓存的 IP,不再重新解析 —— 这是防
+          DNS rebinding 的关键:连接目标锁死到 init 校验过的私网 IP,
+          请求时刻即使 DNS 被 rebind 到公网也不受影响(_assert_no_dns_rebind
+          还会再校验一次并拒绝)。
+        """
         try:
             parsed = urlparse(url)
             host = parsed.hostname
@@ -305,7 +371,15 @@ class LLMGateway:
                 return None
             except ValueError:
                 pass
-            return socket.gethostbyname(host)
+            if self.config.allow_public:
+                try:
+                    return socket.gethostbyname(host)
+                except socket.gaierror:
+                    return None
+            # strict 模式:用 init 缓存的 IP,绝不重新解析作为连接目标
+            if host == self._pinned_host:
+                return self._pinned_ip
+            return None
         except (socket.gaierror, ValueError):
             return None
 
