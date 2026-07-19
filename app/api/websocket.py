@@ -500,12 +500,12 @@ async def audio_processor(
                     segment_start_time=speech_start_sample / sample_rate,
                 )
                 speech_buffer = np.array([], dtype=np.float32)
-                # Bug(M4): 超时只是"队列暂空",状态机仍在 SPEECH、语义上
-                # 上下文连续。若在此重置 last_full_text,下一段 ASR 返回的
-                # 含旧前缀文本(0.5s 上下文 / 短间隔重复语气词)会因基准清空
-                # 被当增量重发 → 前端看到重复字。故超时 flush 后**不重置**
-                # last_full_text,也不切 state;静音触发的 reset(见下文
-                # STATE_SILENCE 切换)才重置上下文。
+                # Bug(M4): 超时只是"队列暂空",flush 出去的文本已入库。
+                # 若在此重置 last_full_text,下一段 ASR 返回的含旧前缀文本
+                # (0.5s 上下文 / 短间隔重复语气词)会因基准清空被当增量重发
+                # → 前端看到重复字。故超时 flush 后保留 last_full_text 作为
+                # 下一段增量合并基准(state 切回 SILENCE 但上下文不丢);只有
+                # 静音触发的自然段结束才重置 last_full_text(见下文 STATE_SILENCE 切换)。
                 state = STATE_SILENCE
                 silence_frame_count = 0
                 silence_sample_count = 0

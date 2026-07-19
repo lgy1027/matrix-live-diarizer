@@ -63,8 +63,11 @@ def _connect_src_csp() -> str:
             ws_hosts.add(parsed.hostname)
     parts = ["'self'"]
     for host in sorted(ws_hosts):
-        parts.append(f"ws://{host}:*")
-        parts.append(f"wss://{host}:*")
+        # IPv6 host 在 CSP host-source 里必须带方括号(CSP3 规范),
+        # 否则 ws://::1:* 会被解析器拒绝,WS 被浏览器拦。
+        host_repr = f"[{host}]" if ":" in host else host
+        parts.append(f"ws://{host_repr}:*")
+        parts.append(f"wss://{host_repr}:*")
     return "connect-src " + " ".join(parts) + ";"
 
 

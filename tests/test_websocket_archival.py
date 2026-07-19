@@ -536,3 +536,12 @@ def test_timeout_flush_does_not_reset_last_full_text(monkeypatch):
     assert shared_ctx.last_full_text == "你好世界", (
         "超时分支不应重置 last_full_text,否则下一段含旧前缀文本会重发"
     )
+    # Low-8: 验证保留的 last_full_text 能正确驱动增量去重 —— 下一段 ASR
+    # 若返回含旧前缀文本(你好世界再见),get_incremental_text 应只发"再见",
+    # 而非整段重发。这是 M4 修复的核心目的(防前端重复字)。
+    # 若有人误把 last_full_text="" 加回超时分支,此处 last_full_text 已清空,
+    # get_incremental_text 会返回整段"你好世界再见",断言失败。
+    incr = shared_ctx.get_incremental_text("你好世界再见")
+    assert incr == "再见", (
+        f"保留 last_full_text 后应只发增量,实际 {incr!r}"
+    )

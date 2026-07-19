@@ -126,6 +126,20 @@ def test_compare_none_embedding_returns_unknown():
     assert result[1] == 0.0
 
 
+def test_compare_none_embedding_returns_unknown_all_engines():
+    """L4: 三引擎(CamPlus/ERes2Net/Wespeaker)在 embedding=None 时都返 Spk_unknown。
+    None 分支是 compare_and_identify 第一行,不触碰实例状态,用 __new__ 构造即可。"""
+    from engine.speaker.eres2net_engine import ERes2NetEngine
+    from engine.speaker.wespeaker_engine import WespeakerEngine
+
+    for engine_cls in (CamPlusEngine, ERes2NetEngine, WespeakerEngine):
+        eng = engine_cls.__new__(engine_cls)  # 不调 __init__,避免加载模型
+        result = eng.compare_and_identify(None, client_id="test", audio_duration=5.0)
+        assert isinstance(result, tuple) and len(result) == 2, f"{engine_cls.__name__}"
+        assert result[0] == "Spk_unknown", f"{engine_cls.__name__} 返 {result[0]!r}"
+        assert result[1] == 0.0, f"{engine_cls.__name__}"
+
+
 # ========== 阈值常量(方向 A 调整) ==========
 
 def test_threshold_direction_a_values():

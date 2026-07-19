@@ -8,7 +8,7 @@
 401 返 JSON: {detail: "..."}
 """
 import logging
-from fastapi import HTTPException, Request
+from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from app.middleware.security import is_trusted_browser_origin
@@ -122,9 +122,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
                     status_code=403,
                     content={"detail": "首次登录必须先修改默认密码"},
                 )
-        except HTTPException:
-            raise
         except Exception as e:
+            # pwd_iat / user 校验异常 → 统一降级 401(不暴露内部错误)。
+            # 本块不再 raise HTTPException(L3 后改 return JSONResponse),
+            # 故无需单独 except HTTPException。
             logger.warning(f"[AUTH] pwd_iat 校验失败: {e}")
             return JSONResponse(
                 status_code=401,

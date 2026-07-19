@@ -15,7 +15,6 @@ WS_CLOSE_ERROR = 1011
 # 说话人
 SPEAKER_ID_PREFIX = "Spk_"
 SYSTEM_SPEAKER = "SYSTEM"
-UNKNOWN_SPEAKER = "Unknown"
 FILE_UPLOAD_SESSION = "file_upload_service"
 
 # 应用信息
