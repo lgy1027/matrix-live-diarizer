@@ -25,12 +25,13 @@ class ERes2NetEngine(BaseSpeakerEngine):
     def __init__(self):
         self.device = "cpu"
         logger.info("[ERes2NetV2] 加载模型...")
+        from app.services.model_resolver import resolve_modelscope
         model_id = 'iic/speech_eres2netv2_sv_zh-cn_16k-common'
-        self.model = Model.from_pretrained(
-            model_id,
+        local = resolve_modelscope(
+            model_id, "speaker", "eres2net",
             revision=ENGINE_CONFIG["eres2net"]["model_revision"],
-            device='cpu',
         )
+        self.model = Model.from_pretrained(local, device='cpu')
         self.model.eval()
         self.chroma_client = chromadb.EphemeralClient(
             settings=Settings(anonymized_telemetry=False)

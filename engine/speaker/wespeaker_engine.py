@@ -42,12 +42,13 @@ class WespeakerEngine(BaseSpeakerEngine):
         """初始化模型"""
         logger.info("[Wespeaker] 加载模型...")
         from modelscope.models import Model
+        from app.services.model_resolver import resolve_modelscope
         model_id = 'iic/speech_resnet34_sv_zh-cn_3dspeaker_16k'
-        self.model = Model.from_pretrained(
-            model_id,
+        local = resolve_modelscope(
+            model_id, "speaker", "wespeaker",
             revision=ENGINE_CONFIG["wespeaker"]["model_revision"],
-            device='cpu',
         )
+        self.model = Model.from_pretrained(local, device='cpu')
         self.model.eval()
         logger.info("[Wespeaker] ResNet34 模型加载成功")
 

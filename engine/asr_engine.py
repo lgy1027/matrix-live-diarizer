@@ -10,6 +10,7 @@ import scipy.signal as signal
 from modelscope import snapshot_download as _ms_snapshot_download
 from qwen_asr import Qwen3ASRModel
 from engine.asr.contracts import empty_asr_result, make_asr_result
+from app.services.model_resolver import resolve_hf, resolve_silero_vad
 # bug-fix: ModelScope CDN 经常慢(实测 8MB/s,1.75GB 需 4 分钟),容易触发 90s 超时。
 # fallback 策略: ModelScope 失败 → HF 本地缓存 (前提: 已下完, ~/.cache/huggingface/hub/)
 from huggingface_hub import snapshot_download as _hf_snapshot_download
@@ -117,25 +118,27 @@ class ASREngine:
                 try:
                     if result["cancelled"]:
                         return
-                    model_dir = snapshot_download(
-                        "Qwen/Qwen3-ASR-0.6B", revision=QWEN_ASR_REVISION
+                    # 本地优先:模型物化到 models/asr/Qwen3-ASR-0.6B/(复用 HF 缓存,
+                    # 不重新下载),from_pretrained 接受本地目录路径。
+                    # 注意:不传 revision — QWEN_ASR_REVISION 是 modelscope 的 hash,
+                    # HF 上不存在;HF 走 main 分支,从已缓存物化即可。
+                    model_dir = resolve_hf(
+                        "Qwen/Qwen3-ASR-0.6B", "asr", "Qwen3-ASR-0.6B",
                     )
                     if result["cancelled"]:
                         return
                     dtype = torch.bfloat16 if device in ("cuda", "mps") else torch.float32
                     # 可选加载 forced aligner (Qwen3-ForcedAligner-0.6B, ~600MB)
-                    # ⚠️ qwen_asr 的 Qwen3ASRModel.from_pretrained 把 forced_aligner 当 str(repo id) 处理
-                    # (Qwen3ASRModel.from_pretrained 内会再调 snapshot_download / Qwen3ForcedAligner.from_pretrained)
-                    # 所以只传 repo id 字符串,不要 pre-load 后再传对象
-                    # (否则会触发 "Repo id must use alphanumeric chars" 错误)
+                    # forced_aligner 传本地路径字符串(与原 snapshot_download 返回值一致,
+                    # from_pretrained 内部按 str 处理),物化到 models/asr/Qwen3-ForcedAligner-0.6B/。
                     forced_aligner_id = None
                     if self.config.asr_word_timestamps:
                         if result["cancelled"]:
                             return
                         logger.info("[ASR] 加载 forced aligner (Qwen3-ForcedAligner-0.6B)")
-                        forced_aligner_id = snapshot_download(
-                            "Qwen/Qwen3-ForcedAligner-0.6B",
-                            revision=QWEN_ALIGNER_REVISION,
+                        forced_aligner_id = resolve_hf(
+                            "Qwen/Qwen3-ForcedAligner-0.6B", "asr",
+                            "Qwen3-ForcedAligner-0.6B",
                         )
                     if result["cancelled"]:
                         return
@@ -180,33 +183,16 @@ class ASREngine:
             if result["ok"]:
                 self.device = device
                 self.asr_model = result["asr_model"]
-                # 加载 Silero VAD
-                # 优先从本地 torch.hub 缓存加载(source='local'),避开
-                # torch.hub 的 GitHub API 调用。后者在 GitHub 限流(403)时会触发
-                # torch 2.11 hub.py 的 _validate_not_a_forked_repo KeyError bug
-                # (掩盖真实 403),且违反项目"断网可用"原则(每次启动都重新
-                # 校验 GitHub)。缓存存在则离线加载,无缓存才回退在线下载。
+                # 加载 Silero VAD:物化到 models/vad/silero-vad/ 后离线加载。
+                # resolve_silero_vad 本地优先,复用 torch hub 缓存 copytree(自动迁移),
+                # 避开 torch.hub 的 GitHub API 调用(限流 403 会触发 torch 2.11
+                # hub.py 的 _validate_not_a_forked_repo KeyError bug)。
                 try:
-                    import glob as _glob
-                    _hub_root = os.path.expanduser("~/.cache/torch/hub")
-                    _vad_cache = os.path.join(
-                        _hub_root, f"snakers4_silero-vad_{SILERO_VAD_REVISION}"
+                    _vad_dir = resolve_silero_vad()
+                    self.vad_model, utils = torch.hub.load(
+                        repo_or_dir=_vad_dir, model='silero_vad',
+                        source='local', trust_repo=True,
                     )
-                    if not os.path.isdir(_vad_cache):
-                        _cands = sorted(
-                            _glob.glob(os.path.join(_hub_root, "snakers4_silero-vad_*"))
-                        )
-                        _vad_cache = _cands[0] if _cands else None
-                    if _vad_cache and os.path.isdir(_vad_cache):
-                        self.vad_model, utils = torch.hub.load(
-                            repo_or_dir=_vad_cache, model='silero_vad',
-                            source='local', trust_repo=True,
-                        )
-                    else:
-                        self.vad_model, utils = torch.hub.load(
-                            repo_or_dir=f'snakers4/silero-vad:{SILERO_VAD_REVISION}',
-                            model='silero_vad', trust_repo=True,
-                        )
                     self.get_speech_timestamps = utils[0]
                     self.vad_model.eval()
                     self.sample_rate = 16000

@@ -68,35 +68,51 @@ class FunASREngine:
         return requested
 
     def _load_model(self) -> None:
-        from funasr import AutoModel
+        # FunASR AutoModel 内部经 modelscope 下多个模型(SenseVoice + fsmn-vad +
+        # punc),无法逐个物化到干净目录。改为加载期间把 MODELSCOPE_CACHE 临时
+        # scope 到 models/funasr/,加载后恢复,不影响声纹引擎的缓存路径。
+        import os as _os
+        from app.services.model_resolver import models_root
+        _funasr_cache = _os.path.join(models_root(), "funasr")
+        _os.makedirs(_funasr_cache, exist_ok=True)
+        _old_ms_cache = _os.environ.get("MODELSCOPE_CACHE")
+        _os.environ["MODELSCOPE_CACHE"] = _funasr_cache
         try:
-            from funasr.utils.postprocess_utils import rich_transcription_postprocess
-        except Exception:
-            rich_transcription_postprocess = None
-        self._postprocess = rich_transcription_postprocess
+            from funasr import AutoModel
+            try:
+                from funasr.utils.postprocess_utils import rich_transcription_postprocess
+            except Exception:
+                rich_transcription_postprocess = None
+            self._postprocess = rich_transcription_postprocess
 
-        if self.kind == "sensevoice":
-            self.model = AutoModel(
-                model="iic/SenseVoiceSmall",
-                vad_model="fsmn-vad",
-                vad_kwargs={"max_single_segment_time": 30000},
-                device=self.device,
-            )
-        elif self.kind == "paraformer":
-            self.model = AutoModel(
-                model="paraformer-zh",
-                vad_model="fsmn-vad",
-                punc_model="ct-punc",
-                vad_kwargs={"max_single_segment_time": 30000},
-                device=self.device,
-            )
-        elif self.kind == "paraformer_streaming":
-            self.model = AutoModel(
-                model="paraformer-zh-streaming",
-                device=self.device,
-            )
-        else:
-            raise ValueError(f"Unsupported FunASR kind: {self.kind}")
+            if self.kind == "sensevoice":
+                self.model = AutoModel(
+                    model="iic/SenseVoiceSmall",
+                    vad_model="fsmn-vad",
+                    vad_kwargs={"max_single_segment_time": 30000},
+                    device=self.device,
+                )
+            elif self.kind == "paraformer":
+                self.model = AutoModel(
+                    model="paraformer-zh",
+                    vad_model="fsmn-vad",
+                    punc_model="ct-punc",
+                    vad_kwargs={"max_single_segment_time": 30000},
+                    device=self.device,
+                )
+            elif self.kind == "paraformer_streaming":
+                self.model = AutoModel(
+                    model="paraformer-zh-streaming",
+                    device=self.device,
+                )
+            else:
+                raise ValueError(f"Unsupported FunASR kind: {self.kind}")
+        finally:
+            # 恢复 MODELSCOPE_CACHE,避免影响后续声纹引擎缓存路径
+            if _old_ms_cache is None:
+                _os.environ.pop("MODELSCOPE_CACHE", None)
+            else:
+                _os.environ["MODELSCOPE_CACHE"] = _old_ms_cache
 
     def is_silent(self, audio_data, threshold=0.012, use_vad=True):
         return rms_is_silent(audio_data, threshold=threshold)

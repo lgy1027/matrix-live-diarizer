@@ -12,8 +12,13 @@
 import importlib.machinery
 import os
 import sys
+import tempfile
 import types
 import pytest
+
+# 测试统一把 MODELS_DIR 指到 tmp,避免 resolve_modelscope 把真实缓存物化到
+# 仓库 ./models/(污染 + 慢)。必须在 app.config 被 import 前设置。
+os.environ.setdefault("MODELS_DIR", os.path.join(tempfile.gettempdir(), "matrix_test_models"))
 
 
 def _make_spec(name):
@@ -190,6 +195,8 @@ _ENV_KEYS_TO_ISOLATE = (
     "ASR_DEVICE",
     "ASR_LOAD_TIMEOUT_SEC",
 )
+# 注意:MODELS_DIR 不在此列表 — 它由 conftest 模块级 setdefault 设到 tmp,
+# 常驻所有测试,让 resolve_modelscope 写 tmp 而非仓库 ./models/。
 
 
 @pytest.fixture(autouse=True)

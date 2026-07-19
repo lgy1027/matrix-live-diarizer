@@ -67,11 +67,18 @@ class PyannoteDiarizer:
             self._enabled = False
             return
         try:
+            # 本地化:cache_dir 指向 models/pyannote/,HF pipeline 缓存于此
+            # (hashed 结构 models--pyannote--.../snapshots/,在 models/ 下)。
+            from app.services.model_resolver import local_path
+            import os as _os
+            _pyannote_cache = local_path("pyannote", "_cache")
+            _os.makedirs(_pyannote_cache, exist_ok=True)
             logger.info("[PYANNOTE] 加载 pyannote/speaker-diarization-community-1 (~50MB,首次需联网)...")
             self._pipeline = Pipeline.from_pretrained(
                 "pyannote/speaker-diarization-community-1",
                 revision=PYANNOTE_REVISION,
                 token=token,
+                cache_dir=_pyannote_cache,
             )
             from app.config import config
 

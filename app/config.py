@@ -299,6 +299,24 @@ class StorageConfig:
 
 
 @dataclass
+class ModelsConfig:
+    """模型本地目录配置。
+
+    所有模型(ASR/VAD/声纹/pyannote)统一放在 models_dir 下,按分类建子目录,
+    每个模型一个目录。首次启动若 ~/.cache 里有已下模型会自动迁移 copy 进来,
+    避免重新下载;之后纯本地加载,断网可用。
+    覆盖默认目录设环境变量 MODELS_DIR。
+    """
+    models_dir: str = "./models"
+
+    @classmethod
+    def from_env(cls) -> "ModelsConfig":
+        return cls(
+            models_dir=get_env_str("MODELS_DIR", "./models"),
+        )
+
+
+@dataclass
 class CORSConfig:
     """Browser origins allowed to call the local API."""
     allowed_origins: tuple[str, ...] = (
@@ -385,6 +403,7 @@ class AppConfig:
     speaker: SpeakerConfig = field(default_factory=SpeakerConfig)
     rate_limit: RateLimitConfig = field(default_factory=RateLimitConfig)
     storage: StorageConfig = field(default_factory=StorageConfig)
+    models: ModelsConfig = field(default_factory=ModelsConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     cors: CORSConfig = field(default_factory=CORSConfig)
     auth: AuthConfig = field(default_factory=AuthConfig)
@@ -399,6 +418,7 @@ class AppConfig:
             speaker=SpeakerConfig.from_env(),
             rate_limit=RateLimitConfig.from_env(),
             storage=StorageConfig.from_env(),
+            models=ModelsConfig.from_env(),
             llm=LLMConfig.from_env(),
             cors=CORSConfig.from_env(),
             auth=AuthConfig.from_env(),

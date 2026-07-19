@@ -57,13 +57,16 @@ class CamPlusEngine(BaseSpeakerEngine):
         return "reliable"
 
     def __init__(self):
+        # 本地优先:物化到 models/speaker/camplus/(复用 modelscope 缓存,自动迁移),
+        # Model.from_pretrained 接受本地目录路径。无本地则下载迁移。
+        from app.services.model_resolver import resolve_modelscope
         model_id = 'damo/speech_campplus_sv_zh-cn_16k-common'
-        self.device = "cpu"
-        self.model = Model.from_pretrained(
-            model_id,
+        local = resolve_modelscope(
+            model_id, "speaker", "camplus",
             revision=ENGINE_CONFIG["campplus"]["model_revision"],
-            device='cpu',
         )
+        self.device = "cpu"
+        self.model = Model.from_pretrained(local, device='cpu')
         self.model.eval()
 
         self.chroma_client = chromadb.EphemeralClient(
