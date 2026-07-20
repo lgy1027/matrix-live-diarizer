@@ -1,6 +1,7 @@
 """Product-facing meeting repository."""
 from __future__ import annotations
 import json
+import re
 import uuid
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -632,9 +633,51 @@ class MeetingRepository:
             conn.commit()
 
     def search(self, q: str, limit: int = 50) -> list[dict]:
+        """全文搜索: FTS5 trigram 主路径 + LIKE 兜底(2 字/特殊字符)"""
         query = q.strip()
         if not query:
             return []
+
+        def _make_snippet(text: str, kw: str) -> str:
+            pos = text.lower().find(kw.lower())
+            if pos < 0:
+                return text[:48]
+            start = max(0, pos - 16)
+            end = min(len(text), pos + len(kw) + 16)
+            prefix = "..." if start > 0 else ""
+            suffix = "..." if end < len(text) else ""
+            return prefix + text[start:pos] + "[match]" + text[pos:pos + len(kw)] + "[/match]" + text[pos + len(kw):end] + suffix
+
+        def _join_cols(row: dict) -> dict:
+            item = dict(row)
+            text = item.get("text") or ""
+            item["snippet"] = _make_snippet(text, query)
+            item["jump_url"] = f"/meetings/{item['meeting_id']}?segment={item['segment_id']}"
+            return item
+
+        # 1. FTS5 路径(trigram,3+ 字中文命中率高)
+        fts_q = re.sub(r"[^\w一-鿿]+", " ", query, flags=re.UNICODE).strip()
+        fts_results: list[dict] = []
+        if fts_q:
+            with self.db.connect() as conn:
+                sql = """SELECT ts.id AS segment_id, ts.meeting_id, ts.text,
+                                ts.start_time, ts.end_time, m.title AS meeting_title,
+                                CASE WHEN ms.identity_status IN ('auto_matched', 'confirmed')
+                                          OR (ms.identity_status IS NULL AND ms.manually_confirmed = 1)
+                                     THEN COALESCE(p.name, ms.label)
+                                     ELSE ms.label END AS speaker_name
+                         FROM transcript_segments_fts
+                         JOIN transcript_segments ts ON ts.id = transcript_segments_fts.rowid
+                         JOIN meetings m ON m.id = ts.meeting_id
+                         LEFT JOIN meeting_speakers ms ON ms.id = ts.meeting_speaker_id
+                         LEFT JOIN people p ON p.id = ms.person_id
+                         WHERE transcript_segments_fts MATCH ?
+                         ORDER BY rank LIMIT ?"""
+                rows = conn.execute(sql, (fts_q + "*", limit)).fetchall()
+                fts_results = [_join_cols(dict(r)) for r in rows]
+
+        # 2. LIKE 兜底(2 字/特殊字符场景)
+        like_results: list[dict] = []
         with self.db.connect() as conn:
             rows = conn.execute(
                 """SELECT ts.id AS segment_id, ts.meeting_id, ts.text,
@@ -652,17 +695,14 @@ class MeetingRepository:
                    LIMIT ?""",
                 (f"%{query}%", f"%{query}%", limit),
             ).fetchall()
-        results = []
-        for row in rows:
-            item = dict(row)
-            text = item["text"] or ""
-            position = text.lower().find(query.lower())
-            if position >= 0:
-                start = max(0, position - 16)
-                end = min(len(text), position + len(query) + 16)
-                item["snippet"] = text[start:position] + "[match]" + text[position:position + len(query)] + "[/match]" + text[position + len(query):end]
-            else:
-                item["snippet"] = text[:48]
-            item["jump_url"] = f"/meetings/{item['meeting_id']}?segment={item['segment_id']}"
-            results.append(item)
-        return results
+            like_results = [_join_cols(dict(r)) for r in rows]
+
+        # 3. UNION 去重(FTS5 优先)
+        seen: set = set()
+        merged: list[dict] = []
+        for hit in fts_results + like_results:
+            sid = hit["segment_id"]
+            if sid not in seen:
+                seen.add(sid)
+                merged.append(hit)
+        return merged[:limit]

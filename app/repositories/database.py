@@ -119,6 +119,23 @@ CREATE TABLE IF NOT EXISTS transcript_segments (
 CREATE INDEX IF NOT EXISTS idx_transcript_segments_meeting
     ON transcript_segments(meeting_id, segment_index);
 
+-- FTS5 trigram 全文搜索(contentless,外链 transcript_segments)
+CREATE VIRTUAL TABLE IF NOT EXISTS transcript_segments_fts
+    USING fts5(text, content='transcript_segments', content_rowid='id', tokenize='trigram');
+
+CREATE TRIGGER IF NOT EXISTS ts_fts_ai AFTER INSERT ON transcript_segments BEGIN
+    INSERT INTO transcript_segments_fts(rowid, text) VALUES (new.id, new.text);
+END;
+CREATE TRIGGER IF NOT EXISTS ts_fts_ad AFTER DELETE ON transcript_segments BEGIN
+    INSERT INTO transcript_segments_fts(transcript_segments_fts, rowid, text)
+        VALUES('delete', old.id, old.text);
+END;
+CREATE TRIGGER IF NOT EXISTS ts_fts_au AFTER UPDATE ON transcript_segments BEGIN
+    INSERT INTO transcript_segments_fts(transcript_segments_fts, rowid, text)
+        VALUES('delete', old.id, old.text);
+    INSERT INTO transcript_segments_fts(rowid, text) VALUES (new.id, new.text);
+END;
+
 CREATE TABLE IF NOT EXISTS meeting_notes (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
