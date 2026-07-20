@@ -573,6 +573,68 @@ class MeetingRepository:
             conn.commit()
         return cursor.rowcount > 0
 
+    def merge_speakers(self, meeting_id: str, target_id: str, source_ids: list[str]) -> int:
+        """合并:把 source speakers 的所有 segments 改指到 target,然后删 source。
+
+        返回迁移的 segment 数。
+        """
+        if target_id in source_ids:
+            raise ValueError("target_id 不能在 source_ids 里")
+        if not source_ids:
+            return 0
+        placeholders = ",".join("?" for _ in source_ids)
+        with self.db.connect() as conn:
+            owner = conn.execute(
+                "SELECT 1 FROM meeting_speakers WHERE id = ? AND meeting_id = ?",
+                (target_id, meeting_id),
+            ).fetchone()
+            if owner is None:
+                raise ValueError("target speaker 不存在")
+            cursor = conn.execute(
+                f"""UPDATE transcript_segments
+                    SET meeting_speaker_id = ?, manually_edited = 1,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE meeting_id = ? AND meeting_speaker_id IN ({placeholders})""",
+                [target_id, meeting_id, *source_ids],
+            )
+            migrated = cursor.rowcount
+            conn.execute(
+                f"""DELETE FROM meeting_speakers
+                    WHERE meeting_id = ? AND id IN ({placeholders})""",
+                [meeting_id, *source_ids],
+            )
+            conn.commit()
+        return migrated
+
+    def split_speaker(self, meeting_id: str, source_id: str, segment_ids: list[int]) -> str:
+        """拆分:给选中的 segments 创建一个新的匿名 meeting_speaker,脱离 source。
+
+        返回新建的 speaker id。
+        """
+        new_id = f"Spk_{uuid.uuid4().hex[:12]}"
+        with self.db.connect() as conn:
+            source = conn.execute(
+                "SELECT label FROM meeting_speakers WHERE id = ? AND meeting_id = ?",
+                (source_id, meeting_id),
+            ).fetchone()
+            if source is None:
+                raise ValueError("source speaker 不存在")
+            conn.execute(
+                """INSERT INTO meeting_speakers (id, meeting_id, label, identity_status)
+                   VALUES (?, ?, ?, 'anonymous')""",
+                (new_id, meeting_id, f"{source['label']}_split"),
+            )
+            placeholders = ",".join("?" for _ in segment_ids)
+            conn.execute(
+                f"""UPDATE transcript_segments
+                    SET meeting_speaker_id = ?, manually_edited = 1,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE meeting_id = ? AND id IN ({placeholders})""",
+                [new_id, meeting_id, *segment_ids],
+            )
+            conn.commit()
+        return new_id
+
     def confirm_speaker(self, meeting_id: str, speaker_id: str, person_id: str | None) -> bool:
         with self.db.connect() as conn:
             if person_id is not None and conn.execute(

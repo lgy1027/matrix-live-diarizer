@@ -43,6 +43,16 @@ class NoteUpdate(BaseModel):
     content: str = Field(min_length=1, max_length=100_000)
 
 
+class SpeakerMergeRequest(BaseModel):
+    target_speaker_id: str = Field(pattern=r"^Spk_[a-zA-Z0-9_]+$")
+    source_speaker_ids: list[str] = Field(min_length=1, max_length=50)
+
+
+class SpeakerSplitRequest(BaseModel):
+    source_speaker_id: str = Field(pattern=r"^Spk_[a-zA-Z0-9_]+$")
+    segment_ids: list[int] = Field(min_length=1, max_length=500)
+
+
 def _require_mutable_meeting(request: Request, meeting_id: str) -> dict:
     meeting = request.app.state.meeting_repo.get(meeting_id)
     if meeting is None:
@@ -315,3 +325,44 @@ def confirm_meeting_speaker(
     if not updated:
         raise HTTPException(status_code=404, detail="会议说话人不存在")
     return {"message": "说话人身份已确认"}
+
+
+@router.post("/{meeting_id}/speakers/merge")
+def merge_meeting_speakers(
+    meeting_id: str,
+    body: SpeakerMergeRequest,
+    request: Request,
+):
+    """合并:把多个 source speaker 的 segments 全部改指到 target,然后删 source。"""
+    _require_mutable_meeting(request, meeting_id)
+    try:
+        migrated = request.app.state.meeting_repo.merge_speakers(
+            meeting_id, body.target_speaker_id, body.source_speaker_ids
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "target_speaker_id": body.target_speaker_id,
+        "merged_source_ids": body.source_speaker_ids,
+        "segments_updated": migrated,
+    }
+
+
+@router.post("/{meeting_id}/speakers/split")
+def split_meeting_speaker(
+    meeting_id: str,
+    body: SpeakerSplitRequest,
+    request: Request,
+):
+    """拆分:给选中的 segments 创建新的匿名 speaker,脱离 source。"""
+    _require_mutable_meeting(request, meeting_id)
+    try:
+        new_speaker_id = request.app.state.meeting_repo.split_speaker(
+            meeting_id, body.source_speaker_id, body.segment_ids
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "new_speaker_id": new_speaker_id,
+        "segments_updated": len(body.segment_ids),
+    }
