@@ -300,6 +300,7 @@ export const useLiveStore = defineStore('live', () => {
         onMessage,
         onState: (s) => {
           wsState.value = s
+          // disconnected 表示重连已耗尽 5 次尝试,此时才终止录音
           if (s === 'disconnected' && rec.value) {
             window.toast?.(i18n.global.t('live.disconnected'), 'error')
             stopRec()
@@ -310,6 +311,18 @@ export const useLiveStore = defineStore('live', () => {
             auth.clear()
             router.push({ name: 'login', query: { next: '/live' } })
           }
+        },
+        onReconnectAttempt: (attempt, _max, delayMs) => {
+          window.toast?.(
+            i18n.global.t('live.reconnecting', { 0: Math.round(delayMs / 1000), 1: attempt }),
+            'info',
+          )
+        },
+        onReconnected: () => {
+          window.toast?.(i18n.global.t('live.reconnected'), 'ok')
+        },
+        onReconnectFailed: () => {
+          window.toast?.(i18n.global.t('live.reconnectFailed'), 'error')
         },
       })
       ws.connect()

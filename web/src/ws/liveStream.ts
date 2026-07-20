@@ -18,7 +18,7 @@ export type AsrMessage =
   | { type: 'transcribing'; seq: number }
   | { speaker: 'SYSTEM'; text: string; time?: never; words?: never }
 
-export type WsState = 'idle' | 'connecting' | 'live' | 'disconnected' | 'auth-failed'
+export type WsState = 'idle' | 'connecting' | 'live' | 'disconnected' | 'auth-failed' | 'reconnecting'
 
 export interface LiveWsOpts {
   clientId: string
@@ -26,6 +26,9 @@ export interface LiveWsOpts {
   onMessage: (m: AsrMessage) => void
   onState: (s: WsState) => void
   onClose?: (code: number) => void
+  onReconnectAttempt?: (attempt: number, maxAttempts: number, delayMs: number) => void
+  onReconnectFailed?: () => void
+  onReconnected?: () => void
 }
 
 function wsBase(): string {
@@ -38,6 +41,9 @@ export class LiveWs {
   private ws: WebSocket | null = null
   private opts: LiveWsOpts
   private intentionalClose = false
+  private reconnectAttempts = 0
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  static readonly MAX_RECONNECT_ATTEMPTS = 5
 
   constructor(opts: LiveWsOpts) {
     this.opts = opts
@@ -45,6 +51,8 @@ export class LiveWs {
 
   connect() {
     this.intentionalClose = false
+    this.reconnectAttempts = 0
+    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null }
     this.openSocket()
   }
 
@@ -56,6 +64,10 @@ export class LiveWs {
     this.ws.onopen = () => {
       this.sendJson({ action: 'auth', token: this.opts.token })
       this.opts.onState('live')
+      if (this.reconnectAttempts > 0) {
+        this.opts.onReconnected?.()
+      }
+      this.reconnectAttempts = 0
     }
     this.ws.onmessage = (ev) => {
       try {
@@ -67,15 +79,32 @@ export class LiveWs {
     }
     this.ws.onclose = (ev) => {
       this.opts.onClose?.(ev.code)
+      this.ws = null
       if (ev.code === 4401) {
         this.opts.onState('auth-failed')
         return
       }
-      this.ws = null
-      if (!this.intentionalClose) this.opts.onState('disconnected')
+      if (this.intentionalClose) {
+        this.opts.onState('idle')
+        return
+      }
+      // 自动重连:指数退避 1s / 2s / 4s / 8s / 16s,最多 5 次
+      if (this.reconnectAttempts >= LiveWs.MAX_RECONNECT_ATTEMPTS) {
+        this.opts.onReconnectFailed?.()
+        this.opts.onState('disconnected')
+        return
+      }
+      this.reconnectAttempts++
+      const delay = 1000 * Math.pow(2, this.reconnectAttempts - 1)
+      this.opts.onState('reconnecting')
+      this.opts.onReconnectAttempt?.(this.reconnectAttempts, LiveWs.MAX_RECONNECT_ATTEMPTS, delay)
+      this.reconnectTimer = setTimeout(() => {
+        this.reconnectTimer = null
+        if (!this.intentionalClose) this.openSocket()
+      }, delay)
     }
     this.ws.onerror = () => {
-      // onclose 会处理重连, 这里只记
+      // onclose 会处理重连,这里不重复
     }
   }
 
@@ -97,6 +126,7 @@ export class LiveWs {
 
   close() {
     this.intentionalClose = true
+    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null }
     if (this.ws) {
       this.ws.close(1000)
       this.ws = null
