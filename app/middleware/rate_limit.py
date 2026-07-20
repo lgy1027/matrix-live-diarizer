@@ -29,8 +29,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self.requests_per_minute = requests_per_minute
         self.requests_per_hour = requests_per_hour
-        # Bug-82 (审核 #1): 登录端点更严限流,防暴力破解
-        # 同一 IP 每 60s 最多 5 次登录尝试,触发后锁 60s
+        # 登录端点单独的更严限流,防暴力破解:每 60s 最多 5 次,触发后锁 60s
         self.auth_login_per_minute = auth_login_per_minute
         self.auth_lock_seconds = auth_lock_seconds
         # 记录: {ip: {path: [timestamps]}}
@@ -55,7 +54,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         path = request.url.path
         now = time.time()
 
-        # Bug-82 (审核 #1): /v1/auth/login 走更严限流
+        # 登录端点走更严的限流分支
         if path == "/v1/auth/login":
             return await self._check_auth_login(client_ip, request, call_next, now)
 

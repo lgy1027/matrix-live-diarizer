@@ -28,9 +28,9 @@ class CamPlusEngine(BaseSpeakerEngine):
     3. 智能合并：相似度高的临时说话人自动合并
     """
     
-    # Bug-68: 短于这个时长的音频直接跳过声纹匹配,标 "Spk_unknown"
-    # 典型场景: 用户短促回复"嗯/对/好"(0.1-0.3s)cosine 距离波动大,易误合
-    # 0.3s 是经验值:CamPlus 训练在 4-10s 段,<0.3s 段 embedding 无意义
+    # 短于这个时长的音频跳过声纹匹配,标 Spk_unknown。用户短促回复
+    # "嗯/对/好"(0.1-0.3s)cosine 距离波动大、易误合;CamPlus 训练在
+    # 4-10s 段,0.3s 以下 embedding 无意义。
     MIN_USABLE_DURATION = 0.3
 
     # 最小音频长度(秒)用于"可靠"声纹提取(走正常阈值 vs 宽松阈值)
@@ -190,11 +190,11 @@ class CamPlusEngine(BaseSpeakerEngine):
                 - 新建 Spk → (new_id, 1.0 - best_dist)  (新 Spk 通常置信度较低)
         """
         if current_emb is None:
-            # L4: 用 Spk_unknown(符合 ^Spk_ 格式),与下游默认值及
-            # speaker_id 校验 pattern 一致,避免 "Unknown" 不匹配格式。
+            # 返回 Spk_unknown 而非 "Unknown":符合 ^Spk_ 格式,和下游
+            # speaker_id 校验 pattern、默认值保持一致。
             return "Spk_unknown", 0.0
 
-        # Bug-68: 用纯函数分类段类型(supports testable + 复用)
+        # 段时长分类用纯函数,便于测试和复用
         segment_class = self._classify_segment_duration(audio_duration)
         if segment_class == "skip":
             return "Spk_unknown", 0.0
@@ -211,8 +211,8 @@ class CamPlusEngine(BaseSpeakerEngine):
             HIGH_THRESHOLD = 0.75
         MIN_SAMPLES_FOR_EDGE = 2  # 降低边缘匹配样本要求
 
-        # Bug-04 + 方向 A: 新 Spk grace period 阈值从 0.05 提到 0.08
-        # 空库期更宽容(短段 cosine 波动 0.05-0.10 是常态)
+        # 新 Spk grace period:阈值放宽 0.08。空库期短段 cosine 波动
+        # 0.05-0.10 是常态,太严会把同一个人的短段误判成新说话人。
         GRACE_PERIOD_SAMPLES = 3
         GRACE_THRESHOLD_BOOST = 0.08
         import time as _time
@@ -251,8 +251,8 @@ class CamPlusEngine(BaseSpeakerEngine):
             low_thresh = LOW_THRESHOLD if is_reliable else LOW_THRESHOLD + 0.10
             high_thresh = HIGH_THRESHOLD if is_reliable else HIGH_THRESHOLD + 0.10
 
-            # Bug-04: 若最佳候选是新建 Spk(样本 < 3),进一步放宽 high 阈值
-            # 给新声纹"软启动"窗口,让后续短段/失真样本能合并进来
+            # 最佳候选是样本数 < 3 的新 Spk 时,再放宽 high 阈值,给新
+            # 声纹一段"软启动"窗口,让后续短段/失真样本能合并进来。
             if best_count < GRACE_PERIOD_SAMPLES:
                 high_thresh += GRACE_THRESHOLD_BOOST
                 logger.debug(

@@ -35,7 +35,7 @@ def is_trusted_browser_origin(origin: str | None, allowed_origins=()) -> bool:
 
 
 def _connect_src_csp() -> str:
-    """L2: 动态构建 connect-src。
+    """动态构建 connect-src。
 
     前端 WebSocket 用 window.location.host(同源),所以 WS host = 页面 host。
     - 默认 CORS 通配("*"):无法枚举具体 host,只能保留 `ws: wss:`(不改现状,

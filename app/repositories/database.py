@@ -144,7 +144,7 @@ CREATE TABLE IF NOT EXISTS users (
     is_active             INTEGER DEFAULT 1,
     created_at            TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     last_login_at         TIMESTAMP,
-    password_changed_at   REAL DEFAULT 0                -- Bug-88: 改密时间戳(token pwd_iat 校验)
+    password_changed_at   REAL DEFAULT 0                -- 改密时间戳,用于校验 token 里的 pwd_iat
 );
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 """

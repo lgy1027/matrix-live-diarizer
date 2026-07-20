@@ -19,9 +19,8 @@ from engine.speaker.speaker_factory import get_engine_info
 
 logger = logging.getLogger("Matrix_Core")
 
-# Bug-12: 实时字幕里的填充词/语气词,提升可读性
-# 规则: 这些词如果独立出现(前后是标点/空格/字符串边界)就删掉
-# 避免误伤"这个方案"等正常使用 — 只删独立位置
+# 实时字幕里的填充词/语气词,提升可读性。
+# 只删独立出现的(前后是标点/空格/边界),避免误伤"这个方案"这类正常用法。
 _FILLER_PATTERNS = [
     # 嗯/呃/啊 等单字语气词(独立位置: 字符串边界 或 前后是标点/空格)
     r"(?:^|(?<=[,，。、\s]))[嗯呃啊唉哦哈嘿哟]{1,2}(?=[,，。、\s]|$)",
@@ -148,10 +147,9 @@ def _unpack_audio_queue_item(item, fallback_offset: int) -> tuple[int, bytes]:
 # 状态机常量(模块级,供测试 import)
 STATE_SILENCE = 0
 STATE_SPEECH = 1
-SILENCE_THRESHOLD_FRAMES = 8  # bug-fix: 3 帧 (384ms) 太短,自然换气就切碎。
-                                          # 8 帧 ≈ 1024ms 允许 1 秒停顿不切(用户感受:响应延迟略增,但完整)
-                                          # 保持模块级常量,便于 WebSocket 状态机测试直接覆盖。
-LOUD_RMS_THRESHOLD = 0.005    # bug-fix: 0.015 偏高,某些帧瞬时 RMS 跌到这个值就被判静音 → buffer 不累积。原 0.015。
+SILENCE_THRESHOLD_FRAMES = 8  # 3 帧(384ms)太短,自然换气就切碎;8 帧≈1024ms,
+                                          # 允许 1 秒停顿不切,响应略慢但段更完整。模块级常量便于测试覆盖。
+LOUD_RMS_THRESHOLD = 0.005    # 0.015 偏高,某些帧瞬时 RMS 跌到它就被判静音,buffer 累积不起来。
 SILENCE_THRESHOLD_SECONDS = 0.8
 PROCESSOR_DRAIN_TIMEOUT_SECONDS = 30.0
 
@@ -174,9 +172,8 @@ def classify_frame(chunk: np.ndarray, asr_engine_obj) -> bool:
     if asr_engine_obj is None:
         # 测试/无引擎情况:仅靠能量
         return True
-    # bug-fix: silero-vad 对 2048 samples (128ms) 单帧判定不稳定,经常假阳性判静音
-    # → buffer 永远累积不到 0.5s 以上,Qwen3-ASR 收不到长音频 → 转写空
-    # 改用纯 RMS 判定(阈值已经过第一道门)
+    # silero-vad 对 2048 samples(128ms)单帧判定不稳,易假阳性判静音,导致
+    # buffer 永远凑不到 0.5s、Qwen3-ASR 收不到长音频而转写空。这里改用纯 RMS。
     return not asr_engine_obj.is_silent(chunk, use_vad=False)
 
 
@@ -264,11 +261,11 @@ def next_state(state: int, is_speech: bool) -> int:
 
 
 def _strip_filler_words(text: str) -> str:
-    """Bug-12: 删除独立位置的填充词/语气词,提升实时字幕可读性。
+    """删除独立位置的填充词/语气词,提升实时字幕可读性。
 
-    只删除独立位置的填充词(前后是标点/空格/字符串边界),避免误伤"这个方案"等正常使用。
+    只删独立位置(前后是标点/空格/边界),避免误伤"这个方案"等正常用法。
     例: "嗯,我们今天讨论一下,呃,语音识别" → "我们今天讨论一下,语音识别"
-    保留句末句号/问号/感叹号,只清掉由删除造成的孤立尾标(逗号)。
+    保留句末标点,只清掉因删除产生的孤立尾逗号。
     """
     if not text:
         return text
@@ -398,9 +395,8 @@ def compute_skip_count(queue_size: int, threshold: int, keep_recent: int = 25) -
     - queue_size > threshold: 跳过 queue_size - keep_recent 帧
       默认 keep_recent=25 ≈ 0.5s(50fps 帧率 @ 20ms)
 
-    Bug-02: 之前只保留 1 帧,在极速发送场景下(0.1ms 间隔 1000 帧),
-    保留的 1 帧在 20s 音频里占比 0.005%,ASR 无法累积到完整语音段 → 0 识别
-    改为保留 0.5s(25 帧),既能防止 OOM,又能给 ASR 足够上下文
+    只保留 1 帧在极速发送场景(0.1ms 间隔 1000 帧)下占比 0.005%,ASR 凑不
+    到完整语音段而识别空。保留 0.5s(25 帧)既能防 OOM 又留足上下文。
 
     纯函数化(供测试):只依赖入参,不触碰真实队列
     """
@@ -611,9 +607,8 @@ async def audio_processor(
 
             else:
                 # 语音中检测到静音帧
-                # Bug-01: 静音帧只用来计数,不再累积到 speech_buffer
-                # 之前把静音帧也加到 buffer,导致 ASR 看到"语音+静音"混合
-                # 在短音频(0.5-1s)上经常识别空(text="")
+                # 静音帧只计数,不累积进 speech_buffer。之前混入静音帧后,
+                # ASR 在短音频(0.5-1s)上常识别空。
                 silence_frame_count += 1
                 silence_sample_count += len(chunk)
 
@@ -641,8 +636,8 @@ async def audio_processor(
                     engines.speaker.reset_buffer(getattr(websocket, "_speaker_scope", client_id))
                     logger.info(f"[RESET] {client_id} 语义重置（语音段结束）")
 
-    # Bug-01: 退出前 flush 残余 buffer,避免短音频(<1.5s)在 close 时被丢
-    # 触发条件: state 是 SPEECH(累积了语音但没等到 silence_threshold) 或 buffer > 0
+    # 退出前 flush 残余 buffer,避免短音频(<1.5s)在 close 时被丢。
+    # 触发条件:仍处 SPEECH(累积了语音但没等到静音阈值)或 buffer 非空。
     if state == STATE_SPEECH and len(speech_buffer) > sample_rate * 0.1:
         logger.debug(f"[PROCESSOR] {client_id} 退出前 flush 残余 buffer ({len(speech_buffer)/sample_rate:.2f}s)")
         try:

@@ -307,7 +307,7 @@ def update_prompts(payload: dict, request: Request):
     client = request.client
     if not client or client.host not in ("127.0.0.1", "::1", "localhost"):
         raise HTTPException(status_code=403, detail="仅本机可修改 prompts")
-    # Bug-06: 之前静默忽略未知字段,改为 422 显式报错
+    # 未知字段直接 422,不静默丢弃
     unknown_keys = set(payload.keys()) - set(PROMPTS.keys())
     if unknown_keys:
         raise HTTPException(

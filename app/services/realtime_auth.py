@@ -12,9 +12,9 @@ from app.middleware.security import is_trusted_browser_origin
 
 logger = logging.getLogger("Matrix_Core")
 
-# L5: 进程级 WebSocket 连接速率限制。HTTP 有 RateLimitMiddleware,但 WS 不
-# 走 HTTP 中间件,攻击者可空打 WS 触发 5s receive 超时占用 fd/协程。这里在
-# 鉴权前做 per-IP 滑动窗口:窗口内连接数超阈值则 close(4401)。
+# 进程级 WebSocket 连接速率限制。WS 不走 HTTP 中间件,攻击者可空打 WS
+# 触发 5s receive 超时占用 fd/协程。鉴权前做 per-IP 滑动窗口,超阈值
+# close(4401)。
 _WS_CONNECT_WINDOW = 60.0          # 滑动窗口(秒)
 _WS_CONNECT_MAX = 20               # 窗口内每 IP 最大连接数
 _ws_connect_log: dict[str, collections.deque] = {}
@@ -38,7 +38,7 @@ def _ws_rate_limited(client_host: str) -> bool:
 async def authenticate_websocket(websocket, client_id: str) -> bool:
     """Authenticate the first WebSocket message, or allow trusted local mode."""
     client_host = websocket.client.host if websocket.client else ""
-    # L5: WS 连接限流(在鉴权之前),防空打 WS 占 fd/协程
+    # WS 连接限流在鉴权之前,防空打 WS 占 fd/协程
     if _ws_rate_limited(client_host):
         logger.warning("[WS] %s 连接被限流 (%.0fs 内超 %d)", client_host,
                        _WS_CONNECT_WINDOW, _WS_CONNECT_MAX)

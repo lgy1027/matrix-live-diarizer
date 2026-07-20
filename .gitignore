@@ -78,11 +78,15 @@ AGENTS.md
 # 本地数据
 data/
 .storage/
+engine/speaker/speaker_db/
 *.db
 *.db-journal
 *.db-wal
 *.db-shm
 PR_DESCRIPTION.md
+
+# 工具产物
+graphify-out/
 
 # 个人规则文档(和开源项目无关)
 .githooks/

@@ -26,7 +26,7 @@ class AuthService:
         # 启动时若无 JWT_SECRET,生成随机密钥(token 跨进程失效,但本地够用)
         self._secret = config.auth.jwt_secret or secrets.token_urlsafe(48)
         if not config.auth.jwt_secret:
-            # Bug-83 (审核 #2): 警告加强 — 多行醒目提示,防生产部署忘设
+            # 多行醒目警告,避免生产部署忘设导致重启后全员掉线
             logger.error(
                 "\n"
                 "=" * 70 + "\n"
@@ -49,7 +49,7 @@ class AuthService:
 
     # ---- JWT ----
 
-    # Bug-90 (审核 #10): JWT 固定 iss/aud claims (防跨服务 token misuse)
+    # 固定 iss/aud,防止 token 被同机上其他服务误用
     _ISS = "matrix-live-diarizer"
     _AUD = "matrix-client"
 
@@ -57,7 +57,7 @@ class AuthService:
         """签发 JWT (HS256)
 
         payload: {sub, username, iat, exp, pwd_iat, iss, aud}
-        - pwd_iat: 改密时间戳(用于 Bug-88 失效旧 token)
+        - pwd_iat: 改密时间戳,用于改密后失效旧 token
         """
         now = int(time.time())
         payload = {
@@ -66,8 +66,8 @@ class AuthService:
             "iat": now,
             "exp": now + self._ttl_hours * 3600,
             "pwd_iat": float(pwd_iat),
-            "iss": self._ISS,                # Bug-90: 固定 issuer
-            "aud": self._AUD,                # Bug-90: 固定 audience
+            "iss": self._ISS,                # 固定 issuer
+            "aud": self._AUD,                # 固定 audience
         }
         return jwt.encode(payload, self._secret, algorithm="HS256")
 
@@ -76,8 +76,8 @@ class AuthService:
         try:
             return jwt.decode(
                 token, self._secret, algorithms=["HS256"],
-                audience=self._AUD,  # Bug-90: 校验 aud
-                issuer=self._ISS,    # Bug-90: 校验 iss
+                audience=self._AUD,  # 校验 aud
+                issuer=self._ISS,    # 校验 iss
             )
         except jwt.ExpiredSignatureError:
             logger.info("[AUTH] token 过期")

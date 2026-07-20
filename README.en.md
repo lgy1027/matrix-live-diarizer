@@ -1,24 +1,79 @@
+<div align="center">
+
 # Matrix Live Diarizer
 
-A local-first, single-user meeting transcription tool. Uploaded recordings and live captions become one meeting record that can be corrected, linked to confirmed people, summarized, and exported as Markdown, SRT, VTT, or JSON.
+A local-first meeting transcription tool · zero data egress · upload diarization + live captions + voice matching
 
-> This is alpha software for personal use on a trusted computer. It is not a public, multi-tenant, compliance-archive, or automatic identity-verification service.
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.10%E2%80%933.12-blue.svg)](https://www.python.org/)
+[![Node](https://img.shields.io/badge/node-20%2B-green.svg)](https://nodejs.org/)
+![Status](https://img.shields.io/badge/status-alpha-orange.svg)
 
-[中文](README.md) · [Usage](docs/USAGE.md) · [Privacy](docs/PRIVACY.md) · [Security](docs/SECURITY.md) · [API](docs/API.md)
+[中文](README.md) · [Usage](docs/USAGE.md) · [Privacy](docs/PRIVACY.md) · [Security](docs/SECURITY.md) · [API](docs/API.md) · [Models](docs/MODELS.md)
+
+</div>
+
+> This is alpha software for personal use on a trusted computer. It is **not** a public, multi-tenant, compliance-archive, or automatic identity-verification service.
+
+## What it solves
+
+Turn a meeting recording into a structured, speaker-attributed, correctable, exportable transcript — with **audio and transcripts never leaving your machine**. Online ASR services (Feishu, iFlytek, cloud ASR) all require uploading audio; this project does not. LLM summaries can run on local Ollama; a public LLM only receives transcript text when you explicitly allow it (never audio, never voiceprints).
+
+Two paths in one tool, covering a meeting from live capture to post-meeting processing:
+
+- **Upload a recording (post-meeting quality path)**: decode → ASR → optional pyannote multi-speaker diarization → voice-match enrolled people → store → correct / summarize / export.
+- **Live captions (during the meeting)**: browser mic → VAD segmenting → ASR → voice-identify enrolled people → stream segments as they are spoken and persist them.
+
+![Live caption preview](docs/images/Live-Transcription.png)
+
+## Core features
+
+- **Local-first**: on-device inference by default; runs fully offline after the initial model download (when LLM is off).
+- **Multi-speaker diarization**: upload/meeting mode uses pyannote community-1 to produce anonymous speaker turns.
+- **Voice matching**: map anonymous `Spk_01` to enrolled people under strict thresholds; always manually correctable, **not identity authentication**.
+- **Correctable minutes**: double-click to edit text, batch-reassign speakers, generate/edit summaries (LLM or local TextRank fallback).
+- **Multi-format export**: Markdown / SRT / VTT / JSON.
+- **Swappable engines**: ASR (Qwen3-ASR / SenseVoice / Paraformer) and speaker (CamPlus / ERes2Net / Wespeaker) switchable at runtime.
 
 ## Product boundary
 
-- Uploaded recordings are the quality path; live mode provides low-latency reference captions.
+- Uploaded recordings drive post-meeting quality processing (diarization / minutes / export); live mode provides near-real-time captions during the meeting.
 - Diarization creates anonymous speaker labels. Strict voice matches may display an enrolled person automatically, but this is not identity authentication and is always correctable.
 - Without pyannote, transcription can finish but remains anonymous and reports diarization as unavailable.
 - Data stays local by default and LLM features are off. Initial model downloads require network access.
 - Public hosting and regulated medical or legal workflows are outside the supported scope.
 
+> **About the name**: live and upload are two entry points to the same meeting, both first-class. Multi-speaker diarization happens in upload mode; live mode identifies enrolled speakers via voiceprints and does not perform multi-speaker diarization.
+
+## Screenshots
+
+<table>
+  <tr>
+    <td width="50%" align="center"><b>Meetings library</b></td>
+    <td width="50%" align="center"><b>People & voice samples</b></td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/library.png" alt="Meetings library"></td>
+    <td><img src="docs/images/Voice-Library.png" alt="People & voice samples"></td>
+  </tr>
+</table>
+
+## Core flow
+
+1. Upload a recording and choose "quick transcript" or "meeting mode".
+2. A background job decodes, transcribes, and optionally diarizes.
+3. In the meeting detail, review auto-matches, confirm medium-confidence suggestions, and correct the text.
+4. Generate or edit minutes, then export the formats you need.
+
+Person voice samples are optional auxiliary matching info. The system only auto-displays a name when the engine is compatible, the speech and samples are sufficient, and strict thresholds pass; otherwise it stays a suggestion or anonymous.
+
 ## Quick start
 
-Python 3.10–3.12, Node.js 20+, and FFmpeg are required.
+Python 3.10–3.12, Node.js 20+, and FFmpeg are required. The first run downloads models.
 
 ```bash
+git clone https://github.com/lgy1027/matrix-live-diarizer.git
+cd matrix-live-diarizer
 python -m venv .venv
 # Windows: .venv\Scripts\activate
 # macOS/Linux: source .venv/bin/activate
@@ -27,22 +82,60 @@ cd web && npm ci && npm run build && cd ..
 python main.py
 ```
 
-Open `http://127.0.0.1:8000`. The default server binds only to loopback. Docker CPU builds are available with `docker compose up --build`, but CPU inference may be slow.
+Open `http://127.0.0.1:8000`. The default server binds only to loopback. Default account is `admin/admin`; the first login forces a password change.
 
 Data structures may change during the alpha period, so do not use this project as the only copy or as a long-term archive.
 
+Docker CPU builds are available with `docker compose up --build`, but CPU inference may be slow.
+
+```bash
+docker compose up --build
+```
+
 Maintainers publishing their own multi-architecture image can use `docker buildx build --platform linux/amd64,linux/arm64 ...`; each target must be tested separately and the project does not currently promise prebuilt images.
 
-For LAN use, explicitly configure `HOST=0.0.0.0`, `DEPLOYMENT_MODE=lan`, a strong `JWT_SECRET`, trusted `ALLOWED_ORIGINS`, and an HTTPS reverse proxy. Mobile microphone capture normally requires HTTPS.
+CUDA users should use a local Python environment and follow PyTorch's official install instructions for the matching version.
 
-## Data and verification
+## Optional configuration
 
-Managed audio is stored under `data/media/`. Transcripts, people, embeddings, settings, and an optional LLM API key are stored in `data/matrix.db` without application-level encryption.
+Copy `.env.example` to `.env`. **Defaults work out of the box; 99% of setups need no changes.** Common keys:
+
+```dotenv
+HOST=127.0.0.1
+ASR_DEVICE=auto
+ASR_ENGINE=qwen3
+SPEAKER_ENGINE=campplus
+HF_TOKEN=
+LLM_ENABLED=false
+```
+
+**When `HF_TOKEN` is needed** (leave empty otherwise):
+
+- ✅ You want **multi-speaker diarization** in uploaded meetings (pyannote community-1, a gated model) → required, and you must accept the terms on the HF model page.
+- ✅ You enable **word-level timestamps** (Qwen3-ForcedAligner) → recommended to avoid HF rate limits.
+- ❌ Only live captions / quick transcript / local voice matching → **not needed**.
+
+Use `HOST=0.0.0.0` and `DEPLOYMENT_MODE=lan` only when explicitly deploying to a LAN, and pair them with a strong random `JWT_SECRET`, trusted `ALLOWED_ORIGINS`, and an HTTPS reverse proxy. Mobile microphone capture normally requires HTTPS.
+
+## Data and network
+
+- Meeting audio: `data/media/`
+- Transcripts, people, voice embeddings, settings, and an optional LLM API key: `data/matrix.db`
+- Model cache: project-root `models/` by default (overridable via `MODELS_DIR`)
+- Optional public LLM: only sends transcript text when the user explicitly allows it
+
+This data is not encrypted at the application level; use OS-level disk encryption and protect the local account. Deleting a meeting or person removes the managed audio files; stop the service before deleting the entire `data/` directory.
+
+## Development verification
 
 ```bash
 pytest -q --ignore=tests/test_smoke_boot.py
-cd web && npm run check:i18n && npm run build
+cd web && npm run check:i18n && npm run typecheck && npm run build
 npm audit --omit=dev
 ```
 
-Project code is under the [MIT License](LICENSE). Model weights keep their upstream licenses and terms; MIT does not relicense them. See [docs/MODELS.md](docs/MODELS.md).
+A real-model smoke test downloads and loads large models, so it is not run in normal CI: `MATRIX_TEST_REAL_DEPENDENCIES=1 pytest tests/test_smoke_boot.py -v`. On PowerShell run `$env:MATRIX_TEST_REAL_DEPENDENCIES="1"` first.
+
+## License
+
+Project code is under the [MIT License](LICENSE). Model weights keep their upstream licenses and terms; MIT does not relicense them. See [docs/MODELS.md](docs/MODELS.md) and verify upstream terms before deployment.

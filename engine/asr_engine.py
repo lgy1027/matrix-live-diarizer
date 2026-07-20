@@ -11,8 +11,8 @@ from modelscope import snapshot_download as _ms_snapshot_download
 from qwen_asr import Qwen3ASRModel
 from engine.asr.contracts import empty_asr_result, make_asr_result
 from app.services.model_resolver import resolve_hf, resolve_silero_vad
-# bug-fix: ModelScope CDN 经常慢(实测 8MB/s,1.75GB 需 4 分钟),容易触发 90s 超时。
-# fallback 策略: ModelScope 失败 → HF 本地缓存 (前提: 已下完, ~/.cache/huggingface/hub/)
+# ModelScope CDN 限速常见(实测 8MB/s,1.75GB 约 4 分钟),易触发 90s 超时。
+# 兜底:ModelScope 失败 → 改用 HF 本地缓存(前提:已下完,~/.cache/huggingface/hub/)
 from huggingface_hub import snapshot_download as _hf_snapshot_download
 HF_LOCAL_FILES_ONLY = True
 QWEN_ASR_REVISION = os.environ.get(
@@ -163,9 +163,9 @@ class ASREngine:
                 logger.warning(
                     f"[ASR] {device} 加载超时 ({elapsed:.0f}s > {timeout}s)，放弃此设备"
                 )
-                # M5: 置 cancel flag,daemon worker 在下一个阶段边界会主动 return,
-                # 减少与下一个设备加载线程并发占显存/内存(daemon=True 随主进程退出,
-                # 但服务长跑时仍值得尽早收尾)。
+                # 超时后置 cancel 标志,daemon worker 在下一个阶段边界主动
+                # return,减少与下一个设备加载线程并发占显存/内存(daemon 会随
+                # 主进程退出,但服务长跑时仍值得尽早收尾)。
                 result["cancelled"] = True
                 if result.get("asr_model") is not None:
                     result["asr_model"] = None

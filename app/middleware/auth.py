@@ -33,8 +33,8 @@ PASSWORD_CHANGE_ALLOWED_PATHS = (
 
 class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        # Bug-79: 测试模式绕过鉴权(避免破坏 53 个现有 client fixture)
-        # 机制: conftest 设置 TEST_AUTH_BYPASS=1,这里跳过鉴权
+        # 测试环境通过 TEST_AUTH_BYPASS=1 跳过鉴权(conftest 设置),让现有
+        # 测试 client fixture 不必每个都带 token。
         import os as _os
         if _os.environ.get("TEST_AUTH_BYPASS") == "1":
             return await call_next(request)
@@ -95,9 +95,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 status_code=401,
                 content={"detail": "token 格式错误"},
             )
-        # Bug-88 (审核 #7): 改密后旧 token 失效
-        # 校验: token.pwd_iat < user.password_changed_at → 401
-        # 防 token 泄露后被滥用: 改密后即使 token 没过期也不能用
+        # 改密后旧 token 立即失效: token 里记录的 pwd_iat 早于用户的
+        # password_changed_at → 401。避免泄露的 token 在原 TTL 内继续可用。
         try:
             user_row = auth_service.get_user(user_id)
             if not user_row:
