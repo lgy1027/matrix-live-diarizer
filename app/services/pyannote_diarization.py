@@ -16,8 +16,18 @@
 """
 import logging
 import os
+import warnings
 from pathlib import Path
 from typing import List, Tuple
+
+# pyannote/audio 在边界帧(样本数<=1、空切片)上会触发数值统计退化:
+#   - std(): degrees of freedom <= 0  (pooling.py:103)
+#   - Mean of empty slice / invalid value encountered in divide
+# 这些是 pyannote 内部已知行为,结果用 0/NaN 兜底,不影响最终分离。
+# 加载模型前过滤掉,避免污染日志、干扰排查真问题。
+warnings.filterwarnings("ignore", message="std\\(\\).*degrees of freedom", category=UserWarning)
+warnings.filterwarnings("ignore", message="Mean of empty slice", category=RuntimeWarning)
+warnings.filterwarnings("ignore", message="invalid value encountered in divide", category=RuntimeWarning)
 
 from app.services.speaker_alignment import align_speakers_to_segments
 
