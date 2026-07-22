@@ -7,13 +7,13 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%E2%80%933.12-blue.svg)](https://www.python.org/)
 [![Node](https://img.shields.io/badge/node-20%2B-green.svg)](https://nodejs.org/)
-![Status](https://img.shields.io/badge/status-alpha-orange.svg)
+![Status](https://img.shields.io/badge/status-beta-blue.svg)
 
 [English](README.en.md) · [使用说明](docs/USAGE.md) · [隐私](docs/PRIVACY.md) · [安全](docs/SECURITY.md) · [API](docs/API.md) · [模型](docs/MODELS.md)
 
 </div>
 
-> 这是一份 alpha 阶段的个人本机工具。适合在自己的电脑上试用和改进，**不面向公网、多租户、合规存档或自动身份判定**。
+> 这是一份 beta 阶段的本地单机工具,适合在受信任的机器上试用和改进。当前不面向公网部署、多租户、合规存档或自动身份判定。
 
 ## 它解决什么
 
@@ -21,17 +21,17 @@
 
 两条路径合一，覆盖会议从现场到会后的全程：
 
-- **上传录音（会后高质量处理）**：解码 → ASR → 可选 pyannote 多人分离 → 声纹匹配已登记人物 → 入库 → 校正/纪要/导出。
-- **实时字幕（会议进行中）**：浏览器录音 → VAD 切段 → ASR → 声纹识别已登记人物 → 边说边出，落段入库。
+- 📤 **上传录音（会后高质量处理）**：解码 → ASR → 可选 pyannote 多人分离 → 声纹匹配已登记人物 → 入库 → 校正/纪要/导出。
+- ⚡ **实时字幕（会议进行中）**：浏览器录音 → VAD 切段 → ASR → 声纹识别已登记人物 → 边说边出，落段入库。
 
 ## 核心能力
 
-- **本地优先**：默认全本机推理，下载模型后可在无网环境运行（LLM 关闭时）。
-- **多人说话人分离**：上传会议模式用 pyannote community-1 切出匿名说话人 turn。
-- **声纹匹配**：把匿名 `Spk_01` 按严格阈值匹配到已登记人物，可随时人工纠正，**不是身份认证**。声样支持**上传文件或浏览器在线录音**注册。
-- **可校正纪要**：双击改文稿、批量重指说话人、合并/拆分说话人、生成/编辑摘要（LLM 或本地 TextRank 兜底）。
-- **多格式导出**：Markdown / SRT / VTT / JSON。
-- **可切换引擎**：ASR（Qwen3-ASR / SenseVoice / Paraformer）、声纹（CamPlus / ERes2Net / Wespeaker）运行时可切。
+- 🖥️ **本地优先**：默认全本机推理，下载模型后可在无网环境运行（LLM 关闭时）。
+- 👥 **多人说话人分离**：上传会议模式用 pyannote community-1 切出匿名说话人 turn。
+- 🧬 **声纹匹配**：把匿名 `Spk_01` 按严格阈值匹配到已登记人物，可随时人工纠正，**不是身份认证**。声样支持**上传文件或浏览器在线录音**注册。
+- 📝 **可校正纪要**：双击改文稿、批量重指说话人、合并/拆分说话人、生成/编辑摘要（LLM 或本地 TextRank 兜底）。
+- 📤 **多格式导出**：Markdown / SRT / VTT / JSON。
+- 🔧 **可切换引擎**：ASR（Qwen3-ASR / SenseVoice / Paraformer）、声纹（CamPlus / ERes2Net / Wespeaker）运行时可切。
 
 ## 产品边界
 
@@ -43,7 +43,12 @@
 
 > **关于项目名**：实时与上传是同一会议的两个入口，均为一等功能。多人说话人分离（diarization）在上传模式完成；实时模式靠声纹识别已登记说话人，不做多人分离。
 
-## 截图
+## 界面预览
+
+<div align="center">
+  <img src="docs/images/PRIVATE-MEETING-WORKSPACE.png" alt="会议工作区" width="100%">
+  <p><b>会议工作区</b> · 转写、校正、说话人归属、纪要与导出,全程本地</p>
+</div>
 
 <table>
   <tr>
@@ -51,16 +56,16 @@
     <td width="50%" align="center"><b>会议库</b></td>
   </tr>
   <tr>
-    <td><img src="docs/images/Live-Transcription.png" alt="实时字幕"></td>
-    <td><img src="docs/images/library.png" alt="会议库"></td>
+    <td><img src="docs/images/Live-Transcription.png" alt="实时字幕" width="100%"></td>
+    <td><img src="docs/images/Meetings.png" alt="会议库" width="100%"></td>
   </tr>
   <tr>
     <td width="50%" align="center"><b>人员声样（含在线录音）</b></td>
     <td width="50%" align="center"><b>引擎与设置</b></td>
   </tr>
   <tr>
-    <td><img src="docs/images/Voice-Library.png" alt="人员声样"></td>
-    <td><img src="docs/images/settings.png" alt="设置"></td>
+    <td><img src="docs/images/People.png" alt="人员声样" width="100%"></td>
+    <td><img src="docs/images/settings.png" alt="设置" width="100%"></td>
   </tr>
 </table>
 
@@ -98,7 +103,7 @@ python main.py
 
 浏览器打开 `http://127.0.0.1:8000`。默认只监听本机回环地址。默认账户 `admin/admin`，首次登录强制改密。
 
-项目仍处于 alpha 阶段，数据结构可能调整，请勿将其作为会议资料的唯一副本或长期归档系统。
+项目处于 beta 阶段,接口趋于稳定但仍可能调整,请勿将其作为会议资料的唯一副本或长期归档系统。
 
 Docker CPU 版：
 

@@ -7,13 +7,13 @@ A local-first meeting transcription tool · no data egress by default · upload 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%E2%80%933.12-blue.svg)](https://www.python.org/)
 [![Node](https://img.shields.io/badge/node-20%2B-green.svg)](https://nodejs.org/)
-![Status](https://img.shields.io/badge/status-alpha-orange.svg)
+![Status](https://img.shields.io/badge/status-beta-blue.svg)
 
 [中文](README.md) · [Usage](docs/USAGE.md) · [Privacy](docs/PRIVACY.md) · [Security](docs/SECURITY.md) · [API](docs/API.md) · [Models](docs/MODELS.md)
 
 </div>
 
-> This is alpha software for personal use on a trusted computer. It is **not** a public, multi-tenant, compliance-archive, or automatic identity-verification service.
+> This is beta software for a trusted single machine. It is suitable for trial and iteration locally, and is **not** a public, multi-tenant, compliance-archive, or automatic identity-verification service.
 
 ## What it solves
 
@@ -21,17 +21,17 @@ Turn a meeting recording into a structured, speaker-attributed, correctable, exp
 
 Two paths in one tool, covering a meeting from live capture to post-meeting processing:
 
-- **Upload a recording (post-meeting quality path)**: decode → ASR → optional pyannote multi-speaker diarization → voice-match enrolled people → store → correct / summarize / export.
-- **Live captions (during the meeting)**: browser mic → VAD segmenting → ASR → voice-identify enrolled people → stream segments as they are spoken and persist them.
+- 📤 **Upload a recording (post-meeting quality path)**: decode → ASR → optional pyannote multi-speaker diarization → voice-match enrolled people → store → correct / summarize / export.
+- ⚡ **Live captions (during the meeting)**: browser mic → VAD segmenting → ASR → voice-identify enrolled people → stream segments as they are spoken and persist them.
 
 ## Core features
 
-- **Local-first**: on-device inference by default; runs offline after the initial model download (when LLM is off).
-- **Multi-speaker diarization**: upload/meeting mode uses pyannote community-1 to produce anonymous speaker turns.
-- **Voice matching**: map anonymous `Spk_01` to enrolled people under strict thresholds; always manually correctable, **not identity authentication**. Voice samples can be enrolled via **file upload or in-browser recording**.
-- **Correctable minutes**: double-click to edit text, batch-reassign speakers, merge/split speakers, generate/edit summaries (LLM or local TextRank fallback).
-- **Multi-format export**: Markdown / SRT / VTT / JSON.
-- **Swappable engines**: ASR (Qwen3-ASR / SenseVoice / Paraformer) and speaker (CamPlus / ERes2Net / Wespeaker) switchable at runtime.
+- 🖥️ **Local-first**: on-device inference by default; runs offline after the initial model download (when LLM is off).
+- 👥 **Multi-speaker diarization**: upload/meeting mode uses pyannote community-1 to produce anonymous speaker turns.
+- 🧬 **Voice matching**: map anonymous `Spk_01` to enrolled people under strict thresholds; always manually correctable, **not identity authentication**. Voice samples can be enrolled via **file upload or in-browser recording**.
+- 📝 **Correctable minutes**: double-click to edit text, batch-reassign speakers, merge/split speakers, generate/edit summaries (LLM or local TextRank fallback).
+- 📤 **Multi-format export**: Markdown / SRT / VTT / JSON.
+- 🔧 **Swappable engines**: ASR (Qwen3-ASR / SenseVoice / Paraformer) and speaker (CamPlus / ERes2Net / Wespeaker) switchable at runtime.
 
 ## Product boundary
 
@@ -45,22 +45,27 @@ Two paths in one tool, covering a meeting from live capture to post-meeting proc
 
 ## Screenshots
 
+<div align="center">
+  <img src="docs/images/PRIVATE-MEETING-WORKSPACE.png" alt="Meeting workspace" width="100%">
+  <p><b>Meeting workspace</b> · transcription, correction, speaker attribution, minutes, and export — all local</p>
+</div>
+
 <table>
   <tr>
     <td width="50%" align="center"><b>Live captions</b></td>
     <td width="50%" align="center"><b>Meetings library</b></td>
   </tr>
   <tr>
-    <td><img src="docs/images/Live-Transcription.png" alt="Live captions"></td>
-    <td><img src="docs/images/library.png" alt="Meetings library"></td>
+    <td><img src="docs/images/Live-Transcription.png" alt="Live captions" width="100%"></td>
+    <td><img src="docs/images/Meetings.png" alt="Meetings library" width="100%"></td>
   </tr>
   <tr>
     <td width="50%" align="center"><b>People & voice samples (with in-browser recording)</b></td>
     <td width="50%" align="center"><b>Engines & settings</b></td>
   </tr>
   <tr>
-    <td><img src="docs/images/Voice-Library.png" alt="People & voice samples"></td>
-    <td><img src="docs/images/settings.png" alt="Settings"></td>
+    <td><img src="docs/images/People.png" alt="People & voice samples" width="100%"></td>
+    <td><img src="docs/images/settings.png" alt="Settings" width="100%"></td>
   </tr>
 </table>
 
@@ -98,7 +103,7 @@ python main.py
 
 Open `http://127.0.0.1:8000`. The default server binds only to loopback. Default account is `admin/admin`; the first login forces a password change.
 
-Data structures may change during the alpha period, so do not use this project as the only copy or as a long-term archive.
+Interfaces are stabilizing during the beta period, but may still change; do not use this project as the only copy or as a long-term archive.
 
 Docker CPU builds are available with `docker compose up --build`, but CPU inference may be slow.
 

@@ -2,7 +2,7 @@
 
 ## Supported deployment
 
-The supported alpha deployment is one user on a trusted computer. The default server binds to `127.0.0.1`. Local browser requests may bypass login only when the network peer and browser Origin are trusted loopback values.
+The supported beta deployment is one user on a trusted computer. The default server binds to `127.0.0.1`. Local browser requests may bypass login only when the network peer and browser Origin are trusted loopback values.
 
 LAN mode is an advanced deployment, not a multi-user security boundary. All authenticated users would access the same meetings and people.
 

@@ -46,7 +46,7 @@ const zh: Record<string, string> = {
   'footer.ready': 'Ready',
   'footer.status': 'Status',
   'footer.studio': '为挑剔的耳朵而做',
-  'footer.version': 'Matrix · v0.4.0-alpha',
+  'footer.version': 'Matrix · v0.4.0-beta',
   'library.delete.confirm': '确认删除此会话？',
   'library.delete.fail': '删除失败：{0}',
   'library.delete.ok': '已删除',

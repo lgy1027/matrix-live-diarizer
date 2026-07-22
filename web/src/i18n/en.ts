@@ -46,7 +46,7 @@ const en: Record<string, string> = {
   'footer.ready': 'Ready',
   'footer.status': 'Status',
   'footer.studio': 'made for studio ears',
-  'footer.version': 'Matrix · v0.4.0-alpha',
+  'footer.version': 'Matrix · v0.4.0-beta',
   'library.delete.confirm': 'Delete this session?',
   'library.delete.fail': 'Delete failed: {0}',
   'library.delete.ok': 'Deleted',

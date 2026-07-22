@@ -80,7 +80,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=APP_TITLE,
         description="实时音频转写与说话人识别系统",
-        version="0.4.0-alpha.0"
+        version="0.4.0-beta.0"
     )
     
     # 速率限制中间件(从 config.rate_limit 读取,支持 .env 调参)

@@ -1,6 +1,6 @@
 # API
 
-The alpha API serves one local user. Contracts may change before a stable release. Except for health, model catalog, login, and limited status endpoints, `/v1/*` requires authentication when local bypass is disabled.
+The beta API serves one local user. Contracts may still change before a stable release. Except for health, model catalog, login, and limited status endpoints, `/v1/*` requires authentication when local bypass is disabled.
 
 ## Meetings
 
