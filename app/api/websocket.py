@@ -600,7 +600,9 @@ async def audio_processor(
                         websocket, ctx, speech_buffer, client_id, sample_rate,
                         segment_start_time=speech_start_sample / sample_rate,
                     )
-                    # 保留最后 0.5 秒作为上下文
+                    # 保留最后 0.5 秒作为上下文。last_full_text 不重置——
+                    # 下一段 ASR 返回含旧前缀文本时,get_incremental_text 走
+                    # 去重逻辑避免 carryover 重复(与超时 flush 路径一致)。
                     keep_samples = int(sample_rate * 0.5)
                     speech_buffer = speech_buffer[-keep_samples:] if len(speech_buffer) > keep_samples else np.array([], dtype=np.float32)
                     speech_start_sample = max(chunk_end_sample - len(speech_buffer), 0)

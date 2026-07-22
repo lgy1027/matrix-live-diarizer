@@ -319,6 +319,14 @@ export const useLiveStore = defineStore('live', () => {
           )
         },
         onReconnected: () => {
+          // 重连后服务端会话状态可能与本地不同步,重置避免增量文本串接错乱
+          for (const s of segments.value) {
+            if (s.typewriterId) clearTimeout(s.typewriterId)
+          }
+          segments.value = []
+          speakers.value = new Map()
+          sessionSpeakers.value = new Map()
+          segSeq = 0
           window.toast?.(i18n.global.t('live.reconnected'), 'ok')
         },
         onReconnectFailed: () => {

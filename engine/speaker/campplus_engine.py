@@ -65,6 +65,7 @@ class CamPlusEngine(BaseSpeakerEngine):
             model_id, "speaker", "camplus",
             revision=ENGINE_CONFIG["campplus"]["model_revision"],
         )
+        logger.info("[CamPlus] 从本地路径加载: %s", local)
         self.device = "cpu"
         self.model = Model.from_pretrained(local, device='cpu')
         self.model.eval()

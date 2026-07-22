@@ -48,6 +48,7 @@ class WespeakerEngine(BaseSpeakerEngine):
             model_id, "speaker", "wespeaker",
             revision=ENGINE_CONFIG["wespeaker"]["model_revision"],
         )
+        logger.info("[Wespeaker] 从本地路径加载: %s", local)
         self.model = Model.from_pretrained(local, device='cpu')
         self.model.eval()
         logger.info("[Wespeaker] ResNet34 模型加载成功")

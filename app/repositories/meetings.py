@@ -10,6 +10,10 @@ from typing import Optional
 from .database import Database
 
 
+class SpeakerNotFoundError(Exception):
+    """目标说话人不存在(API 层据此返 404 而非 400)。"""
+
+
 def _interval_overlap_seconds(
     left: list[tuple[float, float]], right: list[tuple[float, float]]
 ) -> float:
@@ -102,6 +106,7 @@ class MeetingRepository:
         audio_path: str | None = None,
         status: str = "draft",
     ) -> str:
+        """Create meeting row."""
         meeting_id = str(uuid.uuid4())
         with self.db.connect() as conn:
             conn.execute(
@@ -117,6 +122,38 @@ class MeetingRepository:
             )
             conn.commit()
         return meeting_id
+
+    def create_with_job(
+        self,
+        *,
+        source: str,
+        title: str,
+        processing_mode: str = "meeting",
+        original_filename: str | None = None,
+        audio_path: str | None = None,
+        status: str = "draft",
+    ) -> tuple[str, str]:
+        """Create meeting + job atomically in one transaction."""
+        meeting_id = str(uuid.uuid4())
+        job_id = str(uuid.uuid4())
+        with self.db.connect() as conn:
+            conn.execute(
+                """INSERT INTO meetings
+                   (id, source, status, title, original_filename, audio_path,
+                    processing_mode, diarization_status)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    meeting_id, source, status, title, original_filename,
+                    audio_path, processing_mode,
+                    "pending" if processing_mode == "meeting" else "not_requested",
+                ),
+            )
+            conn.execute(
+                "INSERT INTO processing_jobs (id, meeting_id) VALUES (?, ?)",
+                (job_id, meeting_id),
+            )
+            conn.commit()
+        return meeting_id, job_id
 
     def get(self, meeting_id: str) -> Optional[dict]:
         with self.db.connect() as conn:
@@ -164,13 +201,10 @@ class MeetingRepository:
             ).fetchone()[0]
             rows = conn.execute(
                 f"""SELECT m.*,
-                           COUNT(DISTINCT ts.id) AS segment_count,
-                           COUNT(DISTINCT ms.id) AS speaker_count
+                           (SELECT COUNT(*) FROM transcript_segments ts WHERE ts.meeting_id = m.id) AS segment_count,
+                           (SELECT COUNT(*) FROM meeting_speakers ms WHERE ms.meeting_id = m.id) AS speaker_count
                     FROM meetings m
-                    LEFT JOIN transcript_segments ts ON ts.meeting_id = m.id
-                    LEFT JOIN meeting_speakers ms ON ms.meeting_id = m.id
                     WHERE {predicate}
-                    GROUP BY m.id
                     ORDER BY m.created_at DESC, m.id DESC
                     LIMIT ? OFFSET ?""",
                 [*params, limit, offset],
@@ -589,7 +623,7 @@ class MeetingRepository:
                 (target_id, meeting_id),
             ).fetchone()
             if owner is None:
-                raise ValueError("target speaker 不存在")
+                raise SpeakerNotFoundError("target speaker 不存在")
             cursor = conn.execute(
                 f"""UPDATE transcript_segments
                     SET meeting_speaker_id = ?, manually_edited = 1,
@@ -611,18 +645,18 @@ class MeetingRepository:
 
         返回新建的 speaker id。
         """
-        new_id = f"Spk_{uuid.uuid4().hex[:12]}"
+        new_id = str(uuid.uuid4())
         with self.db.connect() as conn:
             source = conn.execute(
                 "SELECT label FROM meeting_speakers WHERE id = ? AND meeting_id = ?",
                 (source_id, meeting_id),
             ).fetchone()
             if source is None:
-                raise ValueError("source speaker 不存在")
+                raise SpeakerNotFoundError("source speaker 不存在")
             conn.execute(
                 """INSERT INTO meeting_speakers (id, meeting_id, label, identity_status)
                    VALUES (?, ?, ?, 'anonymous')""",
-                (new_id, meeting_id, f"{source['label']}_split"),
+                (new_id, meeting_id, f"{source['label']}_split_{uuid.uuid4().hex[:8]}"),
             )
             placeholders = ",".join("?" for _ in segment_ids)
             conn.execute(

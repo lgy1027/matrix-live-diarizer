@@ -343,6 +343,8 @@ class ASREngineManager:
             logger.info(f"[ASR] 使用缓存引擎: {engine_type}")
             return self._engine_cache[engine_type]
         engine = get_asr_engine(engine_type)
+        if not getattr(engine, "initialized", True):
+            raise RuntimeError(f"ASR 引擎 {engine_type} 初始化失败,不可用")
         self._engine_cache[engine_type] = engine
         return engine
 

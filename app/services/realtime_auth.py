@@ -43,7 +43,7 @@ async def authenticate_websocket(websocket, client_id: str) -> bool:
         logger.warning("[WS] %s 连接被限流 (%.0fs 内超 %d)", client_host,
                        _WS_CONNECT_WINDOW, _WS_CONNECT_MAX)
         try:
-            await websocket.close(code=4401, reason="连接过于频繁")
+            await websocket.close(code=4429, reason="连接过于频繁")
         except Exception:
             pass
         return False
@@ -53,7 +53,7 @@ async def authenticate_websocket(websocket, client_id: str) -> bool:
     local_bypass = (
         config.deployment.mode == "local"
         and config.auth.local_auth_disabled
-        and client_host in ("127.0.0.1", "::1", "localhost")
+        and client_host in ("127.0.0.1", "::1")
         and is_trusted_browser_origin(
             websocket.headers.get("origin"), config.cors.allowed_origins
         )

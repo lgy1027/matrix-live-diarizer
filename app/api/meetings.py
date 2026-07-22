@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
 from app.config import config
+from app.repositories.meetings import SpeakerNotFoundError
 from app.services.audio_files import (
     ALLOWED_AUDIO_EXTENSIONS,
     MAX_AUDIO_FILE_SIZE,
@@ -44,12 +45,12 @@ class NoteUpdate(BaseModel):
 
 
 class SpeakerMergeRequest(BaseModel):
-    target_speaker_id: str = Field(pattern=r"^Spk_[a-zA-Z0-9_]+$")
+    target_speaker_id: str
     source_speaker_ids: list[str] = Field(min_length=1, max_length=50)
 
 
 class SpeakerSplitRequest(BaseModel):
-    source_speaker_id: str = Field(pattern=r"^Spk_[a-zA-Z0-9_]+$")
+    source_speaker_id: str
     segment_ids: list[int] = Field(min_length=1, max_length=500)
 
 
@@ -114,7 +115,7 @@ async def create_upload_meeting(
             )
         except Exception as exc:
             raise HTTPException(status_code=400, detail=f"音频无法解码: {exc}") from None
-        meeting_id = request.app.state.meeting_repo.create(
+        meeting_id, job_id = request.app.state.meeting_repo.create_with_job(
             source="upload",
             title=Path(filename).stem or "未命名会议",
             original_filename=filename,
@@ -122,7 +123,6 @@ async def create_upload_meeting(
             processing_mode=mode,
             status="processing",
         )
-        job_id = request.app.state.job_repo.create(meeting_id)
         runner = getattr(request.app.state, "job_runner", None)
         if runner is not None:
             runner.notify()
@@ -163,6 +163,7 @@ def get_meeting(meeting_id: str, request: Request):
 
 @router.patch("/{meeting_id}")
 def update_meeting(meeting_id: str, body: MeetingUpdate, request: Request):
+    _require_mutable_meeting(request, meeting_id)
     if not request.app.state.meeting_repo.update(meeting_id, title=body.title.strip()):
         raise HTTPException(status_code=404, detail="会议不存在")
     return request.app.state.meeting_repo.get(meeting_id)
@@ -339,6 +340,8 @@ def merge_meeting_speakers(
         migrated = request.app.state.meeting_repo.merge_speakers(
             meeting_id, body.target_speaker_id, body.source_speaker_ids
         )
+    except SpeakerNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {
@@ -360,6 +363,8 @@ def split_meeting_speaker(
         new_speaker_id = request.app.state.meeting_repo.split_speaker(
             meeting_id, body.source_speaker_id, body.segment_ids
         )
+    except SpeakerNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {

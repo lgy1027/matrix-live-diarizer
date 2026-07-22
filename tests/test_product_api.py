@@ -212,10 +212,12 @@ def test_upload_removes_meeting_and_audio_when_job_creation_fails(tmp_path, monk
     client, app = make_client(tmp_path)
     media_dir = tmp_path / "media"
     monkeypatch.setattr(meetings_api.config.storage, "media_dir", str(media_dir))
+    # 原子化后 meeting+job 在同一事务,mock meeting_repo.create_with_job 抛错
+    # → meeting 和 audio 都不应残留
     monkeypatch.setattr(
-        app.state.job_repo,
-        "create",
-        lambda _meeting_id: (_ for _ in ()).throw(RuntimeError("queue unavailable")),
+        app.state.meeting_repo,
+        "create_with_job",
+        lambda **kw: (_ for _ in ()).throw(RuntimeError("queue unavailable")),
     )
 
     with pytest.raises(RuntimeError, match="queue unavailable"):
@@ -308,10 +310,63 @@ def test_add_voice_sample_extracts_and_persists_embedding(tmp_path, monkeypatch)
     )
 
     assert response.status_code == 201
+    payload = response.json()
+    # 6 秒正弦波:effective_speech_sec >= 5 且 quality 够高,应达到自动匹配门槛
+    assert payload["auto_match_eligible"] is True
     detail = client.get(f"/v1/people/{person_id}").json()
     assert detail["samples"][0]["embedding_dim"] == 3
     assert detail["samples"][0]["model_name"] == "test-speaker"
     assert detail["samples"][0]["effective_speech_sec"] >= 5
+
+
+def test_add_voice_sample_reports_ineligible_when_below_auto_match_threshold(tmp_path, monkeypatch):
+    """B1: quality_score < 0.6 或 effective_speech_sec < 3.0 时 auto_match_eligible=False,
+    让用户知道样本已注册但达不到自动匹配门槛。"""
+    from app.api import people as people_api
+
+    class SpeakerEngine:
+        _model_name = "test-speaker"
+
+        def extract_feat(self, _audio):
+            return np.array([0.1, 0.2, 0.3], dtype=np.float32)
+
+    client, app = make_client(tmp_path)
+    app.state.spk_engine = SpeakerEngine()
+    monkeypatch.setattr(people_api.config.storage, "media_dir", str(tmp_path / "media"))
+    person_id = client.post("/v1/people", json={"name": "阈值测试"}).json()["id"]
+
+    # 2.5 秒正弦波:duration >= 2 通过校验,但 effective_speech_sec < 3.0 → 不达标
+    audio = (0.08 * np.sin(2 * np.pi * 220 * np.arange(40000) / 16000)).astype(np.float32)
+    monkeypatch.setattr("librosa.load", lambda *args, **kwargs: (audio, 16000))
+    response = client.post(
+        f"/v1/people/{person_id}/samples",
+        files={"file": ("voice.wav", b"RIFF sample", "audio/wav")},
+    )
+    assert response.status_code == 201
+    assert response.json()["auto_match_eligible"] is False
+
+
+def test_add_voice_sample_rejects_empty_file(tmp_path, monkeypatch):
+    """B4: 上传 0 字节文件应返 400 友好提示,而非触发 500 + librosa 报错。"""
+    from app.api import people as people_api
+
+    class SpeakerEngine:
+        _model_name = "test-speaker"
+
+        def extract_feat(self, _audio):
+            return np.array([0.1, 0.2, 0.3], dtype=np.float32)
+
+    client, app = make_client(tmp_path)
+    app.state.spk_engine = SpeakerEngine()
+    monkeypatch.setattr(people_api.config.storage, "media_dir", str(tmp_path / "media"))
+    person_id = client.post("/v1/people", json={"name": "空文件测试"}).json()["id"]
+
+    response = client.post(
+        f"/v1/people/{person_id}/samples",
+        files={"file": ("empty.wav", b"", "audio/wav")},
+    )
+    assert response.status_code == 400
+    assert "空" in response.json()["detail"]
 
 
 def test_voice_sample_rejects_silence_and_duplicate_pcm(tmp_path, monkeypatch):

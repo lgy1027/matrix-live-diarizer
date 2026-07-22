@@ -2,7 +2,7 @@
 
 # Matrix Live Diarizer
 
-A local-first meeting transcription tool · zero data egress · upload diarization + live captions + voice matching
+A local-first meeting transcription tool · no data egress by default · upload diarization + live captions + voice matching
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%E2%80%933.12-blue.svg)](https://www.python.org/)
@@ -24,14 +24,12 @@ Two paths in one tool, covering a meeting from live capture to post-meeting proc
 - **Upload a recording (post-meeting quality path)**: decode → ASR → optional pyannote multi-speaker diarization → voice-match enrolled people → store → correct / summarize / export.
 - **Live captions (during the meeting)**: browser mic → VAD segmenting → ASR → voice-identify enrolled people → stream segments as they are spoken and persist them.
 
-![Live caption preview](docs/images/Live-Transcription.png)
-
 ## Core features
 
-- **Local-first**: on-device inference by default; runs fully offline after the initial model download (when LLM is off).
+- **Local-first**: on-device inference by default; runs offline after the initial model download (when LLM is off).
 - **Multi-speaker diarization**: upload/meeting mode uses pyannote community-1 to produce anonymous speaker turns.
-- **Voice matching**: map anonymous `Spk_01` to enrolled people under strict thresholds; always manually correctable, **not identity authentication**.
-- **Correctable minutes**: double-click to edit text, batch-reassign speakers, generate/edit summaries (LLM or local TextRank fallback).
+- **Voice matching**: map anonymous `Spk_01` to enrolled people under strict thresholds; always manually correctable, **not identity authentication**. Voice samples can be enrolled via **file upload or in-browser recording**.
+- **Correctable minutes**: double-click to edit text, batch-reassign speakers, merge/split speakers, generate/edit summaries (LLM or local TextRank fallback).
 - **Multi-format export**: Markdown / SRT / VTT / JSON.
 - **Swappable engines**: ASR (Qwen3-ASR / SenseVoice / Paraformer) and speaker (CamPlus / ERes2Net / Wespeaker) switchable at runtime.
 
@@ -49,21 +47,37 @@ Two paths in one tool, covering a meeting from live capture to post-meeting proc
 
 <table>
   <tr>
+    <td width="50%" align="center"><b>Live captions</b></td>
     <td width="50%" align="center"><b>Meetings library</b></td>
-    <td width="50%" align="center"><b>People & voice samples</b></td>
   </tr>
   <tr>
+    <td><img src="docs/images/Live-Transcription.png" alt="Live captions"></td>
     <td><img src="docs/images/library.png" alt="Meetings library"></td>
+  </tr>
+  <tr>
+    <td width="50%" align="center"><b>People & voice samples (with in-browser recording)</b></td>
+    <td width="50%" align="center"><b>Engines & settings</b></td>
+  </tr>
+  <tr>
     <td><img src="docs/images/Voice-Library.png" alt="People & voice samples"></td>
+    <td><img src="docs/images/settings.png" alt="Settings"></td>
   </tr>
 </table>
 
 ## Core flow
 
+**Upload a recording (post-meeting)**
+
 1. Upload a recording and choose "quick transcript" or "meeting mode".
 2. A background job decodes, transcribes, and optionally diarizes.
 3. In the meeting detail, review auto-matches, confirm medium-confidence suggestions, and correct the text.
 4. Generate or edit minutes, then export the formats you need.
+
+**Live captions (during the meeting)**
+
+1. Grant microphone access in the browser and start recording.
+2. VAD auto-segments, ASR transcribes in real time, and enrolled speakers are voice-identified as they speak.
+3. On stop, segments are persisted and enter the same correction / minutes / export flow as uploaded meetings.
 
 Person voice samples are optional auxiliary matching info. The system only auto-displays a name when the engine is compatible, the speech and samples are sufficient, and strict thresholds pass; otherwise it stays a suggestion or anonymous.
 
@@ -98,7 +112,7 @@ CUDA users should use a local Python environment and follow PyTorch's official i
 
 ## Optional configuration
 
-Copy `.env.example` to `.env`. **Defaults work out of the box; 99% of setups need no changes.** Common keys:
+Copy `.env.example` to `.env`. Most local single-machine setups need no changes. Common keys:
 
 ```dotenv
 HOST=127.0.0.1
@@ -109,17 +123,35 @@ HF_TOKEN=
 LLM_ENABLED=false
 ```
 
+`ASR_ENGINE` can be `qwen3` / `sensevoice` / `paraformer` / `paraformer_streaming`; `SPEAKER_ENGINE` can be `campplus` / `eres2net` / `wespeaker`. See `.env.example` for the rest.
+
 **When `HF_TOKEN` is needed** (leave empty otherwise):
 
 - ✅ You want **multi-speaker diarization** in uploaded meetings (pyannote community-1, a gated model) → required, and you must accept the terms on the HF model page.
 - ✅ You enable **word-level timestamps** (Qwen3-ForcedAligner) → recommended to avoid HF rate limits.
 - ❌ Only live captions / quick transcript / local voice matching → **not needed**.
 
-Use `HOST=0.0.0.0` and `DEPLOYMENT_MODE=lan` only when explicitly deploying to a LAN, and pair them with a strong random `JWT_SECRET`, trusted `ALLOWED_ORIGINS`, and an HTTPS reverse proxy. Mobile microphone capture normally requires HTTPS.
+Use `HOST=0.0.0.0` and `DEPLOYMENT_MODE=lan` only when explicitly deploying to a LAN, and pair them with a strong random `JWT_SECRET` and trusted `ALLOWED_ORIGINS`. Cross-machine access also requires HTTPS (see "Cross-machine access" below).
+
+## Cross-machine access (optional)
+
+The default `HOST=127.0.0.1` listens only on localhost — use `http://127.0.0.1:8000` locally; microphone and upload work normally.
+
+To access from **another machine** (uploading recordings and in-browser recording both need the mic), HTTPS is required: browsers disable `getUserMedia` on `http://IP` non-localhost origins. The server can run HTTPS directly with a self-signed cert:
+
+```bash
+bash scripts/gen_self_cert.sh              # generate data/ssl/ self-signed cert (includes host IP)
+ENABLE_HTTPS=1 HOST=0.0.0.0 \
+DEPLOYMENT_MODE=lan ALLOWED_ORIGINS=https://<host-IP>:8000 \
+python main.py
+```
+
+Open `https://<host-IP>:8000`; accept the "not secure" warning on first visit.
 
 ## Data and network
 
-- Meeting audio: `data/media/`
+- Meeting audio: `data/media/` (uploaded originals, named by meeting id)
+- Person voice-sample audio: `data/media/voices/<person_id>/`
 - Transcripts, people, voice embeddings, settings, and an optional LLM API key: `data/matrix.db`
 - Model cache: project-root `models/` by default (overridable via `MODELS_DIR`)
 - Optional public LLM: only sends transcript text when the user explicitly allows it
@@ -130,11 +162,26 @@ This data is not encrypted at the application level; use OS-level disk encryptio
 
 ```bash
 pytest -q --ignore=tests/test_smoke_boot.py
-cd web && npm run check:i18n && npm run typecheck && npm run build
+```
+
+```bash
+cd web
+npm run check:i18n
+npm run typecheck
+npm run build
 npm audit --omit=dev
 ```
 
 A real-model smoke test downloads and loads large models, so it is not run in normal CI: `MATRIX_TEST_REAL_DEPENDENCIES=1 pytest tests/test_smoke_boot.py -v`. On PowerShell run `$env:MATRIX_TEST_REAL_DEPENDENCIES="1"` first.
+
+## Contributing
+
+Pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and conventions.
+
+## Reporting issues
+
+- Bugs and feature requests: open a [GitHub Issue](https://github.com/lgy1027/matrix-live-diarizer/issues).
+- Security vulnerabilities: follow [SECURITY.md](SECURITY.md) to report privately; do not attach recordings, transcripts, or credentials to issues.
 
 ## License
 

@@ -77,6 +77,12 @@ class FunASREngine:
         _os.makedirs(_funasr_cache, exist_ok=True)
         _old_ms_cache = _os.environ.get("MODELSCOPE_CACHE")
         _os.environ["MODELSCOPE_CACHE"] = _funasr_cache
+        # FunASR AutoModel 内部走 modelscope:本地缓存命中则离线加载,否则首次联网下载。
+        _cached_models = _os.path.isdir(_os.path.join(_funasr_cache, "hub", "models"))
+        logger.info(
+            "[FunASR] MODELSCOPE_CACHE scope → %s (本地%s,首次会联网下载)",
+            _funasr_cache, "已缓存,离线加载" if _cached_models else "无缓存",
+        )
         try:
             from funasr import AutoModel
             try:
@@ -131,7 +137,11 @@ class FunASREngine:
             return empty_asr_result()
 
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._transcribe_sync, audio_data)
+        try:
+            return await loop.run_in_executor(None, self._transcribe_sync, audio_data)
+        except Exception as e:
+            logger.error(f"[ASR] FunASR 推理异常: {e}")
+            return empty_asr_result()
 
     def _transcribe_sync(self, audio_data: np.ndarray) -> ASRResult:
         kwargs: dict[str, Any] = {"input": audio_data.astype(np.float32)}

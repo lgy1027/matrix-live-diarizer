@@ -1,4 +1,5 @@
 """FastAPI 应用工厂"""
+import asyncio
 import logging
 import os
 from functools import partial
@@ -36,9 +37,12 @@ def _register_lifecycle_handlers(app: FastAPI, *, startup, shutdown) -> None:
     app.router.on_shutdown.append(shutdown)
 
 
-async def _shutdown_application(job_runner, runtime) -> None:
+async def _shutdown_application(job_runner, runtime, app) -> None:
     """Stop background work before releasing process-local model resources."""
     await job_runner.stop()
+    tasks = getattr(app.state, "ws_background_tasks", None)
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
     await runtime.close()
 
 
@@ -213,7 +217,7 @@ def _init_engines(app: FastAPI):
     _register_lifecycle_handlers(
         app,
         startup=job_runner.start,
-        shutdown=partial(_shutdown_application, job_runner, runtime),
+        shutdown=partial(_shutdown_application, job_runner, runtime, app),
     )
 
     logger.info(f"💾 数据库已初始化: {config.storage.db_path}")

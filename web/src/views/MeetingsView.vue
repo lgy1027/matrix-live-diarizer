@@ -11,12 +11,20 @@ const items=ref<Meeting[]>([]),jobs=ref<Job[]>([]),q=ref(''),hits=ref<Array<{seg
 const hasQuery=computed(()=>Boolean(q.value.trim()))
 const jobMap=computed(()=>new Map(jobs.value.map(job=>[job.meeting_id,job])))
 let timer:number|undefined
-async function load(silent=false){if(!silent)loading.value=true;try{const [meetings,resultJobs]=await Promise.all([listMeetings(),listJobs()]);items.value=meetings.items;jobs.value=resultJobs.items;error.value=''}catch(e){error.value=e instanceof Error?e.message:String(e)}finally{loading.value=false}}
+// 轮询仅在存在处理中(processing 会议 / queued|running job)时启动,
+// 处理完成自动停 — 避免常驻轮询打满每小时速率上限(1000/小时)。
+const POLL_INTERVAL=2500
+function hasActiveProcessing():boolean{
+  return items.value.some(m=>m.status==='processing')||jobs.value.some(j=>['queued','running'].includes(j.status))
+}
+function startPollingIfNeeded(){if(timer===undefined&&hasActiveProcessing()){timer=window.setInterval(()=>void load(true),POLL_INTERVAL)}}
+function stopPollingIfNeeded(){if(timer!==undefined&&(!hasActiveProcessing())){window.clearInterval(timer);timer=undefined}}
+async function load(silent=false){if(!silent)loading.value=true;try{const [meetings,resultJobs]=await Promise.all([listMeetings(),listJobs()]);items.value=meetings.items;jobs.value=resultJobs.items;error.value=''}catch(e){error.value=e instanceof Error?e.message:String(e)}finally{loading.value=false}startPollingIfNeeded();stopPollingIfNeeded()}
 async function search(){if(!q.value.trim()){hits.value=[];return}searching.value=true;try{hits.value=(await searchMeetings(q.value.trim())).hits}finally{searching.value=false}}
 function clearSearch(){q.value='';hits.value=[]}
 async function remove(m:Meeting){const ok=await dialog.showConfirm({title:t('product.meetings.deleteTitle'),message:t('product.meetings.deleteConfirm',{title:m.title}),confirmText:t('product.meetings.delete'),cancelText:t('btn.cancel'),danger:true});if(!ok)return;await deleteMeeting(m.id);await load()}
 async function actJob(job:Job){acting.value=job.id;try{job.status==='failed'||job.status==='cancelled'?await retryJob(job.id):await cancelJob(job.id);await load(true)}finally{acting.value=''}}
-onMounted(()=>{void load();timer=window.setInterval(()=>void load(true),2500)});onUnmounted(()=>window.clearInterval(timer))
+onMounted(()=>{void load()});onUnmounted(()=>{if(timer!==undefined)window.clearInterval(timer)})
 </script>
 <template><section class="product-page"><div class="page-head"><div><div class="eyebrow">{{t('product.meetings.eyebrow')}}</div><h1>{{t('product.meetings.title')}}</h1><p>{{t('product.meetings.lead')}}</p></div><button class="primary-action" @click="router.push({name:'home'})">＋ {{t('product.meetings.new')}}</button></div>
   <form class="searchbox" role="search" @submit.prevent="search"><input v-model="q" :aria-label="t('product.meetings.searchPlaceholder')" :placeholder="t('product.meetings.searchPlaceholder')"><button v-if="hasQuery" type="button" class="clear" :aria-label="t('product.meetings.clearSearch')" @click="clearSearch">×</button><button class="search" :disabled="searching">{{searching?t('product.meetings.searching'):t('product.meetings.search')}}</button></form>

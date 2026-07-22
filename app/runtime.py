@@ -5,6 +5,7 @@ import asyncio
 import importlib.metadata
 import inspect
 import shutil
+import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Optional
@@ -147,17 +148,24 @@ class InferenceCoordinator:
     @asynccontextmanager
     async def offline(self):
         async with self._condition:
-            starved = False  # 是否已过饿死超时,过则放宽进入条件
+            starved = False
+            wait_start = None
             while True:
-                # 常规条件:无运行 + 无 live 排队(让 live 优先)
                 if not self._active and self._live_waiters == 0:
                     break
-                # 已饿死:放宽为仅"无运行",并置 starving 标志让 live 谦让
                 if starved and not self._active:
                     break
-                # 单层 wait_for 超时:仅首次用饿死超时,标记 starved 后转为
-                # 无超时等待 live 释放(避免 wait_for 嵌套 wait_for 的锁陷阱)
-                timeout = self._OFFLINE_STARVE_TIMEOUT if not starved else None
+                if not starved:
+                    if wait_start is None:
+                        wait_start = time.monotonic()
+                    remaining = self._OFFLINE_STARVE_TIMEOUT - (time.monotonic() - wait_start)
+                    if remaining <= 0:
+                        starved = True
+                        self._offline_starving = True
+                        continue
+                    timeout = remaining
+                else:
+                    timeout = None
                 try:
                     await asyncio.wait_for(self._condition.wait(), timeout=timeout)
                 except asyncio.TimeoutError:

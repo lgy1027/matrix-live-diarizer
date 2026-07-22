@@ -150,6 +150,7 @@ def resolve_silero_vad(name: str = "silero-vad") -> str:
     category = "vad"
     dst = local_path(category, name)
     if has_local(category, name):
+        logger.info("[MODELS] VAD %s 已就绪(本地)", name)
         return dst
     cached = _torch_hub_vad_cache()
     if cached:
@@ -157,6 +158,7 @@ def resolve_silero_vad(name: str = "silero-vad") -> str:
         _copytree(cached, dst)
         return dst
     # 缓存没有 → 在线下载到 torch hub,再 copy
+    logger.info("[MODELS] VAD 本地与缓存均无,联网下载 silero-vad")
     import torch
     _ensure_parent(category, name)
     # 下载到默认 torch hub 缓存后取出路径

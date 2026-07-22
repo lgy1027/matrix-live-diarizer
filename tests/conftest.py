@@ -194,6 +194,8 @@ _ENV_KEYS_TO_ISOLATE = (
     "ASR_ENGINE",
     "ASR_DEVICE",
     "ASR_LOAD_TIMEOUT_SEC",
+    "JWT_SECRET",
+    "UPLOAD_CHUNK_DURATION",
 )
 # 注意:MODELS_DIR 不在此列表 — 它由 conftest 模块级 setdefault 设到 tmp,
 # 常驻所有测试,让 resolve_modelscope 写 tmp 而非仓库 ./models/。

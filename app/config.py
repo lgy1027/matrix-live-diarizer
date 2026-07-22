@@ -136,6 +136,7 @@ class AudioConfig:
             heartbeat_interval=get_env_int("HEARTBEAT_INTERVAL", 10),
             heartbeat_timeout=get_env_int("HEARTBEAT_TIMEOUT", 30),
             max_buffer_seconds=get_env_int("AUDIO_MAX_BUFFER_SECONDS", 10),
+            max_segment_seconds=get_env_int("AUDIO_MAX_SEGMENT_SECONDS", 5),
             upload_max_duration=get_env_int("UPLOAD_MAX_DURATION", 3600),
             upload_chunk_duration=get_env_int("UPLOAD_CHUNK_DURATION", 30),
             upload_overlap_duration=get_env_float("UPLOAD_OVERLAP_DURATION", 1.0),

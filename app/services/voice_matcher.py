@@ -4,6 +4,11 @@ from dataclasses import dataclass
 
 import numpy as np
 
+# "强样本"判定门槛:质量分与有效语音时长同时达标才算一个可用于自动匹配的样本。
+# people.py 注册声样后用同一对常量算 auto_match_eligible,与下方 strong_sample 统计保持一致。
+STRONG_SAMPLE_MIN_QUALITY = 0.6
+STRONG_SAMPLE_MIN_SPEECH_SEC = 3.0
+
 
 @dataclass(frozen=True)
 class IdentityMatchDecision:
@@ -114,8 +119,8 @@ def classify_person_match(
                 sample.get("person_id") != person_id
                 or sample.get("model_id") != model_id
                 or not sample.get("embedding")
-                or float(sample.get("quality_score") or 0.0) < 0.6
-                or float(sample.get("effective_speech_sec") or 0.0) < 3.0
+                or float(sample.get("quality_score") or 0.0) < STRONG_SAMPLE_MIN_QUALITY
+                or float(sample.get("effective_speech_sec") or 0.0) < STRONG_SAMPLE_MIN_SPEECH_SEC
             ):
                 continue
             known = np.frombuffer(sample["embedding"], dtype=np.float32)

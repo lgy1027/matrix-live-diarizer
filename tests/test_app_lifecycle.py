@@ -33,6 +33,10 @@ def test_shutdown_stops_jobs_before_releasing_engines():
         async def close(self):
             events.append("engines")
 
-    asyncio.run(_shutdown_application(Runner(), Runtime()))
+    class App:
+        class state:
+            ws_background_tasks = None
+
+    asyncio.run(_shutdown_application(Runner(), Runtime(), App()))
 
     assert events == ["jobs", "engines"]

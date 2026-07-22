@@ -22,6 +22,7 @@ WHITELIST_PATHS = (
     "/health",
     "/ready",
     "/v1/models",
+    "/v1/engines",
     "/v1/llm/status",
 )
 
@@ -57,7 +58,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         local_bypass = (
             config.deployment.mode == "local"
             and config.auth.local_auth_disabled
-            and client_host in {"127.0.0.1", "::1", "localhost"}
+            and client_host in {"127.0.0.1", "::1"}
             and is_trusted_browser_origin(
                 request.headers.get("origin"), config.cors.allowed_origins
             )

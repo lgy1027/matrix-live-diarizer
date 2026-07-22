@@ -5,58 +5,12 @@ import asyncio
 import logging
 import threading
 import time
-import os
 import scipy.signal as signal
-from modelscope import snapshot_download as _ms_snapshot_download
 from qwen_asr import Qwen3ASRModel
 from engine.asr.contracts import empty_asr_result, make_asr_result
 from app.services.model_resolver import resolve_hf, resolve_silero_vad
-# ModelScope CDN 限速常见(实测 8MB/s,1.75GB 约 4 分钟),易触发 90s 超时。
-# 兜底:ModelScope 失败 → 改用 HF 本地缓存(前提:已下完,~/.cache/huggingface/hub/)
-from huggingface_hub import snapshot_download as _hf_snapshot_download
-HF_LOCAL_FILES_ONLY = True
-QWEN_ASR_REVISION = os.environ.get(
-    "QWEN_ASR_REVISION", "4ce9cc728b473a5aedbe7b6e1ea45646316824dc"
-)
-QWEN_ALIGNER_REVISION = os.environ.get(
-    "QWEN_ALIGNER_REVISION", "cf1c50164ea3ac48240d12bef5ead74aee0720cc"
-)
-SILERO_VAD_REVISION = os.environ.get(
-    "SILERO_VAD_REVISION", "76e3dc408eb2a5c655c34e230d2d5459b4439daa"
-)
-# Qwen3ForcedAligner 是可选依赖(给字级时间戳用),只在 _load_with_fallback 内 lazy import
-# 这样测试 mock qwen_asr 简单 module 时(无 __path__)不会在 import 阶段就失败
-
-
-def snapshot_download(repo_id: str, **kwargs):
-    """下载 model,优先 ModelScope,失败 fallback HF 本地缓存"""
-    try:
-        return _ms_snapshot_download(repo_id, **kwargs)
-    except Exception as e:
-        logger = __import__('logging').getLogger("ASR_Engine")
-        logger.warning(f"[ASR] ModelScope 下载失败 ({type(e).__name__}),fallback HF 本地缓存")
-        # HF fallback 必须 local_files_only=True,避免网络问题
-        return _hf_snapshot_download(repo_id, local_files_only=HF_LOCAL_FILES_ONLY)
 
 logger = logging.getLogger("ASR_Engine")
-
-# 扩展的幻觉词列表
-HALLUCINATIONS = [
-    # 常见幻觉词
-    "谢谢。", "大家再见。", "字幕由", "感谢收看",
-    "谢谢大家。", "谢谢观看。", "再见。", "拜拜。",
-    # 无意义输出
-    "嗯。", "啊。", "呃。", "这个。",
-    # 节目相关幻觉
-    "出品人", "制片人", "监制", "导演", "编剧",
-    "主演", "特邀演员", "友情出演", "联合出品",
-    "本节目由", "本视频由", "本片由",
-    # 平台水印
-    "西瓜视频", "抖音", "快手", "B站", "哔哩哔哩",
-    "YouTube", "优酷", "爱奇艺", "腾讯视频",
-    # 重复模式
-    "。。", "，，", "、、", "。。。",
-]
 
 
 class ASREngine:
@@ -120,13 +74,14 @@ class ASREngine:
                         return
                     # 本地优先:模型物化到 models/asr/Qwen3-ASR-0.6B/(复用 HF 缓存,
                     # 不重新下载),from_pretrained 接受本地目录路径。
-                    # 注意:不传 revision — QWEN_ASR_REVISION 是 modelscope 的 hash,
-                    # HF 上不存在;HF 走 main 分支,从已缓存物化即可。
+                    # resolve_hf 不传 revision,modelscope 的 revision hash 在 HF 上
+                    # 不存在,统一走 main 分支从已缓存物化。
                     model_dir = resolve_hf(
                         "Qwen/Qwen3-ASR-0.6B", "asr", "Qwen3-ASR-0.6B",
                     )
                     if result["cancelled"]:
                         return
+                    logger.info("[ASR] 从本地路径加载 Qwen3-ASR: %s", model_dir)
                     dtype = torch.bfloat16 if device in ("cuda", "mps") else torch.float32
                     # 可选加载 forced aligner (Qwen3-ForcedAligner-0.6B, ~600MB)
                     # forced_aligner 传本地路径字符串(与原 snapshot_download 返回值一致,
@@ -140,6 +95,7 @@ class ASREngine:
                             "Qwen/Qwen3-ForcedAligner-0.6B", "asr",
                             "Qwen3-ForcedAligner-0.6B",
                         )
+                        logger.info("[ASR] forced aligner 本地路径: %s", forced_aligner_id)
                     if result["cancelled"]:
                         return
                     result["asr_model"] = Qwen3ASRModel.from_pretrained(
@@ -327,32 +283,6 @@ class ASREngine:
         except Exception as e:
             logger.warning(f"[VAD] 分段异常: {e}")
             return [audio_data] if len(audio_data) >= 1600 else []
-
-    def filter_hallucinations(self, text: str) -> str:
-        """过滤幻觉词"""
-        if not text:
-            return ""
-        
-        # 移除幻觉词
-        for h in HALLUCINATIONS:
-            text = text.replace(h, "")
-        
-        # 移除重复标点
-        import re
-        text = re.sub(r'[。]{2,}', '。', text)
-        text = re.sub(r'[，]{2,}', '，', text)
-        text = re.sub(r'[、]{2,}', '、', text)
-        
-        # 过滤过短结果（可能是噪声）
-        text = text.strip()
-        if len(text) < 2:
-            return ""
-        
-        # 过滤纯标点
-        if all(c in '，。！？、；：""''（）【】…—' for c in text):
-            return ""
-        
-        return text
 
     def evaluate_audio_quality(self, audio_data: np.ndarray) -> dict:
         """评估音频质量"""

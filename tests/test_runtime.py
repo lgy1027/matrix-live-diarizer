@@ -162,3 +162,48 @@ def test_audio_dependency_diagnostics_detects_mismatched_torch_family(monkeypatc
 
     assert report.compatible is False
     assert "torchaudio" in report.message
+
+
+def test_offline_starves_even_with_repeated_notify_under_threshold():
+    """offline 在被 live 持续占用(_active=True, live_waiters>0)时,即使期间
+    反复 notify_all(模拟 _release),累计等待超过 _OFFLINE_STARVE_TIMEOUT 后
+    仍应置 _offline_starving。notify 不应让 offline 永远等不够超时。
+
+    本测试驱动 offline() 协程并手动 notify,避免真实并发协程的时序抖动。
+    """
+    async def scenario():
+        coordinator = InferenceCoordinator()
+        coordinator._OFFLINE_STARVE_TIMEOUT = 0.04  # 40ms
+        coordinator._active = True
+        coordinator._live_waiters = 1
+
+        offline_done = asyncio.Event()
+
+        async def waiting_offline():
+            async with coordinator.offline():
+                pass
+            offline_done.set()
+
+        offline_task = asyncio.create_task(waiting_offline())
+        await asyncio.sleep(0)  # 让 offline 进入 wait
+
+        # 反复 notify(模拟 live _release),但绝不释放 _active,offline 进不去
+        for _ in range(20):
+            await asyncio.sleep(0.005)  # 5ms
+            async with coordinator._condition:
+                coordinator._condition.notify_all()
+
+        # 累计约 100ms >> 40ms,应已 starved
+        await asyncio.sleep(0.02)
+        assert coordinator._offline_starving is True, (
+            "反复 notify 不应让 offline 无限等待,累计 > 超时应置 starving"
+        )
+
+        # 释放:offline 进入
+        coordinator._active = False
+        coordinator._live_waiters = 0
+        async with coordinator._condition:
+            coordinator._condition.notify_all()
+        await asyncio.wait_for(offline_done.wait(), timeout=1.0)
+
+    asyncio.run(scenario())

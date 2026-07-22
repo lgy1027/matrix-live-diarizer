@@ -31,6 +31,7 @@ class ERes2NetEngine(BaseSpeakerEngine):
             model_id, "speaker", "eres2net",
             revision=ENGINE_CONFIG["eres2net"]["model_revision"],
         )
+        logger.info("[ERes2NetV2] 从本地路径加载: %s", local)
         self.model = Model.from_pretrained(local, device='cpu')
         self.model.eval()
         self.chroma_client = chromadb.EphemeralClient(

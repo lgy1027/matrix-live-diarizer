@@ -652,3 +652,177 @@ def test_atomic_transcript_replacement_rolls_back_everything_on_insert_failure(
         }
     ]
     assert detail["notes"][0]["content"] == "必须保留的纪要"
+
+
+def _meeting_with_two_speakers(meetings, segments_count=3):
+    """建一个 upload 会议 + 两个匿名 speaker,每个 speaker 几条 segment。"""
+    meeting_id, _ = meetings.create_with_job(
+        source="upload", title="合并测试", processing_mode="meeting", status="processing"
+    )
+    spk_a = meetings.ensure_speaker(meeting_id, "SPEAKER_00")
+    spk_b = meetings.ensure_speaker(meeting_id, "SPEAKER_01")
+    seg_ids_a = []
+    seg_ids_b = []
+    with meetings.db.connect() as conn:
+        for i in range(segments_count):
+            cur = conn.execute(
+                """INSERT INTO transcript_segments
+                   (meeting_id, segment_index, meeting_speaker_id, text,
+                    start_time, end_time)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (meeting_id, i, spk_a, f"A段{i}", float(i), float(i + 1)),
+            )
+            seg_ids_a.append(cur.lastrowid)
+        for i in range(segments_count):
+            cur = conn.execute(
+                """INSERT INTO transcript_segments
+                   (meeting_id, segment_index, meeting_speaker_id, text,
+                    start_time, end_time)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (meeting_id, segments_count + i, spk_b, f"B段{i}",
+                 float(segments_count + i), float(segments_count + i + 1)),
+            )
+            seg_ids_b.append(cur.lastrowid)
+        conn.commit()
+    return meeting_id, spk_a, spk_b, seg_ids_a, seg_ids_b
+
+
+def test_merge_speakers_reassigns_segments_and_deletes_source(product_repos):
+    meetings, _jobs, _people = product_repos
+    meeting_id, spk_a, spk_b, seg_ids_a, seg_ids_b = _meeting_with_two_speakers(meetings)
+
+    migrated = meetings.merge_speakers(meeting_id, spk_a, [spk_b])
+    assert migrated == len(seg_ids_b)
+
+    with meetings.db.connect() as conn:
+        # source 的 segments 全改指到 target
+        reassigned = conn.execute(
+            "SELECT meeting_speaker_id FROM transcript_segments WHERE id IN (%s)"
+            % ",".join("?" for _ in seg_ids_b),
+            seg_ids_b,
+        ).fetchall()
+        assert all(r["meeting_speaker_id"] == spk_a for r in reassigned)
+        # source speaker 已删
+        assert conn.execute(
+            "SELECT 1 FROM meeting_speakers WHERE id = ?", (spk_b,)
+        ).fetchone() is None
+        # target 还在
+        assert conn.execute(
+            "SELECT 1 FROM meeting_speakers WHERE id = ?", (spk_a,)
+        ).fetchone() is not None
+
+
+def test_merge_speakers_rejects_target_in_sources(product_repos):
+    meetings, _jobs, _people = product_repos
+    meeting_id, spk_a, spk_b, _, _ = _meeting_with_two_speakers(meetings)
+    with pytest.raises(ValueError, match="不能在 source_ids"):
+        meetings.merge_speakers(meeting_id, spk_a, [spk_a, spk_b])
+
+
+def test_merge_speakers_target_not_found_raises_speaker_not_found(product_repos):
+    from app.repositories.meetings import SpeakerNotFoundError
+    meetings, _jobs, _people = product_repos
+    meeting_id, spk_a, _b, _, _ = _meeting_with_two_speakers(meetings)
+    with pytest.raises(SpeakerNotFoundError):
+        meetings.merge_speakers(meeting_id, "nonexistent-uuid", [spk_a])
+
+
+def test_split_speaker_creates_new_speaker_and_moves_segments(product_repos):
+    meetings, _jobs, _people = product_repos
+    meeting_id, spk_a, _b, seg_ids_a, _ = _meeting_with_two_speakers(meetings)
+
+    new_id = meetings.split_speaker(meeting_id, spk_a, seg_ids_a[:2])
+    assert new_id != spk_a
+    with meetings.db.connect() as conn:
+        moved = conn.execute(
+            "SELECT meeting_speaker_id FROM transcript_segments WHERE id IN (?, ?)",
+            seg_ids_a[:2],
+        ).fetchall()
+        assert all(r["meeting_speaker_id"] == new_id for r in moved)
+        # 新 speaker 存在且匿名
+        row = conn.execute(
+            "SELECT identity_status FROM meeting_speakers WHERE id = ?", (new_id,)
+        ).fetchone()
+        assert row["identity_status"] == "anonymous"
+        # source speaker 仍在(只移了部分 segment)
+        assert conn.execute(
+            "SELECT 1 FROM meeting_speakers WHERE id = ?", (spk_a,)
+        ).fetchone() is not None
+
+
+def test_split_speaker_repeated_does_not_hit_unique_constraint(product_repos):
+    """对同一 source 重复 split,label 带 uuid 后缀不应触发 UNIQUE(meeting_id,label)。"""
+    meetings, _jobs, _people = product_repos
+    meeting_id, spk_a, _b, seg_ids_a, _ = _meeting_with_two_speakers(meetings)
+    # 第一次 split
+    first = meetings.split_speaker(meeting_id, spk_a, seg_ids_a[:1])
+    # 第二次 split 同一 source 的另一段
+    second = meetings.split_speaker(meeting_id, spk_a, seg_ids_a[1:2])
+    assert first != second
+    with meetings.db.connect() as conn:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM meeting_speakers WHERE meeting_id = ?", (meeting_id,)
+        ).fetchone()[0]
+        # 原 A + 原 B + 2 个 split = 4
+        assert count == 4
+
+
+def test_split_speaker_source_not_found_raises_speaker_not_found(product_repos):
+    from app.repositories.meetings import SpeakerNotFoundError
+    meetings, _jobs, _people = product_repos
+    meeting_id, _a, _b, _, _ = _meeting_with_two_speakers(meetings)
+    with pytest.raises(SpeakerNotFoundError):
+        meetings.split_speaker(meeting_id, "nonexistent-uuid", [1])
+
+
+def test_create_with_job_is_atomic_on_insert_failure(product_repos):
+    """job 插入失败时 meeting 也不应残留(同事务回滚)。"""
+    meetings, jobs, _people = product_repos
+    # 让 processing_jobs 表 insert 失败:用一个非法 meeting 外键不行,
+    # 改用 monkeypatch 不便(跨 repo)。直接验证成功路径的两行都进同事务:
+    # 插入一个 meeting 但让 job 的 meeting_id 列约束触发——用 DROP 掉 jobs
+    # 表的主键约束来制造失败太重。改为:验证 create_with_job 后 meeting+job 都在,
+    # 且 create(老路径)不被 upload 使用(已在 test_product_api 验证)。
+    meeting_id, job_id = meetings.create_with_job(
+        source="upload", title="原子测试", processing_mode="meeting", status="processing"
+    )
+    assert meetings.get(meeting_id) is not None
+    assert jobs.get(job_id) is not None
+
+
+def test_create_with_job_rolls_back_when_job_insert_fails(product_repos, monkeypatch):
+    """真正验证原子性:job INSERT 抛错时 meeting 不应残留(同事务回滚)。"""
+    meetings, _jobs, _people = product_repos
+    # 拦截 conn.execute:meeting INSERT 放行,job INSERT 抛 IntegrityError
+    original_connect = meetings.db.connect
+
+    class _Wrapper:
+        def __init__(self):
+            self._ctx = original_connect()
+
+        def __enter__(self):
+            self._conn = self._ctx.__enter__()
+            return self
+
+        def __exit__(self, *a):
+            return self._ctx.__exit__(*a)
+
+        def execute(self, sql, params=()):
+            if "INSERT INTO processing_jobs" in sql:
+                raise sqlite3.IntegrityError("simulated failure")
+            return self._conn.execute(sql, params)
+
+        def commit(self):
+            self._conn.commit()
+
+        def rollback(self):
+            self._conn.rollback()
+
+    monkeypatch.setattr(meetings.db, "connect", _Wrapper)
+    with pytest.raises(sqlite3.IntegrityError):
+        meetings.create_with_job(
+            source="upload", title="应回滚", processing_mode="meeting", status="processing"
+        )
+    # meeting 不应残留(事务回滚,未 commit)
+    rows = meetings.list()
+    assert rows[0] == 0

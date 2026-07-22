@@ -16,21 +16,33 @@ export function rms(f32: Float32Array): number {
 
 // bug-fix: 部分浏览器(Mac Chrome)忽略 AudioContext({sampleRate:16000}) 强制参数,
 // 实际采样率是 48000/44100。后端按 16kHz 解析样本,音频会被加速 3 倍播放,ASR 识别率暴跌。
-// 这里做实时降采样:48k→16k 简单抽取(语音 < 4kHz,奈奎斯特 8k 够用,16k 更没问题)。
-// 简单低通(平均 3 个相邻样本)减少 aliasing,但保留语音可懂度优先,不做 SRC 精度优化。
+// 这里做实时降采样到 16k:整数比例(48k→16k=3)走窗口均值低通抽取;
+// 非整数比例(44.1k→16k=2.75625)用线性插值,避免尾部越界静音。
 export function resampleTo16k(input: Float32Array, fromRate: number): Float32Array {
   if (fromRate === 16000 || fromRate < 16000) return input  // 已是 16k 或更低,直接返回
   const ratio = fromRate / 16000
   const outLen = Math.floor(input.length / ratio)
   const out = new Float32Array(outLen)
-  // 简单低通 + 抽取:每 3 个样本均值后取 1 个(Mac 48k → 16k)
-  const group = Math.round(ratio)
+  if (outLen === 0) return out
+  if (Number.isInteger(ratio)) {
+    const step = ratio
+    for (let i = 0; i < outLen; i++) {
+      const start = i * step
+      const end = Math.min(start + step, input.length)
+      let sum = 0
+      for (let j = start; j < end; j++) sum += input[j]
+      out[i] = sum / (end - start)
+    }
+    return out
+  }
+  // 非整数比例:线性插值;末点 clamp 到最后一个输入样本,避免 idx+1 越界。
   for (let i = 0; i < outLen; i++) {
-    let sum = 0
-    const start = i * group
-    const end = Math.min(start + group, input.length)
-    for (let j = start; j < end; j++) sum += input[j]
-    out[i] = sum / (end - start)
+    const srcPos = i * ratio
+    const idx = Math.floor(srcPos)
+    const frac = srcPos - idx
+    const a = input[idx]
+    const b = idx + 1 < input.length ? input[idx + 1] : a
+    out[i] = a + (b - a) * frac
   }
   return out
 }

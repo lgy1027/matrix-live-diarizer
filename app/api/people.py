@@ -17,6 +17,10 @@ from app.services.audio_files import (
     persist_upload,
 )
 from app.services.voice_sample_quality import assess_voice_sample
+from app.services.voice_matcher import (
+    STRONG_SAMPLE_MIN_QUALITY,
+    STRONG_SAMPLE_MIN_SPEECH_SEC,
+)
 from app.repositories.people import DuplicateVoiceSampleError
 from engine.speaker.speaker_factory import embedding_model_id
 
@@ -112,13 +116,15 @@ async def add_voice_sample(
     target = voice_dir / f"{uuid.uuid4().hex}{extension}"
     try:
         try:
-            await persist_upload(
+            size = await persist_upload(
                 file,
                 target,
                 max_bytes=min(MAX_AUDIO_FILE_SIZE, 50 * 1024 * 1024),
             )
         except UploadTooLargeError:
             raise HTTPException(status_code=400, detail="声音样本超过 50MB") from None
+        if size == 0:
+            raise HTTPException(status_code=400, detail="声音样本为空")
         import librosa
 
         audio, _ = await asyncio.to_thread(
@@ -130,6 +136,11 @@ async def add_voice_sample(
             raise HTTPException(status_code=400, detail="声音样本至少需要 2 秒")
         assessment = assess_voice_sample(audio, config.audio.sample_rate)
         if assessment.effective_speech_sec < 2:
+            if assessment.effective_speech_sec < 0.5:
+                raise HTTPException(
+                    status_code=422,
+                    detail="未检测到人声，请确认麦克风已连接并对着说话后重录",
+                )
             raise HTTPException(status_code=422, detail="有效语音不足 2 秒，请减少静音后重试")
         if assessment.quality_score < 0.35:
             detail = "样本疑似为噪声，请使用清晰人声重新录制" if assessment.noise_like else (
@@ -191,6 +202,11 @@ async def add_voice_sample(
             "effective_speech_sec": assessment.effective_speech_sec,
             "model_id": model_name,
             "embedding_status": "ready",
+            # 是否达到自动匹配门槛,与 voice_matcher 的 strong_sample 判定一致
+            "auto_match_eligible": (
+                quality_score >= STRONG_SAMPLE_MIN_QUALITY
+                and assessment.effective_speech_sec >= STRONG_SAMPLE_MIN_SPEECH_SEC
+            ),
         }
     except Exception:
         target.unlink(missing_ok=True)

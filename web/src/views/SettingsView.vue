@@ -468,12 +468,6 @@ onMounted(load)
       <div class="l"><EmText :text="t('view.settings.about')" /></div>
       <div class="about">
         <span>{{ t('settings.about.text') }}</span><br />
-        <span>
-          {{ t('settings.about.enginesLabel') || 'Diarization:' }}
-          <a href="#">{{ t('settings.about.engines', Object.keys(engines).length) }}</a>
-          <span class="sep">·</span>
-          <a href="#">{{ t('settings.about.asrEngines', asrList.length) || `${asrList.length} ASR engines` }}</a>
-        </span><br />
         <a href="/docs" target="_blank" rel="noopener">{{ t('settings.about.docs') }}</a>
         &nbsp;·&nbsp;
         <a href="/health" target="_blank" rel="noopener">Health →</a>
@@ -689,4 +683,16 @@ onMounted(load)
 .about a { color: var(--amber); }
 .about a:hover { text-decoration: underline; }
 .empty { padding: 30px; text-align: center; color: var(--text-3); font-family: var(--mono); font-size: 12px; }
+
+/* 移动端适配:主网格原本固定三列(1.6fr 1fr 1fr)且无断点,手机上引擎卡片被挤、内容看不全。
+   窄屏改单列堆叠,取消 engine/asr-row 的跨行(span 2 在单列无意义且会留空行),
+   LLM 表单两列改单列,外边距收紧。eng-row 内部 auto/1fr/auto 不动(外层单列后已有足够宽度)。 */
+@media (max-width: 900px) {
+  .set-wrap { padding: 24px 20px 32px; }
+  .set-grid { grid-template-columns: 1fr; }
+  .set-grid .set-row.engine-row,
+  .set-grid .set-row.asr-row { grid-row: auto; }
+  .llm-form { grid-template-columns: 1fr; }
+  .llm-detail .help { margin-left: 0; }
+}
 </style>

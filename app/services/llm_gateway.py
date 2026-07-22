@@ -343,13 +343,14 @@ class LLMGateway:
         if not pinned_ip:
             yield
             return
+        # 锁跨整个请求持有,串行化所有 LLM 调用。这是有意的:socket.getaddrinfo
+        # 是进程全局 patch,并发 install/remove 会让一个请求的 pin 被另一个
+        # 请求的 remove 失效,破坏 DNS rebinding 防御。并发退化换正确性。
         await asyncio.to_thread(cls._socket_patch_lock.acquire)
         try:
             cls._install_socket_patch(url, pinned_ip)
             yield
         finally:
-            # 只移除本 context 注册的 host,不动其他并发 context 的 pin;
-            # map 空了才还原 getaddrinfo。
             cls._remove_socket_pin(url)
             cls._socket_patch_lock.release()
 
