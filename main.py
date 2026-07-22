@@ -17,7 +17,8 @@ from app.config import config
 app = create_app()
 
 # 可选 HTTPS:跨机器访问时浏览器要求安全上下文(否则 http://IP 下 getUserMedia 被禁)。
-# 设 ENABLE_HTTPS=1 用 data/ssl/ 自签证书直接跑 HTTPS(证书用 scripts/gen_self_cert.sh 生成)。
+# 设 ENABLE_HTTPS=1 用 data/ssl/ 自签证书直接跑 HTTPS
+# (证书用 python scripts/gen_self_cert.py 跨平台生成)。
 # 本机 127.0.0.1 访问不需要,默认不开。
 _ssl_kwargs: dict = {}
 if os.environ.get("ENABLE_HTTPS", "").lower() in ("1", "true", "yes"):
@@ -26,7 +27,10 @@ if os.environ.get("ENABLE_HTTPS", "").lower() in ("1", "true", "yes"):
     cert = Path(os.environ.get("SSL_CERT", "data/ssl/selfsigned.crt"))
     key = Path(os.environ.get("SSL_KEY", "data/ssl/selfsigned.key"))
     if not cert.is_file() or not key.is_file():
-        print(f"[main] ENABLE_HTTPS=1 但证书不存在,请先运行: bash scripts/gen_self_cert.sh")
+        print(
+            "[main] ENABLE_HTTPS=1 但证书不存在,请先运行: "
+            "python scripts/gen_self_cert.py"
+        )
         sys.exit(1)
     _ssl_kwargs = {"ssl_certfile": str(cert), "ssl_keyfile": str(key)}
 

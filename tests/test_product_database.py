@@ -355,6 +355,39 @@ def test_deleting_meeting_removes_managed_audio_and_children(product_repos, tmp_
     assert jobs.get(job_id) is None
 
 
+def test_schema_init_repairs_inconsistent_transcript_search_index(tmp_path):
+    path = tmp_path / "fts-repair.db"
+    db = Database(str(path), create_default_admin=False)
+    db.init_schema()
+    meetings = MeetingRepository(db)
+    meeting_id = meetings.create(source="upload", title="索引修复")
+    meetings.insert_segment(
+        meeting_id,
+        segment_index=0,
+        text="需要重新建立全文索引",
+        start_time=0,
+        end_time=1,
+    )
+
+    with db.connect() as conn:
+        conn.execute(
+            "INSERT INTO transcript_segments_fts(transcript_segments_fts) "
+            "VALUES('delete-all')"
+        )
+        conn.commit()
+    with db.connect() as conn:
+        with pytest.raises(sqlite3.DatabaseError, match="malformed"):
+            conn.execute(
+                "INSERT INTO transcript_segments_fts(transcript_segments_fts, rank) "
+                "VALUES('integrity-check', 1)"
+            )
+
+    db.init_schema()
+
+    assert meetings.search("重新建立")
+    assert meetings.delete(meeting_id)
+
+
 def test_person_deletion_removes_samples_but_preserves_meeting(product_repos, tmp_path):
     meetings, _jobs, people = product_repos
     meeting_id = meetings.create(source="live", title="实时会议")

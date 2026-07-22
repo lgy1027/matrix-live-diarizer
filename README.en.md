@@ -142,14 +142,29 @@ Use `HOST=0.0.0.0` and `DEPLOYMENT_MODE=lan` only when explicitly deploying to a
 
 The default `HOST=127.0.0.1` listens only on localhost — use `http://127.0.0.1:8000` locally; microphone and upload work normally.
 
-To access from **another machine** (uploading recordings and in-browser recording both need the mic), HTTPS is required: browsers disable `getUserMedia` on `http://IP` non-localhost origins. The server can run HTTPS directly with a self-signed cert:
+To access from **another machine** (uploading recordings and in-browser recording both need the mic), HTTPS is required: browsers disable `getUserMedia` on `http://IP` non-localhost origins. The server can run HTTPS directly with a self-signed certificate. Install OpenSSL first, then use the cross-platform Python script to include the host's IPv4 addresses in the certificate.
+
+macOS / Linux:
 
 ```bash
-bash scripts/gen_self_cert.sh              # generate data/ssl/ self-signed cert (includes host IP)
+python3 scripts/gen_self_cert.py
 ENABLE_HTTPS=1 HOST=0.0.0.0 \
 DEPLOYMENT_MODE=lan ALLOWED_ORIGINS=https://<host-IP>:8000 \
 python main.py
 ```
+
+Windows PowerShell:
+
+```powershell
+python .\scripts\gen_self_cert.py
+$env:ENABLE_HTTPS = "1"
+$env:HOST = "0.0.0.0"
+$env:DEPLOYMENT_MODE = "lan"
+$env:ALLOWED_ORIGINS = "https://<host-IP>:8000"
+python main.py
+```
+
+The backward-compatible `bash scripts/gen_self_cert.sh` entry point remains available on macOS and Linux.
 
 Open `https://<host-IP>:8000`; accept the "not secure" warning on first visit.
 

@@ -2,6 +2,7 @@
 import asyncio
 import logging
 import os
+import sys
 from functools import partial
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,6 +24,40 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger("Matrix_Core")
+
+
+def _is_expected_windows_transport_reset(context: dict) -> bool:
+    """Match the harmless Proactor callback error emitted after a peer reset."""
+    error = context.get("exception")
+    error_code = getattr(error, "winerror", None) or getattr(error, "errno", None)
+    return (
+        isinstance(error, ConnectionResetError)
+        and error_code == 10054
+        and "_ProactorBasePipeTransport._call_connection_lost"
+        in str(context.get("message", ""))
+    )
+
+
+def _configure_event_loop() -> None:
+    """Suppress only the known Windows Proactor connection-close log noise."""
+    if sys.platform != "win32":
+        return
+    loop = asyncio.get_running_loop()
+    previous_handler = loop.get_exception_handler()
+    if getattr(previous_handler, "_matrix_transport_reset_filter", False):
+        return
+
+    def handle_exception(current_loop, context) -> None:
+        if _is_expected_windows_transport_reset(context):
+            logger.debug("忽略客户端已重置的 Windows HTTPS 连接")
+            return
+        if previous_handler is not None:
+            previous_handler(current_loop, context)
+        else:
+            current_loop.default_exception_handler(context)
+
+    handle_exception._matrix_transport_reset_filter = True
+    loop.set_exception_handler(handle_exception)
 
 
 def _register_lifecycle_handlers(app: FastAPI, *, startup, shutdown) -> None:
@@ -214,6 +249,7 @@ def _init_engines(app: FastAPI):
     app.state.meeting_processor = meeting_processor
     job_runner = JobRunner(job_repo, meeting_repo, meeting_processor)
     app.state.job_runner = job_runner
+    app.router.on_startup.append(_configure_event_loop)
     _register_lifecycle_handlers(
         app,
         startup=job_runner.start,

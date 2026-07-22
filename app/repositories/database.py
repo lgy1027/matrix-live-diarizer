@@ -185,6 +185,7 @@ class Database:
             conn.executescript(SCHEMA_SQL)
             self._validate_schema_version(conn)
             self._validate_required_columns(conn)
+            self._repair_transcript_search_index(conn)
             # 默认 admin 账户初始化(空表时插入)
             if self.create_default_admin:
                 self._ensure_default_admin(conn)
@@ -328,6 +329,44 @@ class Database:
             raise RuntimeError(
                 "数据库结构缺少声音样本质量字段；请重启以完成 alpha schema 升级。"
             )
+
+    @staticmethod
+    def _transcript_search_index_is_valid(conn: sqlite3.Connection) -> bool:
+        """Check that the external-content FTS index matches transcript rows."""
+        conn.execute("SAVEPOINT transcript_fts_check")
+        try:
+            conn.execute(
+                "INSERT INTO transcript_segments_fts(transcript_segments_fts, rank) "
+                "VALUES('integrity-check', 1)"
+            )
+        except sqlite3.DatabaseError as exc:
+            conn.execute("ROLLBACK TO transcript_fts_check")
+            conn.execute("RELEASE transcript_fts_check")
+            if "malformed" not in str(exc).lower():
+                raise
+            return False
+        conn.execute("RELEASE transcript_fts_check")
+        return True
+
+    def _repair_transcript_search_index(self, conn: sqlite3.Connection) -> None:
+        """Rebuild only the derived FTS index when legacy data is inconsistent."""
+        if self._transcript_search_index_is_valid(conn):
+            return
+
+        quick_check = [row[0] for row in conn.execute("PRAGMA quick_check").fetchall()]
+        if quick_check != ["ok"]:
+            raise sqlite3.DatabaseError(
+                "SQLite 主数据库完整性检查失败: " + "; ".join(quick_check)
+            )
+
+        logger.warning("[DB] 文稿全文索引不一致，正在从原始文稿安全重建")
+        conn.execute(
+            "INSERT INTO transcript_segments_fts(transcript_segments_fts) "
+            "VALUES('rebuild')"
+        )
+        if not self._transcript_search_index_is_valid(conn):
+            raise sqlite3.DatabaseError("文稿全文索引重建后仍未通过完整性检查")
+        logger.info("[DB] 文稿全文索引重建完成")
 
     def _init_schema_on_conn(self, conn: sqlite3.Connection) -> None:
         """在已开启的连接上建表(兜底用)"""

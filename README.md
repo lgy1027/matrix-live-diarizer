@@ -142,14 +142,29 @@ LLM_ENABLED=false
 
 默认 `HOST=127.0.0.1` 只监听本机——本机用 `http://127.0.0.1:8000` 即可，麦克风和上传都正常。
 
-要从**别的机器**访问（上传录音、在线录音都要麦克风），浏览器要求 HTTPS：`http://IP` 非 localhost 下 `getUserMedia` 会被禁用。项目支持让服务直接跑 HTTPS 自签证书：
+要从**别的机器**访问（上传录音、在线录音都要麦克风），浏览器要求 HTTPS：`http://IP` 非 localhost 下 `getUserMedia` 会被禁用。项目支持让服务直接跑 HTTPS 自签证书。请先确保系统已安装 OpenSSL，随后使用项目的跨平台 Python 脚本生成包含本机 IPv4 地址的证书。
+
+macOS / Linux：
 
 ```bash
-bash scripts/gen_self_cert.sh              # 生成 data/ssl/ 自签证书（含本机 IP）
+python3 scripts/gen_self_cert.py
 ENABLE_HTTPS=1 HOST=0.0.0.0 \
 DEPLOYMENT_MODE=lan ALLOWED_ORIGINS=https://<本机IP>:8000 \
 python main.py
 ```
+
+Windows PowerShell：
+
+```powershell
+python .\scripts\gen_self_cert.py
+$env:ENABLE_HTTPS = "1"
+$env:HOST = "0.0.0.0"
+$env:DEPLOYMENT_MODE = "lan"
+$env:ALLOWED_ORIGINS = "https://<本机IP>:8000"
+python main.py
+```
+
+macOS / Linux 也可以继续使用兼容入口 `bash scripts/gen_self_cert.sh`。
 
 浏览器访问 `https://<本机IP>:8000`，首次提示"不安全"点"高级 → 继续前往"即可。
 
