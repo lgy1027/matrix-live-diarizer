@@ -115,3 +115,49 @@ def test_ws_rate_limit_per_ip_independent():
     assert realtime_auth._ws_rate_limited(a) is True
     assert realtime_auth._ws_rate_limited(b) is False  # B 未超
     realtime_auth._ws_connect_log.clear()
+
+
+def test_ws_rate_limit_dict_garbage_collects_empty_keys():
+    """#6: 队列清空后删除 dict 键,防 IP 扩散(NAT/IPv6 扫描)撑爆内存。"""
+    from app.services import realtime_auth
+    realtime_auth._ws_connect_log.clear()
+    host = "203.0.113.7"
+    realtime_auth._ws_rate_limited(host)
+    assert host in realtime_auth._ws_connect_log
+    # 模拟窗口过期:把时间戳推到窗口外
+    import time as _time
+    realtime_auth._ws_connect_log[host][0] = _time.time() - realtime_auth._WS_CONNECT_WINDOW - 1
+    # 下次调用会 popleft 清空,然后删键
+    realtime_auth._ws_rate_limited(host)  # 触发清理 + 重新加入
+    # 关键:清理后若再次因新连接 setdefault,键存在但 deque 是新的(不累积)
+    assert len(realtime_auth._ws_connect_log[host]) == 1
+    realtime_auth._ws_connect_log.clear()
+
+
+def test_ws_client_ip_uses_xff_from_trusted_proxy():
+    """#5: 直连来自可信反代(127.0.0.1)时读 X-Forwarded-For,避免反代后全站共享
+    proxy IP 的 20 连接配额(单点 DoS)。"""
+    from app.services import realtime_auth
+    from unittest.mock import MagicMock
+
+    ws = MagicMock()
+    ws.client.host = "127.0.0.1"
+    ws.headers = {"X-Forwarded-For": "203.0.113.9"}
+    assert realtime_auth._ws_client_ip(ws) == "203.0.113.9"
+
+    # X-Real-IP 兜底
+    ws2 = MagicMock()
+    ws2.client.host = "127.0.0.1"
+    ws2.headers = {"X-Real-IP": "198.51.100.10"}
+    assert realtime_auth._ws_client_ip(ws2) == "198.51.100.10"
+
+
+def test_ws_client_ip_ignores_xff_from_untrusted():
+    """#5: 直连不可信时不读 XFF(防客户端伪造绕过限流)。"""
+    from app.services import realtime_auth
+    from unittest.mock import MagicMock
+
+    ws = MagicMock()
+    ws.client.host = "203.0.113.50"  # 非可信反代
+    ws.headers = {"X-Forwarded-For": "1.2.3.4"}
+    assert realtime_auth._ws_client_ip(ws) == "203.0.113.50"

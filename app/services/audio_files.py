@@ -7,7 +7,6 @@ import numpy as np
 
 
 ALLOWED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".m4a", ".flac", ".ogg", ".aac", ".wma"}
-MAX_AUDIO_FILE_SIZE = 500 * 1024 * 1024
 UPLOAD_READ_SIZE = 1024 * 1024
 
 

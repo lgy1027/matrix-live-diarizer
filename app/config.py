@@ -108,6 +108,7 @@ class AudioConfig:
     upload_max_duration: int = 3600     # 1小时
     upload_chunk_duration: int = 30     # 30秒分段
     upload_overlap_duration: float = 1.0
+    upload_max_file_size: int = 500 * 1024 * 1024  # 500MB 单文件大小上限
     # ASR 设备：auto | cpu | mps | cuda
     # auto 优先 mps，加载超时后回退 cpu
     # ASR 引擎：qwen3 | sensevoice | paraformer | paraformer_streaming
@@ -140,6 +141,7 @@ class AudioConfig:
             upload_max_duration=get_env_int("UPLOAD_MAX_DURATION", 3600),
             upload_chunk_duration=get_env_int("UPLOAD_CHUNK_DURATION", 30),
             upload_overlap_duration=get_env_float("UPLOAD_OVERLAP_DURATION", 1.0),
+            upload_max_file_size=_upload_max_file_size(),
             asr_engine=get_env_str("ASR_ENGINE", "qwen3").lower(),
             asr_device=get_env_str("ASR_DEVICE", "auto").lower(),
             asr_load_timeout_sec=get_env_int("ASR_LOAD_TIMEOUT_SEC", 90),
@@ -147,7 +149,23 @@ class AudioConfig:
         )
 
 
-@dataclass  
+def _upload_max_file_size() -> int:
+    """读取 UPLOAD_MAX_FILE_SIZE_MB,校验非负后转字节。
+
+    0 或负数无意义(0 字节上限等于禁用上传),记 warning 并回退默认 500MB,
+    避免运维笔误导致所有上传被拒且错误文案出现"0MB/-5MB"。
+    """
+    mb = get_env_int("UPLOAD_MAX_FILE_SIZE_MB", 500)
+    if mb <= 0:
+        import logging
+        logging.getLogger("Matrix_Core").warning(
+            "UPLOAD_MAX_FILE_SIZE_MB=%d 无效(必须 >0),回退默认 500MB", mb
+        )
+        mb = 500
+    return mb * 1024 * 1024
+
+
+@dataclass
 class SpeakerConfig:
     """声纹引擎: campplus / eres2net / wespeaker"""
     engine_type: str = "campplus"
