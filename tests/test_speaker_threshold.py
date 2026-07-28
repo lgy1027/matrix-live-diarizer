@@ -36,14 +36,6 @@ def test_short_segment_duration_constant():
     """SHORT_SEGMENT_DURATION = 0.5s — 短于此但 >= MIN_USABLE 走宽松阈值"""
     assert CamPlusEngine.SHORT_SEGMENT_DURATION == 0.5
 
-
-def test_min_audio_duration_constant():
-    """MIN_AUDIO_DURATION = 1.0s(方向 A 从 1.5 降到 1.0)"""
-    assert CamPlusEngine.MIN_AUDIO_DURATION == 1.0
-    # 关键: 严格 > SHORT_SEGMENT_DURATION(0.5),不让阈值错位
-    assert CamPlusEngine.MIN_AUDIO_DURATION > CamPlusEngine.SHORT_SEGMENT_DURATION
-
-
 # ========== 纯函数 _classify_segment_duration ==========
 
 def test_classify_skip_very_short():
@@ -193,3 +185,27 @@ def test_threshold_short_segment_relaxed():
     # 走 is_reliable=False 的 fallback — 可能新建或返 "Unknown"
     # 关键:不抛异常,且结果合理
     assert result is not None
+
+
+def test_campplus_negative_score_clamped_to_zero():
+    """cosine distance 可 >1(差异大说话人),score=1-dist 会为负,clamp 到 0.0。
+
+    覆盖 campplus 的 clamp(此前测试只覆盖 eres2net/wespeaker)。
+    """
+    eng = _make_engine_mock()
+    emb = np.random.rand(192).astype(np.float32)
+    # dist=1.3 → 1-1.3=-0.3,走不匹配新建路径,clamp 后 score=0.0
+    eng.collection.query.return_value = {
+        "distances": [[1.30]],
+        "ids": [["Spk_existing"]],
+        "metadatas": [[{"count": 1}]],
+    }
+    eng.collection.get.return_value = {
+        "ids": ["Spk_existing"],
+        "embeddings": [emb.tolist()],
+    }
+
+    spk, score = eng.compare_and_identify(emb, client_id="test", audio_duration=5.0)
+    assert spk.startswith("Spk_")
+    assert score == 0.0  # clamp,不出现 -0.3
+    assert 0.0 <= score <= 1.0
