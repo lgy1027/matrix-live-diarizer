@@ -9,7 +9,7 @@ A local-first meeting transcription tool · no data egress by default · upload 
 [![Node](https://img.shields.io/badge/node-20%2B-green.svg)](https://nodejs.org/)
 ![Status](https://img.shields.io/badge/status-beta-blue.svg)
 
-[中文](README.md) · [Usage](docs/USAGE.md) · [Privacy](docs/PRIVACY.md) · [Security](docs/SECURITY.md) · [API](docs/API.md) · [Models](docs/MODELS.md)
+[中文](README.md) · [Usage](docs/USAGE.md) · [LLM setup](docs/LLM_SETUP.md) · [Privacy](docs/PRIVACY.md) · [Security](docs/SECURITY.md) · [API](docs/API.md) · [Models](docs/MODELS.md)
 
 </div>
 
@@ -39,6 +39,7 @@ Two paths in one tool, covering a meeting from live capture to post-meeting proc
 - Diarization creates anonymous speaker labels. Strict voice matches may display an enrolled person automatically, but this is not identity authentication and is always correctable.
 - Without pyannote, transcription can finish but remains anonymous and reports diarization as unavailable.
 - Data stays local by default and LLM features are off. Initial model downloads require network access.
+- macOS MPS occasionally deadlocks; a load timeout (default 90s) falls back to CPU. The service is single-process (`WORKERS=1`) — do not raise it.
 - Public hosting and regulated medical or legal workflows are outside the supported scope.
 
 > **About the name**: live and upload are two entry points to the same meeting, both first-class. Multi-speaker diarization happens in upload mode; live mode identifies enrolled speakers via voiceprints and does not perform multi-speaker diarization.
@@ -84,11 +85,9 @@ Two paths in one tool, covering a meeting from live capture to post-meeting proc
 2. VAD auto-segments, ASR transcribes in real time, and enrolled speakers are voice-identified as they speak.
 3. On stop, segments are persisted and enter the same correction / minutes / export flow as uploaded meetings.
 
-Person voice samples are optional auxiliary matching info. The system only auto-displays a name when the engine is compatible, the speech and samples are sufficient, and strict thresholds pass; otherwise it stays a suggestion or anonymous.
-
 ## Quick start
 
-Python 3.10–3.12, Node.js 20+, and FFmpeg are required. The first run downloads models.
+Python 3.10–3.12 (CI only verifies 3.12), Node.js 20+, and FFmpeg are required. The first start downloads ~1.8GB of models and may take tens of minutes depending on network speed; once downloaded, it can run permanently offline when LLM is off.
 
 ```bash
 git clone https://github.com/lgy1027/matrix-live-diarizer.git
@@ -105,15 +104,13 @@ Open `http://127.0.0.1:8000`. The default server binds only to loopback. Default
 
 Interfaces are stabilizing during the beta period, but may still change; do not use this project as the only copy or as a long-term archive.
 
-Docker CPU builds are available with `docker compose up --build`, but CPU inference may be slow.
+Docker (CPU only):
 
 ```bash
 docker compose up --build
 ```
 
-Maintainers publishing their own multi-architecture image can use `docker buildx build --platform linux/amd64,linux/arm64 ...`; each target must be tested separately and the project does not currently promise prebuilt images.
-
-CUDA users should use a local Python environment and follow PyTorch's official install instructions for the matching version.
+CUDA users should use a local Python environment and follow PyTorch's official install instructions for the matching version (the Docker image is CPU only). Multi-architecture images require maintainers to run `docker buildx build --platform linux/amd64,linux/arm64` and verify each target; no prebuilt images are promised.
 
 ## Optional configuration
 
@@ -128,7 +125,7 @@ HF_TOKEN=
 LLM_ENABLED=false
 ```
 
-`ASR_ENGINE` can be `qwen3` / `sensevoice` / `paraformer` / `paraformer_streaming`; `SPEAKER_ENGINE` can be `campplus` / `eres2net` / `wespeaker`. See `.env.example` for the rest.
+`ASR_ENGINE` can be `qwen3` / `sensevoice` / `paraformer` / `paraformer_streaming`; `SPEAKER_ENGINE` can be `campplus` / `eres2net` / `wespeaker`. See `.env.example` for the rest. To enable LLM features (summary / action items / minutes), see the [LLM setup guide](docs/LLM_SETUP.md).
 
 **When `HF_TOKEN` is needed** (leave empty otherwise):
 
@@ -189,7 +186,7 @@ cd web
 npm run check:i18n
 npm run typecheck
 npm run build
-npm audit --omit=dev
+npm audit --omit=dev --audit-level=high
 ```
 
 A real-model smoke test downloads and loads large models, so it is not run in normal CI: `MATRIX_TEST_REAL_DEPENDENCIES=1 pytest tests/test_smoke_boot.py -v`. On PowerShell run `$env:MATRIX_TEST_REAL_DEPENDENCIES="1"` first.

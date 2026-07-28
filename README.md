@@ -9,7 +9,7 @@
 [![Node](https://img.shields.io/badge/node-20%2B-green.svg)](https://nodejs.org/)
 ![Status](https://img.shields.io/badge/status-beta-blue.svg)
 
-[English](README.en.md) · [使用说明](docs/USAGE.md) · [隐私](docs/PRIVACY.md) · [安全](docs/SECURITY.md) · [API](docs/API.md) · [模型](docs/MODELS.md)
+[English](README.en.md) · [使用说明](docs/USAGE.md) · [LLM 配置](docs/LLM_SETUP.md) · [隐私](docs/PRIVACY.md) · [安全](docs/SECURITY.md) · [API](docs/API.md) · [模型](docs/MODELS.md)
 
 </div>
 
@@ -39,6 +39,7 @@
 - "说话人分离"只产生匿名标签；声纹匹配可按严格规则自动显示已登记人物，但不构成身份认证，且可随时纠正。
 - 未配置 pyannote 时，会议仍可完成转写，但保持匿名并明确提示分离不可用。
 - 默认数据保存在本机且不启用 LLM。首次启动下载模型时会联网。
+- macOS MPS 偶发死锁，加载超时（默认 90s）会自动回退 CPU；服务为单进程（`WORKERS=1`），请勿调高。
 - 不建议直接暴露到公网，也不承诺满足医疗、法律等受监管行业要求。
 
 > **关于项目名**：实时与上传是同一会议的两个入口，均为一等功能。多人说话人分离（diarization）在上传模式完成；实时模式靠声纹识别已登记说话人，不做多人分离。
@@ -84,11 +85,9 @@
 2. VAD 自动切段、ASR 实时转写、声纹识别已登记说话人，边说边出。
 3. 结束录音后落段入库，与上传会议进入同一套校正/纪要/导出流程。
 
-人物声音样本属于可选的辅助匹配信息。系统仅在模型兼容、语音和样本充足、严格阈值通过时自动显示姓名；其他情况保持建议或匿名。
-
 ## 快速开始
 
-要求 Python 3.10–3.12、Node.js 20+ 和 FFmpeg。首次运行需要下载模型。
+要求 Python 3.10–3.12（CI 仅验证 3.12）、Node.js 20+ 和 FFmpeg。首次启动会下载约 1.8GB 模型，视网速可能需要数十分钟；下载完成后 LLM 关闭时可永久断网运行。
 
 ```bash
 git clone https://github.com/lgy1027/matrix-live-diarizer.git
@@ -111,9 +110,7 @@ Docker CPU 版：
 docker compose up --build
 ```
 
-需要自行发布多架构镜像时可使用 `docker buildx build --platform linux/amd64,linux/arm64 ...`；发布者必须分别验证目标架构，项目目前不提供预构建镜像承诺。
-
-CPU 推理可能较慢；CUDA 用户建议使用本地 Python 环境并按 PyTorch 官方说明安装对应版本。
+CUDA 用户建议使用本地 Python 环境并按 PyTorch 官方说明安装对应版本（Docker 镜像仅含 CPU）。多架构镜像需发布者自行 `docker buildx build --platform linux/amd64,linux/arm64` 并验证目标架构，项目不提供预构建镜像承诺。
 
 ## 可选配置
 
@@ -128,7 +125,7 @@ HF_TOKEN=
 LLM_ENABLED=false
 ```
 
-`ASR_ENGINE` 可选 `qwen3` / `sensevoice` / `paraformer` / `paraformer_streaming`；`SPEAKER_ENGINE` 可选 `campplus` / `eres2net` / `wespeaker`。其余项见 `.env.example`。
+`ASR_ENGINE` 可选 `qwen3` / `sensevoice` / `paraformer` / `paraformer_streaming`；`SPEAKER_ENGINE` 可选 `campplus` / `eres2net` / `wespeaker`。其余项见 `.env.example`。启用 LLM（摘要/行动项/纪要）见 [LLM 配置指南](docs/LLM_SETUP.md)。
 
 **何时需要 `HF_TOKEN`**（其余情况留空即可）：
 
@@ -189,7 +186,7 @@ cd web
 npm run check:i18n
 npm run typecheck
 npm run build
-npm audit --omit=dev
+npm audit --omit=dev --audit-level=high
 ```
 
 真实模型冒烟测试会下载并加载大模型，因此常规 CI 默认不运行：`MATRIX_TEST_REAL_DEPENDENCIES=1 pytest tests/test_smoke_boot.py -v`。PowerShell 请先执行 `$env:MATRIX_TEST_REAL_DEPENDENCIES="1"`。

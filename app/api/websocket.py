@@ -152,6 +152,11 @@ SILENCE_THRESHOLD_FRAMES = 8  # 3 帧(384ms)太短,自然换气就切碎;8 帧�
 LOUD_RMS_THRESHOLD = 0.005    # 0.015 偏高,某些帧瞬时 RMS 跌到它就被判静音,buffer 累积不起来。
 SILENCE_THRESHOLD_SECONDS = 0.8
 PROCESSOR_DRAIN_TIMEOUT_SECONDS = 30.0
+# deferred processor 的最终放弃上限。WS 硬断连后,卡在推理中的 processor 用 shield
+# 等待(to_thread 无法取消)。若推理真死锁(MPS),shield 会无限等 → 推理槽被永久
+# 占有,新 live() 冻死。设上限:超时后放弃等待(接受可能的槽泄漏),解除活锁。
+# 远大于单次 ASR 推理正常耗时,只在真死锁时触发。
+DEFERRED_PROCESSOR_TIMEOUT_SECONDS = 120.0
 
 
 def classify_frame(chunk: np.ndarray, asr_engine_obj) -> bool:
@@ -475,7 +480,10 @@ async def audio_processor(
 
     # Once receiving stops, drain every frame the server already accepted.
     while not stop_event.is_set() or not queue.empty():
-        # 跳帧策略(纯函数 compute_skip_count 算要跳的帧数)
+        # drain(接收停止后清余量)跳帧。当前默认配置 queue_size=8 < keep_recent=25,
+        # compute_skip_count 恒返 0(逐帧处理剩余,不丢)—— drain 时全保留是合理的
+        # (停止后无新帧,积压已停)。实时防积压靠 enqueue 端 QueueFull 丢最旧帧。
+        # 若调大 AUDIO_QUEUE_SIZE 超过 keep_recent,此处会在 drain 时跳帧保最近。
         queue_size = queue.qsize()
         frames_to_skip = compute_skip_count(queue_size, skip_frame_threshold)
         for _ in range(frames_to_skip):
@@ -496,7 +504,7 @@ async def audio_processor(
                     segment_start_time=speech_start_sample / sample_rate,
                 )
                 speech_buffer = np.array([], dtype=np.float32)
-                # Bug(M4): 超时只是"队列暂空",flush 出去的文本已入库。
+                # 超时只是"队列暂空",flush 出去的文本已入库。
                 # 若在此重置 last_full_text,下一段 ASR 返回的含旧前缀文本
                 # (0.5s 上下文 / 短间隔重复语气词)会因基准清空被当增量重发
                 # → 前端看到重复字。故超时 flush 后保留 last_full_text 作为
@@ -700,14 +708,11 @@ async def _process_speech_segment(
     # run_asr 现在返回 dict {text, words}
     full_text = asr_result["text"]
     seg_words = asr_result["words"]
-    # diag: 打印 ASR 原始输出 + 音频时长,排查"很多话没转录"问题
-    logger.info(f"[DIAG-ASR] {client_id} duration={audio_duration:.2f}s full_text={full_text!r}")
 
     # Bug-fix: Qwen3-ASR 对 < 0.5s 短音频返回空(模型没足够上下文),
     # 用户"一直在说话"但每段 VAD 切到 0.13s 时全返空 → 前端没字幕
     # 改成 < 0.5s 直接跳过 ASR,等累积够长再识别(用户感受延迟略增,但每段都能稳定识别)
     if audio_duration < 0.5 and not (full_text and full_text.strip()):
-        logger.info(f"[DIAG-ASR] {client_id} 跳过短段 {audio_duration:.2f}s (< 0.5s, Qwen3-ASR 返空)")
         return
 
     embedding = None
@@ -721,7 +726,7 @@ async def _process_speech_segment(
     # 处理识别结果
     if full_text and full_text.strip():
         # 调用 compare_and_identify，传递音频时长
-        # 整改: 用 client_id 当默认名 (SessionContext 没 session_title 属性, 简化用 client_id)
+        # SessionContext 无 session_title 属性,用 client_id 当默认名
         meeting_id = await _ensure_live_meeting(websocket, client_id)
         speaker_scope = meeting_id
         websocket._speaker_scope = speaker_scope
@@ -764,9 +769,6 @@ async def _process_speech_segment(
             else:
                 result_start = segment_start_time + native_start
                 result_end = segment_start_time + native_end
-        # diag: 看增量合并把什么过滤掉了
-        if not incr_text:
-            logger.info(f"[DIAG-ASR] {client_id} 增量合并返回空 (full_text={full_text!r} last={ctx.last_full_text!r})")
 
         if incr_text:
             try:
@@ -841,16 +843,35 @@ async def _finalize_live_session(websocket: WebSocket, client_id: str) -> None:
             pass
     speaker_scope = getattr(websocket, "_speaker_scope", None)
     if speaker_scope:
-        _engine_snapshot(websocket).speaker.cleanup_client(speaker_scope)
+        # finalize 不能因清理异常中断:cleanup_client 内部已 catch delete 异常,
+        # 这里再加一层兜底,防 _engine_snapshot/speaker 访问偶发抛导致 finalize
+        # 中断(后续 WS 流程崩在收尾)。
+        try:
+            _engine_snapshot(websocket).speaker.cleanup_client(speaker_scope)
+        except Exception:
+            logger.warning("[WS] 清理说话人资源异常 %s", speaker_scope, exc_info=True)
     logger.info("[WS] 用户 %s 连接已释放", client_id)
 
 
 async def _finish_deferred_processor(
     websocket: WebSocket, client_id: str, processor_task: asyncio.Task
 ) -> None:
-    """Keep ownership of an uninterruptible model call without blocking WS close."""
+    """Keep ownership of an uninterruptible model call without blocking WS close.
+
+    shield 等 processor 完成(to_thread 模型调用无法取消),但加最终超时:
+    超时后放弃等待,解除"推理死锁 → 槽永久占有 → 新 live 冻死"的活锁。
+    超时仍触发 finalize(会议状态收尾),槽泄漏的极端情况由进程重启回收。
+    """
     try:
-        await asyncio.shield(processor_task)
+        await asyncio.wait_for(
+            asyncio.shield(processor_task),
+            timeout=DEFERRED_PROCESSOR_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        logger.warning(
+            "[WS] %s deferred processor %.0fs 未完成,放弃等待(可能推理死锁,槽需重启回收)",
+            client_id, DEFERRED_PROCESSOR_TIMEOUT_SECONDS,
+        )
     except Exception:
         logger.warning("[WS] %s 后台 processor 异常", client_id, exc_info=True)
     finally:

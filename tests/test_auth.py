@@ -642,3 +642,37 @@ def test_login_with_bad_password_returns_401_not_422(monkeypatch):
     # 错类型
     r = client.post("/v1/auth/login", json={"username": 123, "password": []})
     assert r.status_code == 401
+
+
+def test_unauthorized_response_carries_cors_for_trusted_origin(monkeypatch):
+    """#7: 跨源 401 带 Access-Control-Allow-Origin,否则浏览器当网络错误,
+    前端无法区分未登录、不能自动跳登录页。"""
+    import importlib
+    tmp = tempfile.mkdtemp()
+    monkeypatch.setenv("STORAGE_DB_PATH", os.path.join(tmp, "test.db"))
+    monkeypatch.setenv("JWT_SECRET", "test-secret-for-unit-tests")
+    monkeypatch.setenv("DEPLOYMENT_MODE", "lan")
+    monkeypatch.setenv("ALLOWED_ORIGINS", "https://app.example")
+    cfg = importlib.import_module("app.config"); importlib.reload(cfg)
+    app_mod = importlib.import_module("app"); importlib.reload(app_mod)
+    client = TestClient(app_mod.create_app(), client=("203.0.113.5", 50000))
+    # 无 token + 可信 Origin → 401 带 ACAO
+    r = client.get("/v1/meetings", headers={"Origin": "https://app.example"})
+    assert r.status_code == 401
+    assert r.headers.get("access-control-allow-origin") == "https://app.example"
+
+
+def test_unauthorized_response_no_cors_for_untrusted_origin(monkeypatch):
+    """#7: 不可信 Origin 的 401 不带 ACAO,防给任意 Origin 回填造成跨源信息泄露。"""
+    import importlib
+    tmp = tempfile.mkdtemp()
+    monkeypatch.setenv("STORAGE_DB_PATH", os.path.join(tmp, "test.db"))
+    monkeypatch.setenv("JWT_SECRET", "test-secret-for-unit-tests")
+    monkeypatch.setenv("DEPLOYMENT_MODE", "lan")
+    monkeypatch.setenv("ALLOWED_ORIGINS", "https://app.example")
+    cfg = importlib.import_module("app.config"); importlib.reload(cfg)
+    app_mod = importlib.import_module("app"); importlib.reload(app_mod)
+    client = TestClient(app_mod.create_app(), client=("203.0.113.5", 50000))
+    r = client.get("/v1/meetings", headers={"Origin": "https://evil.example"})
+    assert r.status_code == 401
+    assert r.headers.get("access-control-allow-origin") is None

@@ -33,12 +33,8 @@ class CamPlusEngine(BaseSpeakerEngine):
     # 4-10s 段,0.3s 以下 embedding 无意义。
     MIN_USABLE_DURATION = 0.3
 
-    # 最小音频长度(秒)用于"可靠"声纹提取(走正常阈值 vs 宽松阈值)
-    # 方向 A: 从 1.5 降到 1.0,让更多段参与声纹(但仍要求有起码质量)
-    MIN_AUDIO_DURATION = 1.0
-
-    # 短于这个时长的段(<MIN_AUDIO 但 >=MIN_USABLE)走更宽容阈值
-    # 让短段能合并到现有 Spk(避免空库期碎片)
+    # 短于这个时长的段(<SHORT_SEGMENT_DURATION)走更宽容阈值,
+    # 让短段能合并到现有 Spk(避免空库期碎片)。>= 此值视为 reliable 走正常阈值。
     SHORT_SEGMENT_DURATION = 0.5
 
     @staticmethod
@@ -91,7 +87,7 @@ class CamPlusEngine(BaseSpeakerEngine):
     def extract_feat(self, audio_data: np.ndarray) -> Tuple[np.ndarray, float]:
         """提取声纹特征，返回 (embedding, 音频时长)"""
         try:
-            audio_duration = len(audio_data) / 16000.0  # 假设16kHz采样率
+            audio_duration = len(audio_data) / 16000.0  # 采样率固定 16kHz
             
             tensor = torch.FloatTensor(audio_data).unsqueeze(0)
             with torch.no_grad():
@@ -288,7 +284,7 @@ class CamPlusEngine(BaseSpeakerEngine):
                 self.collection.update(**update_kwargs)
                 logger.info(f"[MATCHED] {best_id} (sim: {1-best_dist:.0%}, samples={best_count+1}, "
                             f"{'updated' if embedding_to_save is not None else 'locked'})")
-                return best_id, float(1 - best_dist)
+                return best_id, float(max(0.0, min(1.0, 1 - best_dist)))
             
             # 边缘匹配：需要已有足够样本
             if best_dist < high_thresh and best_count >= MIN_SAMPLES_FOR_EDGE:
@@ -305,7 +301,7 @@ class CamPlusEngine(BaseSpeakerEngine):
                 update_kwargs["embeddings"] = [new_mean.tolist()]
                 self.collection.update(**update_kwargs)
                 logger.info(f"[EDGE OK] {best_id} (sim: {1-best_dist:.0%}, samples={best_count+1})")
-                return best_id, float(1 - best_dist)
+                return best_id, float(max(0.0, min(1.0, 1 - best_dist)))
             
             # 检查第二、第三候选（可能有更好的匹配）
             for i in range(1, min(3, len(results['distances'][0]))):
@@ -328,7 +324,7 @@ class CamPlusEngine(BaseSpeakerEngine):
                     update_kwargs["embeddings"] = [new_mean.tolist()]
                     self.collection.update(**update_kwargs)
                     logger.info(f"[ALT MATCH] {spk_id} (sim: {1-dist:.0%}, samples={count+1})")
-                    return spk_id, float(1 - dist)
+                    return spk_id, float(max(0.0, min(1.0, 1 - dist)))
             
             if best_dist < high_thresh:
                 logger.debug(f"[EDGE?] Dist={best_dist:.4f} 样本不足({best_count}<{MIN_SAMPLES_FOR_EDGE})")
@@ -339,7 +335,7 @@ class CamPlusEngine(BaseSpeakerEngine):
             best_dist = None
 
         # 注册新说话人（但可能还在待确认状态）
-        # 整改: new_id 改用 uuid hex 8 字符, 短且唯一; 同时支持 default_name (从 filename 或 client_id 推)
+        # new_id 用 uuid hex 8 字符:短且唯一,不泄漏 client_id
         import uuid as _uuid
         new_id = f"Spk_{_uuid.uuid4().hex[:8]}"
         # 默认名: 优先用 default_name, 否则剥 client_id 当 fallback
@@ -355,7 +351,7 @@ class CamPlusEngine(BaseSpeakerEngine):
                     "count": 1,
                     "last_update": time.time(),
                     "confirmed": True,
-                    "name": display_name,  # 整改: 写入默认显示名
+                    "name": display_name,
                 }],
             )
             logger.info(f"[NEW SPEAKER] {new_id} name={display_name!r} (reliable, {audio_duration:.1f}s)")
@@ -382,5 +378,5 @@ class CamPlusEngine(BaseSpeakerEngine):
 
         # 新建 Spk 时的置信度:有候选时返 (1 - best_dist) 反映"与最近候选的相似度"
         # 无候选(空 DB)时返 0.0;前端可据此判断"是否值得展示给用户看"
-        new_speaker_score = float(1 - best_dist) if best_dist is not None else 0.0
+        new_speaker_score = float(max(0.0, min(1.0, 1 - best_dist))) if best_dist is not None else 0.0
         return new_id, new_speaker_score

@@ -36,19 +36,22 @@ class SessionContext:
             self.last_output_text = new_text
             return new_text
         
-        # 情况1：新文本包含旧文本（ASR 补全了之前的内容）
+        # 情况1：新文本包含旧文本（ASR 补全了之前的内容）。
+        # 仅当旧文本位于新文本前缀位置(start_idx==0)才算"补全",提取尾部增量;
+        # 若旧文本出现在新文本中间或后缀位置,那是新内容嵌入了旧词,不算补全,
+        # 不能返回空串否则会丢掉整段 —— fallthrough 到情况3/新内容输出。
         if norm_old in norm_new:
-            # 找到旧文本在新文本中的位置
             start_idx = norm_new.find(norm_old)
-            # 计算新增部分的起始位置（在标准化文本中）
-            new_start_in_norm = start_idx + len(norm_old)
-            # 在原始文本中找到对应位置
-            incremental = self._extract_after_position(new_text, new_start_in_norm)
-            if incremental and normalize(incremental):
-                self.last_full_text = new_text
-                self.last_output_text = incremental
-                return incremental
-            return ""
+            if start_idx == 0:
+                # 旧文本是新文本前缀,计算新增部分的起始位置(标准化文本中)
+                new_start_in_norm = start_idx + len(norm_old)
+                incremental = self._extract_after_position(new_text, new_start_in_norm)
+                if incremental and normalize(incremental):
+                    self.last_full_text = new_text
+                    self.last_output_text = incremental
+                    return incremental
+                return ""
+            # 非前缀包含,落入下方"无精确前缀重叠"分支,按新内容处理
         
         # 情况2：旧文本包含新文本（可能是 ASR 修正或重复）
         if norm_new in norm_old:

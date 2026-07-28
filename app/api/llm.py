@@ -11,12 +11,41 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.config import LLMConfig
 from app.services.llm_gateway import LLMGateway, EndpointSecurityError
-from app.services.llm_prompts import PROMPTS
+from app.services.llm_prompts import DEFAULT_PROMPTS
 
 logger = logging.getLogger("Matrix_LLM_API")
 
 router = APIRouter()
 
+# settings_repo 存 prompt 的 key 前缀:llm.prompt.<op>
+LLM_PROMPT_KEY_PREFIX = "llm.prompt."
+
+
+def _load_prompts(settings_repo) -> dict:
+    """从 settings_repo 加载用户自定义 prompt,缺失的用 DEFAULT_PROMPTS 补。
+
+    每次 _get_gateway 调用(每请求)读一次,保证 PUT 后立即可见,无内存副本陈旧。
+    """
+    prompts = dict(DEFAULT_PROMPTS)
+    if settings_repo is None:
+        return prompts
+    for op in DEFAULT_PROMPTS:
+        v = settings_repo.get(f"{LLM_PROMPT_KEY_PREFIX}{op}")
+        if v:
+            prompts[op] = v
+    return prompts
+
+
+def _save_prompts(settings_repo, payload: dict) -> dict:
+    """写 settings_repo 持久化 prompt(重启不丢)。校验字段后逐 key 写入。"""
+    for k, v in payload.items():
+        if not isinstance(v, str):
+            raise HTTPException(
+                status_code=422,
+                detail=f"prompt 字段 {k} 必须是字符串,实际 {type(v).__name__}",
+            )
+        settings_repo.set(f"{LLM_PROMPT_KEY_PREFIX}{k}", v)
+    return _load_prompts(settings_repo)
 
 LLM_SETTING_PREFIX = "llm."
 
@@ -111,11 +140,12 @@ def _effective_llm_cfg(repo=None) -> tuple[LLMConfig, str, Optional[str]]:
 
 def _get_gateway(request: Request) -> LLMGateway:
     cfg, _source, _provider = _effective_llm_cfg(_settings_repo(request))
+    prompts = _load_prompts(_settings_repo(request))
     try:
-        return LLMGateway(cfg)
+        return LLMGateway(cfg, prompts)
     except EndpointSecurityError as e:
         logger.warning(f"[LLM] endpoint 安全校验失败,降级本地摘要: {e}")
-        return LLMGateway(replace(cfg, enabled=False))
+        return LLMGateway(replace(cfg, enabled=False), prompts)
 
 
 def _is_authenticated_status_request(request: Request) -> bool:
@@ -201,7 +231,7 @@ async def llm_status(request: Request):
         "has_api_key": bool(cfg.api_key),
         "config_source": source,
         "error": probe["error"] if probe else None,
-        "fallback": "extractive-textrank",  # 🆕 永远可用的兜底
+        "fallback": "extractive-textrank",
     }
 
 
@@ -299,22 +329,23 @@ def update_llm_settings(body: LLMSettingsRequest, request: Request):
 
 
 @router.get("/v1/llm/prompts")
-def get_prompts():
-    return PROMPTS
+def get_prompts(request: Request):
+    # 从 settings_repo 读(含用户改的),缺失用 DEFAULT_PROMPTS。不返模块常量。
+    return _load_prompts(_settings_repo(request))
 
 @router.put("/v1/llm/prompts")
 def update_prompts(payload: dict, request: Request):
-    client = request.client
-    if not client or client.host not in ("127.0.0.1", "::1", "localhost"):
-        raise HTTPException(status_code=403, detail="仅本机可修改 prompts")
+    # 与 PUT /v1/llm/settings 一致:只走 JWT 鉴权中间件,不额外限制本机 host
+    # (支持 LAN 部署从别的机器登录后修改 prompt)。
     # 未知字段直接 422,不静默丢弃
-    unknown_keys = set(payload.keys()) - set(PROMPTS.keys())
+    unknown_keys = set(payload.keys()) - set(DEFAULT_PROMPTS.keys())
     if unknown_keys:
         raise HTTPException(
             status_code=422,
-            detail=f"未知 prompt 字段: {sorted(unknown_keys)};合法字段: {sorted(PROMPTS.keys())}",
+            detail=f"未知 prompt 字段: {sorted(unknown_keys)};合法字段: {sorted(DEFAULT_PROMPTS.keys())}",
         )
-    for k, v in payload.items():
-        if k in PROMPTS:
-            PROMPTS[k] = v
-    return PROMPTS
+    repo = _settings_repo(request)
+    if repo is None:
+        raise HTTPException(status_code=500, detail="settings 仓库不可用")
+    # 持久化到 settings_repo(重启不丢);_get_gateway 下次请求自动读最新。
+    return _save_prompts(repo, payload)

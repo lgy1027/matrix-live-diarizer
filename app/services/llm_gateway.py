@@ -3,7 +3,6 @@ import ipaddress
 import socket
 import asyncio
 import logging
-import threading
 from contextlib import asynccontextmanager
 from typing import Optional
 from urllib.parse import urlparse
@@ -65,10 +64,10 @@ def _validate_endpoint(
 
 
 class LLMGateway:
-    def __init__(self, config: LLMConfig):
-        # DNS rebinding 防御基准:host 与 IP 在 init 时刻就被校验并缓存,
-        # 请求时 pin 到这个缓存 IP(而非每次重新解析),并在请求前再校验
-        # 一次当前 DNS 与缓存一致(见 _assert_no_dns_rebind)。
+    def __init__(self, config: LLMConfig, prompts: Optional[dict] = None):
+        # prompts: 用户在 settings 页改过的 prompt(从 settings_repo 加载)。
+        # None 时用 DEFAULT_PROMPTS。探活等不涉及 prompt 的调用可不传。
+        self._prompts = dict(prompts) if prompts else None  # 延迟加载默认
         self._pinned_host: Optional[str] = None
         self._pinned_ip: Optional[str] = None
         if config.enabled:
@@ -166,6 +165,7 @@ class LLMGateway:
 
         source 取值:
         - "llm" — LLM 真实生成(mock 模式也算)
+        - "llm-mapreduce" — 超长转写分块摘要再合并(N+1 次 LLM 调用)
         - "extractive-fallback" — 降级到本地 TextRank
 
         触发降级的情况:
@@ -173,6 +173,13 @@ class LLMGateway:
         - LLM 不可用 (probe 失败)
         - LLM 调用抛 LLMUnavailableError / LLMTimeoutError / LLMModelMissingError
         - LLM mock 模式 (mock_response 走原路径,不在降级范围)
+
+        超长处理:transcript token 估算 > max_input_tokens*0.95 时走 map-reduce
+        (分块按 segment 边界不切断 turn,各块单独摘要,合并阶段再生成总摘要)。
+        1 小时会议(~1万字,估算 ~7300 token)在默认 max_input_tokens=8000 下
+        7300 < 7600 不触发单次调用;十几万字超长才分块。
+        注:token 估算用 len/1.5 偏保守乐观(实际中文可能更多 token),
+        若模型 context 真装不下会由 LLM 报错降级 extractive 兜底。
         """
         # 1. 尝试 LLM
         if self.config.enabled:
@@ -181,17 +188,37 @@ class LLMGateway:
                     return self._mock_response(op, segments, **kwargs), "llm"
                 if not await self.is_available():
                     raise LLMUnavailableError(f"LLM 不可用: {self.config.endpoint}")
-                from .llm_prompts import PROMPTS
                 transcript = self._segments_to_text(segments)
-                template = PROMPTS.get(op)
-                if not template:
-                    raise ValueError(f"未知操作: {op}")
-                try:
-                    prompt = template.format(transcript=transcript, **kwargs)
-                except KeyError:
-                    prompt = template.replace("{transcript}", transcript)
-                text = await self._call_llm(prompt)
-                return text, "llm"
+                # summarize:按会议总时长自适应摘要篇幅(调用方未显式传 max_words 时)。
+                # 见 _adaptive_max_words:短~120/中~200/长~300/超长~400 字。
+                if op == "summarize" and "max_words" not in kwargs:
+                    kwargs["max_words"] = self._adaptive_max_words(segments)
+                # 短文本直接发;超长走 map-reduce(按 segment 边界分块)。
+                # 阈值用 0.95 而非 0.8:1 小时会议(~1万字含前缀≈7300 token)
+                # 在默认 max_input_tokens=8000 下应落回单次,只在真正超长(>7600)
+                # 才分块。0.8 会让 1 小时会议误触发(用户明确不希望日常多调用)。
+                if self._est_tokens(transcript) <= self.config.max_input_tokens * 0.95:
+                    text = await self._llm_single_call(op, transcript, kwargs)
+                    return text, "llm"
+                chunks = self._split_segments(segments, self.config.max_input_tokens * 0.7)
+                if len(chunks) <= 1:
+                    # 估算偏保守导致单块(分不出多块),直接发
+                    text = await self._llm_single_call(op, transcript, kwargs)
+                    return text, "llm"
+                logger.info(f"[LLM] 转写超长({self._est_tokens(transcript):.0f} token),"
+                            f"map-reduce 分 {len(chunks)} 块")
+                chunk_texts = []
+                for i, chunk in enumerate(chunks):
+                    chunk_transcript = self._segments_to_text(chunk)
+                    # 块摘要:压缩 max_words 避免块摘要总和过长
+                    chunk_kwargs = dict(kwargs)
+                    if "max_words" in chunk_kwargs:
+                        chunk_kwargs["max_words"] = max(100, chunk_kwargs["max_words"] // 2)
+                    chunk_texts.append(await self._llm_single_call(op, chunk_transcript, chunk_kwargs))
+                # 合并阶段:各块摘要拼接再生成总摘要
+                merged = "\n\n".join(f"[分块{i+1}]\n{t}" for i, t in enumerate(chunk_texts))
+                text = await self._llm_single_call(op, merged, kwargs)
+                return text, "llm-mapreduce"
             except (LLMUnavailableError, LLMTimeoutError, LLMModelMissingError) as e:
                 logger.warning(f"[LLM] 失败,降级到 extractive: {e}")
             except Exception as e:
@@ -204,6 +231,90 @@ class LLMGateway:
             content = "\n".join(f"- {item}" for item in items) if items else f"- {NO_ACTIONS}"
             return content, "extractive-fallback"
         return self._extractive_fallback(op, segments, **kwargs), "extractive-fallback"
+
+    async def _llm_single_call(self, op: str, transcript: str, kwargs: dict) -> str:
+        """渲染 prompt(用 str.replace 防转写花括号触发 KeyError)+ 单次 _call_llm。"""
+        from .llm_prompts import DEFAULT_PROMPTS
+        prompts = self._prompts if self._prompts is not None else DEFAULT_PROMPTS
+        template = prompts.get(op)
+        if not template:
+            raise ValueError(f"未知操作: {op}")
+        prompt = self._render_prompt(template, transcript, kwargs)
+        return await self._call_llm(prompt)
+
+    @staticmethod
+    def _render_prompt(template: str, transcript: str, kwargs: dict) -> str:
+        """用 str.replace 逐占位符替换,不解析转写里的花括号。
+
+        str.format 会把转写文本里的 {xxx} 当占位符解析,触发 KeyError → 旧兜底
+        只替 {transcript},留下 {max_words} 字面发给 LLM("数值未填写"提示)。
+        str.replace 不解析,转写花括号安全。
+        """
+        prompt = template.replace("{transcript}", transcript)
+        if "max_words" in kwargs:
+            prompt = prompt.replace("{max_words}", str(kwargs["max_words"]))
+        return prompt
+
+    @staticmethod
+    def _est_tokens(text: str) -> float:
+        """token 估算:中文 ~1.5 字/token,英文 ~4 字/token。用 /1.5 偏保守
+        (多估 token),保证不超 max_input_tokens。"""
+        return len(text) / 1.5
+
+    @staticmethod
+    def _estimate_meeting_duration(segments: list[dict]) -> float:
+        """从 segment 的 start_time/end_time(秒)估算会议总时长(秒)。
+
+        取所有 segment 的最大 end - 最小 start。segment 时间戳缺失或全 0
+        (实时流早期)时回退为 0,由 _adaptive_max_words 兜底用中位数篇幅。
+        """
+        ends = [float(s.get("end_time") or 0) for s in segments if s.get("end_time") is not None]
+        starts = [float(s.get("start_time") or 0) for s in segments if s.get("start_time") is not None]
+        if not ends or not starts:
+            return 0.0
+        return max(0.0, max(ends) - min(starts))
+
+    @staticmethod
+    def _adaptive_max_words(segments: list[dict]) -> int:
+        """按会议总时长自适应摘要目标字数。
+
+        <10min→120, 10–30min→200, 30–60min→300, >60min→400。
+        时长估算不出来(0)时用中位数 200(等同旧默认)。
+        """
+        dur = LLMGateway._estimate_meeting_duration(segments)
+        if dur <= 0:
+            return 200
+        minutes = dur / 60.0
+        if minutes < 10:
+            return 120
+        if minutes < 30:
+            return 200
+        if minutes < 60:
+            return 300
+        return 400
+
+    @staticmethod
+    def _split_segments(segments: list[dict], max_chars_per_chunk: int) -> list[list[dict]]:
+        """按 segment 整块累加分块,不切断单个说话人 turn。
+
+        max_chars_per_chunk 是字符上限(已从 token 换算)。单个 segment 超长
+        (罕见)单独成块,不切。
+        """
+        chunks: list[list[dict]] = []
+        current: list[dict] = []
+        current_chars = 0
+        for seg in segments:
+            seg_text = (seg.get("text") or "")
+            seg_len = len(seg_text) + 8  # [spk] 前缀开销
+            if current and current_chars + seg_len > max_chars_per_chunk:
+                chunks.append(current)
+                current = []
+                current_chars = 0
+            current.append(seg)
+            current_chars += seg_len
+        if current:
+            chunks.append(current)
+        return chunks
 
     def _extractive_fallback(self, op: str, segments: list[dict], **kwargs) -> str:
         """extractive 兜底 — 返回 str"""
@@ -270,6 +381,12 @@ class LLMGateway:
                     f"模型 {self.config.model} 未加载。"
                     f"请运行: ollama pull {self.config.model}"
                 )
+            if 300 <= resp.status_code < 400:
+                # follow_redirects=False 时重定向不会自动跟随;本地 LLM 不应重定向,
+                # 出现 3xx 视为可疑(可能被劫持的 endpoint 试图外发),直接拒绝。
+                raise EndpointSecurityError(
+                    f"LLM endpoint 返回重定向 {resp.status_code},已拒绝(follow_redirects=False)。"
+                )
             resp.raise_for_status()
             data = resp.json()
             return data["choices"][0]["message"]["content"]
@@ -320,7 +437,11 @@ class LLMGateway:
         self._assert_no_dns_rebind()
         pinned_ip = self._resolve_pinned_ip(url)
         async with self._dns_pin_guard(url, pinned_ip):
-            async with httpx.AsyncClient(timeout=timeout) as client:
+            # follow_redirects=False:被劫持的 LLM endpoint 若 302 到外部 host,
+            # httpx 默认跟随且 DNS pinning 只 pin 原始 host,不校验重定向目标 →
+            # 可借机 SSRF 外发会议文本。本地 LLM(Ollama/vLLM)不应重定向,
+            # 遇重定向直接当错误返回,杜绝绕过 pinning 的外发路径。
+            async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
                 return await client.post(url, json=payload, headers=headers)
 
     # ---- DNS pinning(防 DNS rebinding 攻击)----
@@ -329,7 +450,7 @@ class LLMGateway:
     # 解决 "把 host 换成 IP 后 SSL cert IP mismatch" 的问题。
 
     _socket_patch_active: bool = False
-    _socket_patch_lock = threading.Lock()
+    _socket_patch_lock = asyncio.Lock()
     _base_getaddrinfo = socket.getaddrinfo
     _original_getaddrinfo = None
     # 多 host pin 映射 host -> (ip, default_port)。早期是单 host 字段,
@@ -346,13 +467,18 @@ class LLMGateway:
         # 锁跨整个请求持有,串行化所有 LLM 调用。这是有意的:socket.getaddrinfo
         # 是进程全局 patch,并发 install/remove 会让一个请求的 pin 被另一个
         # 请求的 remove 失效,破坏 DNS rebinding 防御。并发退化换正确性。
-        await asyncio.to_thread(cls._socket_patch_lock.acquire)
-        try:
+        # 用 asyncio.Lock 而非 threading.Lock:协程在获取锁前被取消时,
+        # asyncio.Lock.acquire 直接抛 CancelledError 且不持锁,try/finally
+        # 安全释放;threading.Lock 经 to_thread(acquire) 在取消时 worker 线程
+        # 仍会拿到锁而协程已取消,release 永不执行 → 锁永久孤立、后续全死锁。
+        async with cls._socket_patch_lock:
             cls._install_socket_patch(url, pinned_ip)
-            yield
-        finally:
-            cls._remove_socket_pin(url)
-            cls._socket_patch_lock.release()
+            try:
+                yield
+            finally:
+                # 正常退出与 yield 期间被取消都走这里:先移除本 host 的 pin,
+                # 再由 async with 释放锁。pin 不移除会污染后续 getaddrinfo。
+                cls._remove_socket_pin(url)
 
     def _resolve_pinned_ip(self, url: str) -> Optional[str]:
         """返回用于 socket pinning 的 IP。None 表示跳过 pinning。

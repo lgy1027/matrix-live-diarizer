@@ -130,6 +130,37 @@ class TestBaseEngineSharedMethods:
             where={"session_id": "meeting-1"}
         )
 
+    def test_cleanup_client_swallows_chroma_delete_exception(self):
+        """delete_session_clusters catch Exception,chroma 抛非 (AttributeError/
+        ValueError/TypeError) 异常(如 IndexError/sqlite3.OperationalError)时
+        不向上传播,避免 finalize 中断 + 匿名簇泄漏。
+        """
+        from engine.speaker.base_engine import BaseSpeakerEngine
+        from collections import defaultdict
+        from unittest.mock import MagicMock
+
+        class FakeEngine(BaseSpeakerEngine):
+            def extract_feat(self, audio_data):
+                return audio_data, 1.0
+
+            def compare_and_identify(self, current_emb, client_id, audio_duration=0,
+                                     use_buffer=True, default_name=None):
+                return "Unknown", 0.0
+
+            @property
+            def _model_name(self):
+                return "Fake"
+
+        engine = FakeEngine()
+        engine.collection = MagicMock()
+        engine.collection.delete.side_effect = IndexError("chroma internal")
+        engine.emb_buffer = defaultdict(list, {"meeting-1": [[0.1]]})
+
+        # 不应抛
+        engine.cleanup_client("meeting-1")
+        # emb_buffer 仍被清理(delete 异常不阻断后续清理)
+        assert "meeting-1" not in engine.emb_buffer
+
 
 @pytest.mark.parametrize(
     "engine_cls",

@@ -12,7 +12,6 @@ from pydantic import BaseModel, Field, field_validator
 from app.config import config
 from app.services.audio_files import (
     ALLOWED_AUDIO_EXTENSIONS,
-    MAX_AUDIO_FILE_SIZE,
     UploadTooLargeError,
     persist_upload,
 )
@@ -115,14 +114,18 @@ async def add_voice_sample(
     voice_dir.mkdir(parents=True, exist_ok=True)
     target = voice_dir / f"{uuid.uuid4().hex}{extension}"
     try:
+        voice_max_bytes = min(config.audio.upload_max_file_size, 50 * 1024 * 1024)
         try:
             size = await persist_upload(
                 file,
                 target,
-                max_bytes=min(MAX_AUDIO_FILE_SIZE, 50 * 1024 * 1024),
+                max_bytes=voice_max_bytes,
             )
         except UploadTooLargeError:
-            raise HTTPException(status_code=400, detail="声音样本超过 50MB") from None
+            limit_mb = voice_max_bytes // (1024 * 1024)
+            raise HTTPException(
+                status_code=400, detail=f"声音样本超过 {limit_mb}MB 限制"
+            ) from None
         if size == 0:
             raise HTTPException(status_code=400, detail="声音样本为空")
         import librosa

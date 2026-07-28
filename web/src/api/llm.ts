@@ -54,3 +54,21 @@ export async function saveLlmSettings(data: LlmSettingsPayload) {
     data,
   })
 }
+
+export interface LlmPrompts {
+  summarize: string
+  action_items: string
+  minutes: string
+}
+
+export async function getLlmPrompts() {
+  return call<LlmPrompts>({ url: '/v1/llm/prompts' })
+}
+
+export async function saveLlmPrompts(data: LlmPrompts) {
+  return call<LlmPrompts>({
+    url: '/v1/llm/prompts',
+    method: 'PUT',
+    data,
+  })
+}

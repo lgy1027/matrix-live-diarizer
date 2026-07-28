@@ -338,6 +338,29 @@ def test_job_retry_and_cancel_rules(product_repos):
     assert retried["retry_count"] == 1
 
 
+def test_request_cancel_queued_job_finalizes_immediately(product_repos):
+    """queued 阶段取消的 job 应直接终结为 cancelled + meeting failed,
+    不依赖 claim_next 领出(claim_next 已过滤 cancel_requested=0,否则会永不终结、
+    meeting 永久卡 processing)。
+    """
+    meetings, jobs, _people = product_repos
+    meeting_id = meetings.create(source="upload", title="排队取消", status="processing")
+    job_id = jobs.create(meeting_id)
+    assert jobs.get(job_id)["status"] == "queued"
+
+    assert jobs.request_cancel(job_id) is True
+    job = jobs.get(job_id)
+    assert job["status"] == "cancelled"
+    assert job["cancel_requested"] == 1
+    assert job["finished_at"] is not None
+    # meeting 应同步标 failed(与 running 阶段取消一致)
+    meeting = meetings.get(meeting_id)
+    assert meeting["status"] == "failed"
+    # cancelled 后仍可 retry
+    assert jobs.retry(job_id)
+    assert jobs.get(job_id)["status"] == "queued"
+
+
 def test_deleting_meeting_removes_managed_audio_and_children(product_repos, tmp_path):
     meetings, jobs, _people = product_repos
     audio = tmp_path / "meeting.wav"

@@ -1,41 +1,31 @@
-# Privacy
+# 隐私
 
-Matrix is local-first, not zero-storage. The application intentionally persists data so meetings remain available after restart.
+Matrix 本地优先，但非零存储。应用有意持久化数据，让会议在重启后仍可用。
 
-## Stored locally
+## 本地存储
 
-| Data | Default location | Encrypted by app |
+| 数据 | 默认位置 | 应用层加密 |
 |---|---|---|
-| Meeting audio, including live recordings | `data/media/` | No |
-| Transcripts, notes, people, voice embeddings | `data/matrix.db` | No |
-| Non-secret settings (LLM endpoint/model/enabled state) | `data/matrix.db` | No |
-| Optional LLM API key | `LLM_API_KEY` process environment / `.env` | No |
-| Model files | User ModelScope/Hugging Face/Torch caches | No |
+| 会议音频（含实时录音） | `data/media/` | 否 |
+| 转写、纪要、人物、声纹 embedding | `data/matrix.db` | 否 |
+| 非敏感设置（LLM endpoint/model/启用状态） | `data/matrix.db` | 否 |
+| 可选的 LLM API key | `LLM_API_KEY` 进程环境 / `.env` | 否 |
+| 模型文件 | 用户的 ModelScope/Hugging Face/Torch 缓存 | 否 |
 
-Use operating-system full-disk encryption and a protected user account. Voice recordings and embeddings are biometric-sensitive information; register samples only with appropriate consent.
+请使用操作系统的全盘加密并保护用户账户。录音和声纹 embedding 属于生物敏感信息；仅在取得适当授权时注册声样。
 
-## Network behavior
+## 网络行为
 
-Network access occurs when models or Python/npm dependencies are downloaded.
-Model hosts include ModelScope, Hugging Face, and Torch Hub according to the
-selected capability; pyannote additionally requires the user to accept its
-gated model terms and provide `HF_TOKEN`.
+下载模型或 Python/npm 依赖时会发生联网。按所选能力，模型来源包括 ModelScope、Hugging Face、Torch Hub；pyannote 另需用户接受其 gated 模型条款并提供 `HF_TOKEN`。
 
-LLM features are disabled by default. Reading `/v1/llm/status` and saving LLM
-settings do not contact the configured endpoint. Clicking **Test connection**
-sends one minimal request without meeting text and may incur provider usage.
-Generating a summary, action list, or minutes with an enabled external
-OpenAI-compatible endpoint sends transcript text and prompts to that endpoint;
-audio and voice embeddings are not included by the application.
+LLM 功能默认关闭。读取 `/v1/llm/status` 和保存 LLM 设置不会连接配置的 endpoint。点击「测试连接」会发送一次不含会议文本的最小请求，可能产生 provider 用量。在已启用的外部 OpenAI 兼容 endpoint 下生成摘要、行动项或纪要时，转写文本和 prompt 会发送到该 endpoint；应用不会附上音频和声纹 embedding。
 
-The LLM API key is read from `LLM_API_KEY`; it is not written to SQLite or
-returned to the browser. Protect `.env`, process environments, backups, and
-diagnostic bundles as secrets.
+LLM API key 从 `LLM_API_KEY` 读取，不写入 SQLite、不返回给浏览器。请把 `.env`、进程环境、备份和诊断包当机密保护。
 
-The repository contains no product analytics or telemetry SDK. Server logs may contain operational metadata and errors, but should not log audio or API keys.
+本仓库不含产品分析或遥测 SDK。服务日志可能含运维元数据和错误，但不应记录音频或 API key。
 
-## Deletion
+## 删除
 
-Deleting a meeting removes its database records and application-managed audio. Deleting a person removes registered voice-sample files and detaches that person from meetings without deleting the meetings. Stop the service before deleting `data/` to erase all managed product data. Model caches and `.env` are separate and must be removed independently when required.
+删除会议会移除其数据库记录和应用管理的音频。删除人物会移除已注册的声样文件，并把该人物从会议中摘除（不删除会议本身）。删除整个 `data/` 前请先停服务，以清除所有受管产品数据。模型缓存和 `.env` 独立存放，需要时须单独删除。
 
-No automatic backup or retention purge is currently provided. Users are responsible for backups, retention, consent, and compliance obligations.
+当前不提供自动备份或留存清理。备份、留存、授权与合规义务由用户自行承担。

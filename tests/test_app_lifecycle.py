@@ -44,6 +44,41 @@ def test_shutdown_stops_jobs_before_releasing_engines():
     assert events == ["jobs", "engines"]
 
 
+def test_shutdown_does_not_hang_on_stuck_ws_background_task(monkeypatch):
+    """#1: deferred processor 卡在不可取消的 to_thread 时,_shutdown_application
+    的 gather 包超时,放弃等待后仍调用 runtime.close(),不让单只卡死的
+    WS 拖死整个进程关停。"""
+    events = []
+
+    class Runner:
+        async def stop(self):
+            events.append("jobs")
+
+    class Runtime:
+        async def close(self):
+            events.append("engines")
+
+    async def stuck_forever():
+        await asyncio.Event().wait()  # 模拟卡死的 to_thread,永不完成
+
+    class App:
+        class state:
+            ws_background_tasks = {stuck_forever()}  # coroutine 对象
+
+    # 把 60s 超时缩短到 0.1s,测超时放弃路径(不真等 60s)
+    orig_wait_for = asyncio.wait_for
+
+    async def fast_wait_for(coro, timeout):
+        return await orig_wait_for(coro, timeout=0.1)
+
+    monkeypatch.setattr(asyncio, "wait_for", fast_wait_for)
+
+    asyncio.run(_shutdown_application(Runner(), Runtime(), App()))
+
+    # 超时后仍执行 runtime.close()(不被卡死任务拖住)
+    assert events == ["jobs", "engines"]
+
+
 def test_windows_proactor_connection_reset_is_expected():
     error = ConnectionResetError(10054, "connection reset")
     context = {

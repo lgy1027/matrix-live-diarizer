@@ -20,6 +20,16 @@ def test_non_exact_text_is_not_deleted():
     assert merge_overlapping_text("发布计划", "发布规划") == "发布规划"
 
 
+def test_single_char_overlap_at_boundary_is_removed():
+    """单字重叠(中文高频字"的")在 chunk 边界也应去重,而非整字重复。
+
+    回归:原 range(limit, 1, -1) 不含 size=1,单字重叠不去重。
+    """
+    assert merge_overlapping_text("我们讨论的", "的执行方案") == "执行方案"
+    # 双重确认:无单字重叠时仍按原样
+    assert merge_overlapping_text("我们讨论", "执行方案") == "执行方案"
+
+
 def test_offline_processing_rejects_non_final_provider_result():
     with pytest.raises(RuntimeError, match="non-final"):
         normalize_offline_asr_result(

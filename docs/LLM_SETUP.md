@@ -107,7 +107,7 @@ LLM_MODEL=gpt-4o-mini
 - 勾选"启用 LLM"
 - 状态显示 "✅ 可用"（如果 endpoint 通）
 
-设置页支持保存 provider / endpoint / model / API Key 到本地 SQLite；`.env` 仍作为默认配置来源。
+设置页支持保存 provider / endpoint / model 到本地 SQLite；**API Key 不写入数据库**，仅通过 `LLM_API_KEY` 环境变量配置。`.env` 仍作为默认配置来源。
 
 > ⚠️ **生产环境部署**:如果你把 Matrix 放在 nginx/Cloudflare 后面,
 > **不要**依赖 X-Forwarded-For 做限流/审计 — 详见

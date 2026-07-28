@@ -102,3 +102,18 @@ def test_no_duplicate_incremental_across_segments():
     # 第四帧: 重复第三帧
     out4 = ctx.get_incremental_text("hello world today")
     assert out4 == ""
+
+
+def test_old_as_non_prefix_substring_not_silently_lost():
+    """旧文本是新文本的非前缀子串(如"你好"→"世界你好")不应丢字。
+
+    回归:超时 flush 后 last_full_text 保留,下一段 ASR 返回的含旧词但不以
+    旧词开头的新文本,原逻辑走情况1(新含旧)返回 "" 整段丢失。修复后旧文本
+    非前缀位置时按新内容输出,不丢字。
+    """
+    ctx = SessionContext("c1")
+    ctx.get_incremental_text("你好")  # last_full_text = "你好"
+    out = ctx.get_incremental_text("世界你好")
+    assert out == "世界你好"
+    # last_full_text 应更新,后续重复不再丢
+    assert ctx.get_incremental_text("世界你好") == ""

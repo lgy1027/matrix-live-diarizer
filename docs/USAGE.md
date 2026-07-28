@@ -1,26 +1,26 @@
-# Usage
+# 使用说明
 
-## Upload a recording
+## 上传录音
 
-From Home, select a file and choose:
+在首页选择文件，选择：
 
-- **Quick transcript** for text only.
-- **Meeting mode** for text plus optional offline speaker separation.
+- **快速转写**：只出文本。
+- **会议模式**：文本 + 可选离线说话人分离。
 
-The upload is decoded before a durable job is accepted. Task progress appears under Tasks. A completed transcript can still report speaker separation as unavailable; this is not treated as an identity result.
+上传在受理持久任务前先解码。任务进度显示在「任务」下。完成的转写仍可能报告说话人分离不可用；这不视为身份结果。
 
-## Correct a meeting
+## 校正会议
 
-Open Meetings, search for transcript text, and select a result to jump to its exact segment. Double-click text to edit it. Anonymous speaker labels can be reassigned in batches. Confirm a person only after listening to the audio.
+打开「会议」，按转写文本搜索，选中结果跳到对应段。双击文本可编辑。匿名说话人标签可批量重指。确认人物前先听音频。
 
-## Register a person
+## 注册人物
 
-Create a person under People and upload a clear voice sample of at least two seconds. Expand **Manage samples** to preview recordings, inspect effective-speech and quality indicators, or remove a mistaken sample. Samples and embeddings remain on the local machine. A model-engine change can make existing embeddings incompatible; add a new sample for the active engine if matching is unavailable.
+在「人员」下创建人物并上传至少 2 秒的清晰声样。展开「管理声样」预听录音、查看有效语音时长与质量指标、删除错误样本。声样与 embedding 留在本机。更换模型引擎可能使既有 embedding 不兼容；匹配不可用时为当前引擎补录新声样。
 
-## Live captions
+## 实时字幕
 
-Live mode stores audio and final transcript segments as a meeting. Captions and speaker labels are approximate. Use an uploaded full recording when post-meeting quality matters. Browsers require microphone permission; non-loopback mobile access generally requires HTTPS.
+实时模式把音频和最终转写段落作为一场会议入库。字幕与说话人标签是近似的。对会后质量有要求时请用上传的完整录音。浏览器需授权麦克风；非本机的移动端访问通常需 HTTPS。
 
-## Notes and export
+## 纪要与导出
 
-Summary, actions, and minutes have a local extractive fallback. Enabling an external LLM sends transcript text to the configured endpoint. Review generated notes before use. Export formats are Markdown, SRT, WebVTT, and JSON.
+摘要、行动项、纪要有本地 extractive 兜底。启用外部 LLM 会把转写文本发到配置的 endpoint。使用前请人工复核生成的纪要。导出格式：Markdown、SRT、WebVTT、JSON。
