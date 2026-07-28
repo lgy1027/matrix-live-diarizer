@@ -116,6 +116,37 @@ class JobRepository:
         job = self.get(job_id)
         if not job or job["status"] in {"completed", "failed", "cancelled"}:
             return False
+        if job["status"] == "queued":
+            # queued 阶段取消:直接终结为 cancelled,不进 processor。
+            # 若仅置 cancel_requested=1 依赖 claim_next 领出+processor 取消,
+            # claim_next 已过滤 cancel_requested=0 → 该 job 永不被领出 →
+            # 永不终结、meeting 永久卡 processing。故此处直接终结。
+            with self.db.connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                cursor = conn.execute(
+                    """UPDATE processing_jobs
+                       SET status = 'cancelled', stage = 'cancelled',
+                           cancel_requested = 1, finished_at = CURRENT_TIMESTAMP,
+                           updated_at = CURRENT_TIMESTAMP
+                       WHERE id = ? AND status = 'queued'""",
+                    (job_id,),
+                )
+                if cursor.rowcount == 0:
+                    # 竞态:claim_next 在此期间已领走(变 running),回退到 running 取消路径
+                    conn.rollback()
+                else:
+                    conn.execute(
+                        """UPDATE meetings
+                           SET status = 'failed', error_message = '任务已取消',
+                               updated_at = CURRENT_TIMESTAMP
+                           WHERE id = ?""",
+                        (job["meeting_id"],),
+                    )
+                    conn.commit()
+                    return True
+            job = self.get(job_id)
+            if not job or job["status"] in {"completed", "failed", "cancelled"}:
+                return False
         return self.update(job_id, cancel_requested=1)
 
     def retry(self, job_id: str) -> bool:
@@ -155,7 +186,8 @@ class JobRepository:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 """SELECT * FROM processing_jobs
-                   WHERE status = 'queued' ORDER BY created_at ASC LIMIT 1"""
+                   WHERE status = 'queued' AND cancel_requested = 0
+                   ORDER BY created_at ASC LIMIT 1"""
             ).fetchone()
             if row is None:
                 conn.commit()

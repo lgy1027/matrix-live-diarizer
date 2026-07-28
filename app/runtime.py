@@ -140,6 +140,10 @@ class InferenceCoordinator:
                 self._active = True
             finally:
                 self._live_waiters -= 1
+                # 等待期间被取消时,live_waiters 已减为 0,但等 live_waiters==0
+                # 的 offline 不会被唤醒(没有 release 来 notify)。主动 notify
+                # 让 offline 重新评估谓词,避免死锁。
+                self._condition.notify_all()
         try:
             yield
         finally:
@@ -150,29 +154,37 @@ class InferenceCoordinator:
         async with self._condition:
             starved = False
             wait_start = None
-            while True:
-                if not self._active and self._live_waiters == 0:
-                    break
-                if starved and not self._active:
-                    break
-                if not starved:
-                    if wait_start is None:
-                        wait_start = time.monotonic()
-                    remaining = self._OFFLINE_STARVE_TIMEOUT - (time.monotonic() - wait_start)
-                    if remaining <= 0:
+            # 标志位在取消路径上也要复位:协程被 cancel 时若 _offline_starving
+            # 残留 True,后续所有 live() 见此谓词永久阻塞,只有下一只 offline
+            # 跑完才清。用 try/finally 保证任何退出路径(含 CancelledError)都复位。
+            try:
+                while True:
+                    if not self._active and self._live_waiters == 0:
+                        break
+                    if starved and not self._active:
+                        break
+                    if not starved:
+                        if wait_start is None:
+                            wait_start = time.monotonic()
+                        remaining = self._OFFLINE_STARVE_TIMEOUT - (time.monotonic() - wait_start)
+                        if remaining <= 0:
+                            starved = True
+                            self._offline_starving = True
+                            continue
+                        timeout = remaining
+                    else:
+                        timeout = None
+                    try:
+                        await asyncio.wait_for(self._condition.wait(), timeout=timeout)
+                    except asyncio.TimeoutError:
                         starved = True
                         self._offline_starving = True
-                        continue
-                    timeout = remaining
-                else:
-                    timeout = None
-                try:
-                    await asyncio.wait_for(self._condition.wait(), timeout=timeout)
-                except asyncio.TimeoutError:
-                    starved = True
-                    self._offline_starving = True
-            self._offline_starving = False
-            self._active = True
+                self._offline_starving = False
+                self._active = True
+            finally:
+                # 正常退出时上面已清;取消退出时此处兜底复位,防 live 死锁。
+                if starved:
+                    self._offline_starving = False
         try:
             yield
         finally:

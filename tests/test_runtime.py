@@ -103,6 +103,83 @@ def test_offline_not_starved_when_live_keeps_arriving():
     asyncio.run(scenario())
 
 
+def test_offline_starving_cleared_on_cancel():
+    """offline() 在 starving 状态下被取消时,_offline_starving 必须复位,
+    否则后续所有 live() 见此谓词永久阻塞(只有下一只 offline 跑完才清)。
+    """
+    async def scenario():
+        coordinator = InferenceCoordinator()
+        coordinator._OFFLINE_STARVE_TIMEOUT = 0.04
+        coordinator._active = True
+        coordinator._live_waiters = 1
+
+        async def waiting_offline():
+            async with coordinator.offline():
+                pass
+
+        offline_task = asyncio.create_task(waiting_offline())
+        await asyncio.sleep(0)  # 进入 wait
+        await asyncio.sleep(0.1)  # 超过 starving 超时
+        assert coordinator._offline_starving is True
+
+        # 取消 offline 协程(模拟关停 job_runner 时 cancel)
+        offline_task.cancel()
+        try:
+            await offline_task
+        except asyncio.CancelledError:
+            pass
+
+        # 取消后 _offline_starving 必须复位,否则 live() 会死锁
+        assert coordinator._offline_starving is False, (
+            "取消 offline 后 _offline_starving 必须复位,否则 live 死锁"
+        )
+
+    asyncio.run(scenario())
+
+
+def test_live_cancel_notifies_so_offline_can_progress():
+    """live() 在等待期间被取消时,_live_waiters 减为 0 后必须 notify,
+    否则等 live_waiters==0 的 offline 不会被唤醒。验证:取消 live 后,
+    offline 能在槽释放后进入(说明 live 取消时通知到了,offline 没死等)。
+    """
+    async def scenario():
+        coordinator = InferenceCoordinator()
+        coordinator._active = True  # live 会阻塞在 wait_for
+        offline_done = asyncio.Event()
+
+        async def waiting_offline():
+            async with coordinator.offline():
+                pass
+            offline_done.set()
+
+        async def waiting_live():
+            async with coordinator.live():
+                pass
+
+        offline_task = asyncio.create_task(waiting_offline())
+        await asyncio.sleep(0)  # offline 进入 wait(active=True,进不去)
+        live_task = asyncio.create_task(waiting_live())
+        await asyncio.sleep(0)  # live 进入 wait(_live_waiters=1)
+
+        # 取消 live:live_waiters 减为 0 + notify
+        live_task.cancel()
+        try:
+            await live_task
+        except asyncio.CancelledError:
+            pass
+        assert coordinator._live_waiters == 0
+
+        # 释放 active 槽,offline 应被唤醒并进入(若 live 取消没 notify,
+        # offline 仍在等,这里 notify_all 也能唤醒它 —— 但验证 live 取消后
+        # offline 的谓词可重判,live_waiters==0 已满足)
+        coordinator._active = False
+        async with coordinator._condition:
+            coordinator._condition.notify_all()
+        await asyncio.wait_for(offline_done.wait(), timeout=1.0)
+
+    asyncio.run(scenario())
+
+
 def test_runtime_close_releases_engine_hooks_once():
     class Engine:
         def __init__(self):
@@ -164,16 +241,25 @@ def test_audio_dependency_diagnostics_detects_mismatched_torch_family(monkeypatc
     assert "torchaudio" in report.message
 
 
-def test_offline_starves_even_with_repeated_notify_under_threshold():
+def test_offline_starves_even_with_repeated_notify_under_threshold(monkeypatch):
     """offline 在被 live 持续占用(_active=True, live_waiters>0)时,即使期间
     反复 notify_all(模拟 _release),累计等待超过 _OFFLINE_STARVE_TIMEOUT 后
     仍应置 _offline_starving。notify 不应让 offline 永远等不够超时。
 
-    本测试驱动 offline() 协程并手动 notify,避免真实并发协程的时序抖动。
+    用可注入假时钟确定性驱动 coordinator 的内部计时,避免依赖 asyncio.sleep
+    小睡的 wall-clock 精度——Windows CI 上 20×5ms 累计实测不足 40ms 导致
+    flaky(单次长 sleep 可靠,但多次小睡不可靠)。假时钟只作用于
+    app.runtime.time.monotonic;asyncio 的 loop.time() 用导入期捕获的原始引用,
+    wait_for 仍按真实时间,两者互不干扰。
     """
+    fake_now = [0.0]
+    monkeypatch.setattr("app.runtime.time.monotonic", lambda: fake_now[0])
+
     async def scenario():
         coordinator = InferenceCoordinator()
-        coordinator._OFFLINE_STARVE_TIMEOUT = 0.04  # 40ms
+        # 真实超时设大:wait_for 在真实时间上本测试内绝不触发,starved 只能由
+        # 假时钟驱动的 recompute(remaining<=0)路径置位,排除真实超时污染。
+        coordinator._OFFLINE_STARVE_TIMEOUT = 10.0
         coordinator._active = True
         coordinator._live_waiters = 1
 
@@ -185,16 +271,29 @@ def test_offline_starves_even_with_repeated_notify_under_threshold():
             offline_done.set()
 
         offline_task = asyncio.create_task(waiting_offline())
-        await asyncio.sleep(0)  # 让 offline 进入 wait
+        for _ in range(3):
+            await asyncio.sleep(0)  # 让 offline 确实进入 condition.wait
 
-        # 反复 notify(模拟 live _release),但绝不释放 _active,offline 进不去
-        for _ in range(20):
-            await asyncio.sleep(0.005)  # 5ms
+        async def poke():
             async with coordinator._condition:
                 coordinator._condition.notify_all()
+            for _ in range(3):
+                await asyncio.sleep(0)  # 让 offline 重判谓词并重新 wait
 
-        # 累计约 100ms >> 40ms,应已 starved
-        await asyncio.sleep(0.02)
+        # 阶段1:反复 notify,累计假时钟 5.0 < 超时 10.0 → 不应 starve。
+        # 即便某次 notify 因 offline 尚未重新 wait 而丢失也无妨:下一poke
+        # 会唤醒它重判,remaining 仍 > 0;且 wait_for 真实超时极大不会触发。
+        for _ in range(5):
+            fake_now[0] += 1.0
+            await poke()
+        assert coordinator._offline_starving is False, (
+            "未超时前反复 notify 不应置 starving"
+        )
+
+        # 阶段2:继续 notify,累计假时钟 11.0 > 超时 10.0 → 应 starved。
+        # notify 唤醒 offline 重判,remaining<=0 → 置 _offline_starving。
+        fake_now[0] += 6.0
+        await poke()
         assert coordinator._offline_starving is True, (
             "反复 notify 不应让 offline 无限等待,累计 > 超时应置 starving"
         )

@@ -240,6 +240,17 @@ class Database:
                        DEFAULT 'anonymous' CHECK(identity_status IN
                        ('anonymous', 'suggested', 'auto_matched', 'confirmed'))"""
                 )
+                # 回填已存在 speaker 的身份状态(基于 manually_confirmed/person_id)。
+                # 必须与补列同分支:旧库可能已有 audio_sha256(下面 voice_samples
+                # 分支不会进入 audio_sha256 补列路径),但缺 identity_status 列 —
+                # 此时只补列不回填会导致已确认人物静默降级为 anonymous。
+                conn.execute(
+                    """UPDATE meeting_speakers
+                       SET identity_status = CASE
+                           WHEN manually_confirmed = 1 THEN 'confirmed'
+                           WHEN person_id IS NOT NULL THEN 'suggested'
+                           ELSE 'anonymous' END"""
+                )
         voice_sample_exists = conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='voice_samples'"
         ).fetchone()
@@ -255,13 +266,6 @@ class Database:
                 )
             if "audio_sha256" not in sample_columns:
                 conn.execute("ALTER TABLE voice_samples ADD COLUMN audio_sha256 TEXT")
-                conn.execute(
-                    """UPDATE meeting_speakers
-                       SET identity_status = CASE
-                           WHEN manually_confirmed = 1 THEN 'confirmed'
-                           WHEN person_id IS NOT NULL THEN 'suggested'
-                           ELSE 'anonymous' END"""
-                )
         conn.execute(
             "UPDATE product_meta SET value = ? WHERE key = 'schema_version'",
             (CURRENT_SCHEMA_VERSION,),

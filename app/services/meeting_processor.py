@@ -36,7 +36,10 @@ def merge_overlapping_text(previous: str, current: str, max_chars: int = 80) -> 
     previous = previous or ""
     current = current or ""
     limit = min(len(previous), len(current), max_chars)
-    for size in range(limit, 1, -1):
+    # range 终止于 1(不含),改为含 size=1 以去掉单字重叠(中文高频字"的/了/是"
+    # 在 chunk 边界常出现)。单字去重有极小概率误删合法单字重复(如口吃"是是"),
+    # 但 chunk 边界重叠区本就是衔接处,误删代价远低于不去重导致的整字重复。
+    for size in range(limit, 0, -1):
         if previous[-size:] == current[:size]:
             return current[size:].lstrip()
     return current

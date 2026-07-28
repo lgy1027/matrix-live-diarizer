@@ -77,7 +77,16 @@ async def _shutdown_application(job_runner, runtime, app) -> None:
     await job_runner.stop()
     tasks = getattr(app.state, "ws_background_tasks", None)
     if tasks:
-        await asyncio.gather(*tasks, return_exceptions=True)
+        # deferred processor 卡在不可取消的 to_thread 推理时,gather 会无限等。
+        # 加超时:超时后放弃等待(deferred 内部已有自己的最终超时,正常应先退出),
+        # 不让单只卡死的 WS 拖死整个进程关停。
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True),
+                timeout=60.0,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("[shutdown] %d 个 WS 后台任务 60s 未完成,放弃等待", len(tasks))
     await runtime.close()
 
 
