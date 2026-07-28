@@ -2,10 +2,11 @@
 import { onMounted, ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getEngines, getModels, switchAsrEngine, switchEngine, type AsrInfo, type EngineInfo, type ModelsInfo } from '../api/engines'
-import { getLlmSettings, getLlmStatus, saveLlmSettings, testLlmConnection, type LlmSettings } from '../api/llm'
+import { getLlmSettings, getLlmStatus, saveLlmSettings, testLlmConnection, getLlmPrompts, saveLlmPrompts, type LlmSettings, type LlmPrompts } from '../api/llm'
 type LlmResp = Awaited<ReturnType<typeof getLlmStatus>>
 import { useDialog } from '../composables/useDialog'
 import EmText from '../components/EmText.vue'
+import PromptEditorDialog from '../components/PromptEditorDialog.vue'
 
 const { t, locale } = useI18n()
 const dialog = useDialog()
@@ -15,7 +16,10 @@ const currentEngine = ref<string | null>(null)
 const models = ref<ModelsInfo | null>(null)
 const llm = ref<LlmResp | null>(null)
 const llmSettings = ref<LlmSettings | null>(null)
+const llmPrompts = ref<LlmPrompts | null>(null)
 const savingLlm = ref(false)
+const savingPrompts = ref(false)
+const showPrompts = ref(false)
 const testingLlm = ref(false)
 const switchingEngine = ref<string | null>(null)
 const switchingAsr = ref<string | null>(null)
@@ -114,6 +118,11 @@ async function load() {
     llm.value = null
     llmSettings.value = null
   }
+  try {
+    llmPrompts.value = await getLlmPrompts()
+  } catch {
+    llmPrompts.value = null
+  }
 }
 
 async function pickEngine(key: string) {
@@ -206,6 +215,19 @@ async function saveLlmConfig() {
     window.toast?.(`${t('settings.llm.saveFail') || '保存失败'}: ${e instanceof Error ? e.message : e}`, 'error')
   } finally {
     savingLlm.value = false
+  }
+}
+
+async function savePrompts(payload: LlmPrompts) {
+  try {
+    savingPrompts.value = true
+    llmPrompts.value = await saveLlmPrompts(payload)
+    showPrompts.value = false
+    window.toast?.(t('settings.llm.promptsSaved') || 'Prompt 模板已保存', 'ok')
+  } catch (e) {
+    window.toast?.(`${t('settings.llm.promptsSaveFail') || 'Prompt 保存失败'}: ${e instanceof Error ? e.message : e}`, 'error')
+  } finally {
+    savingPrompts.value = false
   }
 }
 
@@ -375,9 +397,15 @@ onMounted(load)
 
     <!-- LLM -->
     <div v-if="llm && llmSettings" class="set-row llm-row">
-      <div class="l">
-        <span>{{ t('view.settings.llm') }}</span>
-        <em>LLM</em>
+      <div class="l llm-head">
+        <span class="llm-title"><span>{{ t('view.settings.llm') }}</span><em>LLM</em></span>
+        <button class="btn ghost sm help" type="button" @click="showLlmHelp" :title="t('settings.llm.help') || '配置说明'">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="10" />
+            <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01" />
+          </svg>
+          {{ t('settings.llm.help') || '配置说明' }}
+        </button>
       </div>
       <div class="d">{{ t('view.settings.llm.desc') }}</div>
       <div class="toggle-group">
@@ -406,18 +434,18 @@ onMounted(load)
           </select>
         </label>
         <label>
-          <span>Endpoint</span>
-          <input v-model.trim="llmSettings.endpoint" placeholder="http://127.0.0.1:11434/v1" />
-        </label>
-        <label>
           <span>Model</span>
           <input v-model.trim="llmSettings.model" placeholder="qwen2.5:1.5b" />
+        </label>
+        <label class="full">
+          <span>Endpoint</span>
+          <input v-model.trim="llmSettings.endpoint" placeholder="http://127.0.0.1:11434/v1" />
         </label>
         <div class="llm-secret-note">
           {{ llmSettings.has_api_key ? t('settings.llm.keyFromEnv') : t('settings.llm.keyEnvHint') }}
         </div>
       </div>
-      <div class="llm-options">
+      <div class="llm-options llm-toggles">
         <label>
           <input v-model="llmSettings.allow_public" type="checkbox" />
           <span>{{ t('settings.llm.allowPublic') || '允许公网 endpoint' }}</span>
@@ -426,6 +454,8 @@ onMounted(load)
           <input v-model="llmSettings.mock" type="checkbox" />
           <span>{{ t('settings.llm.mock') || 'Mock 模式' }}</span>
         </label>
+      </div>
+      <div class="llm-options llm-actions">
         <button class="btn primary sm" type="button" :disabled="savingLlm" @click="saveLlmConfig">
           {{ savingLlm ? (t('settings.llm.saving') || '保存中…') : (t('settings.llm.save') || '保存配置') }}
         </button>
@@ -437,8 +467,22 @@ onMounted(load)
         >
           {{ testingLlm ? t('view.settings.llm.testing') : t('view.settings.llm.test') }}
         </button>
+        <button
+          class="btn ghost sm prompts-open"
+          type="button"
+          :disabled="!llmPrompts"
+          @click="showPrompts = true"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <polyline points="14 2 14 8 20 8" />
+            <line x1="8" y1="13" x2="16" y2="13" />
+            <line x1="8" y1="17" x2="13" y2="17" />
+          </svg>
+          {{ t('settings.llm.promptsOpen') || '编辑 Prompt 模板' }}
+        </button>
       </div>
-      <div class="llm-test-notice">{{ t('settings.llm.testNotice', llm.endpoint || '—') }}</div>
+      <div v-if="llm.error" class="llm-error">{{ llm.error }}</div>
       <div class="llm-status">
         <span>{{ t('settings.llm.statusLabel') }}</span>
         <b v-if="llm.available === true" class="on">{{ t('settings.llm.statusAvail') }}</b>
@@ -447,19 +491,6 @@ onMounted(load)
         <span v-if="llm.model" class="model">· {{ llm.model }}</span>
         <span class="model">· {{ llm.config_source || 'env' }}</span>
         <span v-if="llm.last_tested_at" class="model">· {{ t('settings.llm.lastTested', formatTestedAt(llm.last_tested_at)) }}</span>
-      </div>
-      <div v-if="llm.error" class="llm-error">{{ llm.error }}</div>
-      <div class="llm-detail">
-        <span>Endpoint: <b class="teal">{{ llm.endpoint || '—' }}</b></span>
-        <span class="sep">·</span>
-        <span>Model: <b class="teal">{{ llm.model || '—' }}</b></span>
-        <button class="btn ghost sm help" type="button" @click="showLlmHelp">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <circle cx="12" cy="12" r="10" />
-            <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01" />
-          </svg>
-          {{ t('settings.llm.help') || '配置说明' }}
-        </button>
       </div>
     </div>
 
@@ -474,6 +505,13 @@ onMounted(load)
       </div>
     </div>
     </div>
+    <PromptEditorDialog
+      v-if="showPrompts && llmPrompts"
+      :initial="llmPrompts"
+      :saving="savingPrompts"
+      @close="showPrompts = false"
+      @save="savePrompts"
+    />
   </section>
 </template>
 
@@ -586,6 +624,8 @@ onMounted(load)
 .llm-status b.on { color: var(--green); }
 .llm-status b.off { color: var(--text-3); }
 .llm-status .model { color: var(--text-3); }
+.llm-head { justify-content: space-between; align-items: center; }
+.llm-head .llm-title { display: flex; align-items: baseline; gap: 8px; }
 .llm-form {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -598,6 +638,7 @@ onMounted(load)
   gap: 6px;
   min-width: 0;
 }
+.llm-form label.full { grid-column: 1 / -1; }
 .llm-form label span,
 .llm-options label span {
   font-family: var(--mono);
@@ -639,13 +680,7 @@ onMounted(load)
   align-items: center;
   gap: 6px;
 }
-.llm-test-notice {
-  margin-top: 10px;
-  color: var(--text-3);
-  font-family: var(--mono);
-  font-size: 10px;
-  line-height: 1.5;
-}
+.llm-actions { margin-top: 6px; }
 .llm-error {
   margin-top: 10px;
   font-family: var(--mono);
@@ -653,20 +688,6 @@ onMounted(load)
   line-height: 1.5;
   color: #ff5f6d;
 }
-.llm-detail {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 12px;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
-  color: var(--text-3);
-  letter-spacing: 0.04em;
-}
-.llm-detail .sep { color: var(--text-3); }
-.llm-detail b { font-weight: 500; }
-.llm-detail .help { margin-left: auto; }
 .config-hint {
   display: flex;
   align-items: center;

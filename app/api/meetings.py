@@ -12,7 +12,6 @@ from app.config import config
 from app.repositories.meetings import SpeakerNotFoundError
 from app.services.audio_files import (
     ALLOWED_AUDIO_EXTENSIONS,
-    MAX_AUDIO_FILE_SIZE,
     UploadTooLargeError,
     persist_upload,
     validate_audio_file,
@@ -100,11 +99,15 @@ async def create_upload_meeting(
     media_dir.mkdir(parents=True, exist_ok=True)
     target = media_dir / f"{uuid.uuid4().hex}{extension}"
     meeting_id = None
+    max_bytes = config.audio.upload_max_file_size
     try:
         try:
-            size = await persist_upload(file, target, max_bytes=MAX_AUDIO_FILE_SIZE)
+            size = await persist_upload(file, target, max_bytes=max_bytes)
         except UploadTooLargeError:
-            raise HTTPException(status_code=400, detail="文件超过 500MB 限制") from None
+            limit_mb = max_bytes // (1024 * 1024)
+            raise HTTPException(
+                status_code=400, detail=f"文件超过 {limit_mb}MB 限制"
+            ) from None
         if size == 0:
             raise HTTPException(status_code=400, detail="上传文件为空")
         try:
@@ -262,6 +265,8 @@ async def generate_meeting_note(
         "actions": "action_items",
         "minutes": "minutes",
     }[note_type]
+    # summarize:不显式传 max_words,由 _generate 按会议总时长自适应
+    # (短~120/中~200/长~300/超长~400 字)。模板用 {max_words} 占位符渲染。
     content, source = await gateway._generate(operation, segments)
     note = request.app.state.meeting_repo.save_note(
         meeting_id, note_type, content, source
