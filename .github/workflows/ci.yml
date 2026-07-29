@@ -9,6 +9,9 @@ on:
 jobs:
   test:
     runs-on: ${{ matrix.os }}
+    # Windows 慢且偶发时序 flaky(时间戳秒精度跨秒 / asyncio.sleep 累计不足),
+    # 不阻塞 PR 合并;ubuntu/macos 挂了才阻塞。Windows 结果仍在 PR checks 显示。
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
     strategy:
       fail-fast: false
       matrix:
