@@ -1,6 +1,6 @@
 # Security Policy
 
-Matrix Live Diarizer is currently beta software. The supported security boundary is one user on a trusted local computer; public deployment is not supported.
+Matrix Live Diarizer is local-first software for a trusted local computer; public deployment is not supported.
 
 See [docs/SECURITY.md](docs/SECURITY.md) for deployment defaults, sensitive-data handling, and the LAN checklist.
 

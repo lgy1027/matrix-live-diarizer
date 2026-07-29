@@ -7,13 +7,13 @@ A local-first meeting transcription tool · no data egress by default · upload 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%E2%80%933.12-blue.svg)](https://www.python.org/)
 [![Node](https://img.shields.io/badge/node-20%2B-green.svg)](https://nodejs.org/)
-![Status](https://img.shields.io/badge/status-beta-blue.svg)
+![Status](https://img.shields.io/badge/status-WIP-orange.svg)
 
 [中文](README.md) · [Usage](docs/USAGE.md) · [LLM setup](docs/LLM_SETUP.md) · [Privacy](docs/PRIVACY.md) · [Security](docs/SECURITY.md) · [API](docs/API.md) · [Models](docs/MODELS.md)
 
 </div>
 
-> This is beta software for a trusted single machine. It is suitable for trial and iteration locally, and is **not** a public, multi-tenant, compliance-archive, or automatic identity-verification service.
+> This is local-first software for a trusted single machine. It is suitable for local trial and iteration; it is **not** a public, multi-tenant, compliance-archive, or automatic identity-verification service.
 
 ## What it solves
 
@@ -102,7 +102,7 @@ python main.py
 
 Open `http://127.0.0.1:8000`. The default server binds only to loopback. Default account is `admin/admin`; the first login forces a password change.
 
-Interfaces are stabilizing during the beta period, but may still change; do not use this project as the only copy or as a long-term archive.
+Interfaces are still iterating; do not use this project as the only copy or as a long-term archive.
 
 Docker (CPU only):
 
