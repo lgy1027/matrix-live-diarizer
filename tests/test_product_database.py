@@ -668,8 +668,12 @@ def test_atomic_transcript_replacement_rolls_back_everything_on_insert_failure(
         end_time=1,
         speaker_label="SPEAKER_00",
     )
+    speaker_id = meetings.detail(meeting_id)["speakers"][0]["id"]
+    meetings.confirm_speaker(meeting_id, speaker_id, people.create("王五"))
+    # 在 confirm 之后取快照:replace 失败回滚后应恢复到 confirm 之后、replace 之前的状态。
+    # 不能在 confirm 之前取——confirm 会更新 updated_at,Windows 上跨秒时旧快照的时间戳
+    # 与回滚后的实际值不一致,导致 flaky 失败。
     old_speaker = meetings.detail(meeting_id)["speakers"][0]
-    meetings.confirm_speaker(meeting_id, old_speaker["id"], people.create("王五"))
     meetings.save_note(meeting_id, "minutes", "必须保留的纪要", "manual")
 
     with pytest.raises(sqlite3.IntegrityError):
