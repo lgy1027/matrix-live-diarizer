@@ -7,13 +7,13 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%E2%80%933.12-blue.svg)](https://www.python.org/)
 [![Node](https://img.shields.io/badge/node-20%2B-green.svg)](https://nodejs.org/)
-![Status](https://img.shields.io/badge/status-beta-blue.svg)
+![Status](https://img.shields.io/badge/status-WIP-orange.svg)
 
 [English](README.en.md) · [使用说明](docs/USAGE.md) · [LLM 配置](docs/LLM_SETUP.md) · [隐私](docs/PRIVACY.md) · [安全](docs/SECURITY.md) · [API](docs/API.md) · [模型](docs/MODELS.md)
 
 </div>
 
-> 这是一份 beta 阶段的本地单机工具,适合在受信任的机器上试用和改进。当前不面向公网部署、多租户、合规存档或自动身份判定。
+> 这是面向单台受信任机器的本地单机工具,适合本地试用和迭代;当前不面向公网部署、多租户、合规存档或自动身份判定。
 
 ## 它解决什么
 
@@ -102,7 +102,7 @@ python main.py
 
 浏览器打开 `http://127.0.0.1:8000`。默认只监听本机回环地址。默认账户 `admin/admin`，首次登录强制改密。
 
-项目处于 beta 阶段,接口趋于稳定但仍可能调整,请勿将其作为会议资料的唯一副本或长期归档系统。
+项目接口仍在迭代,请勿将其作为会议资料的唯一副本或长期归档系统。
 
 Docker CPU 版：
 
