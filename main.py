@@ -2,6 +2,11 @@
 import os
 import sys
 
+# 进程级收紧文件权限掩码:上传录音、实时录音、SQLite、SSL 证书等所有后续
+# 创建的文件默认 0600、目录 0700。本地优先 + 多用户主机场景下,避免其他
+# 本地用户可读敏感音频/转写/声纹。必须在任何文件创建前设置。
+os.umask(0o077)
+
 # 强制 stdout 行缓冲 — 解决 macOS 上 Python stdout 默认 8KB 缓冲导致用户看不到模型加载进度的问题
 try:
     sys.stdout.reconfigure(line_buffering=True)
