@@ -1,4 +1,4 @@
-"""健康检查端点测试 - TDD"""
+"""健康检查端点测试。"""
 import pytest
 from unittest.mock import Mock, patch
 from fastapi.testclient import TestClient
@@ -49,11 +49,11 @@ class TestHealthEndpoints:
         assert isinstance(data["timestamp"], (int, float))
 
     def test_ready_endpoint_exists(self, mock_app):
-        """测试 /ready 端点存在"""
+        """测试 /ready 端点存在(无引擎时返 503 就绪探针语义)"""
         client = TestClient(mock_app)
         response = client.get("/ready")
-        
-        assert response.status_code == 200
+
+        assert response.status_code in (200, 503)
 
     def test_ready_returns_engine_status(self, mock_app):
         """测试 /ready 返回引擎状态"""
@@ -76,6 +76,17 @@ class TestHealthEndpoints:
         client = TestClient(mock_app)
         response = client.get("/ready")
         assert response.json()["speaker"] is True
+
+    def test_ready_reports_not_ready_when_slot_leaked(self, mock_app):
+        """槽泄漏时 /ready 应报 not_ready 且 inference_slot=False。"""
+        runtime = Mock(asr=Mock(), speaker=Mock())
+        runtime.slot_leaked = True
+        mock_app.state.runtime = runtime
+        client = TestClient(mock_app)
+        response = client.get("/ready")
+        data = response.json()
+        assert data["status"] == "not_ready"
+        assert data["inference_slot"] is False
 
 
 if __name__ == "__main__":

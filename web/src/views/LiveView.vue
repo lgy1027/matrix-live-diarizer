@@ -42,7 +42,8 @@ function drawWave() {
   const barW = w / n
   ctx.shadowColor = 'rgba(255, 107, 53, 0.6)'
   ctx.shadowBlur = 4
-  ctx.fillStyle = 'var(--amber)'
+  // Canvas 2D 不解析 CSS 变量 var(--amber),用与 shadow 一致的字面色,否则波形在深色背景上几乎不可见
+  ctx.fillStyle = '#ff6b35'
   for (let i = 0; i < n; i++) {
     const v = Math.min(h * 0.95, hist[i] * h * 0.8)
     const x = i * barW
@@ -217,12 +218,12 @@ onMounted(loadModels)
 </template>
 
 <style scoped>
-.live-wrap { padding: 32px 48px 48px; }  /* 整改: 删 max-width, 让内容平铺整页 */
+.live-wrap { padding: 32px 48px 48px; }
 .live-grid { display: grid; grid-template-columns: minmax(0, 1fr); align-items: stretch; min-height: calc(100vh - 88px); max-width: 1100px; margin: 0 auto; }
 .live-main { min-width: 0; display: flex; flex-direction: column; }
 .live-heading{display:flex;justify-content:space-between;align-items:flex-end;gap:24px}.session-name{width:min(320px,40%);display:flex;flex-direction:column;gap:7px}.session-name>span{font:10px var(--mono);letter-spacing:.1em;color:var(--text-3);text-transform:uppercase}.session-name input,.session-name button{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:7px;background:var(--ink-2);text-align:left}.session-name input:focus{border-color:var(--amber);box-shadow:0 0 0 3px var(--amber-soft)}.session-name button{color:var(--amber);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.session-name i{float:right;font-style:normal}
 .live-main > .transcript { flex: 1; min-height: 200px; }
-/* 整改 1: 改用 .page-title (components.css) 工具类; 保留 min-width 防止 reflow */
+/* Keep a minimum title width to avoid reflow. */
 .page-title { display: inline-block; }
 .live-meta {
   display: flex;
@@ -388,7 +389,7 @@ onMounted(loadModels)
 .side-block .h-mono { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
 .side-block .h-mono .act { color: var(--amber); font-family: var(--mono); font-size: 10px; cursor: pointer; }
 .side-block .h-mono .act:hover { text-decoration: underline; }
-/* 主区底部的满宽 dashed 导入区 (整改 2: 从右侧侧栏迁来, 升级为 full-width) */
+/* Full-width import area below the live transcript. */
 .dropzone {
   background: var(--ink-2);
   border: 1.5px dashed var(--border);

@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 
 class EngineSwitchRequest(BaseModel):
-    engine_type: str = Field(..., min_length=1)
+    engine_type: str = Field(..., min_length=1, max_length=64)
 
 
 class EngineInfoExtended(BaseModel):

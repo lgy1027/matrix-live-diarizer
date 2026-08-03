@@ -25,8 +25,13 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+import tempfile
+from pathlib import Path
 
 logger = logging.getLogger("Matrix_Models")
+
+_COMPLETE_MARKER = ".matrix-model-complete"
+_SILERO_VAD_REVISION = "76e3dc408eb2a5c655c34e230d2d5459b4439daa"
 
 
 def models_root() -> str:
@@ -49,13 +54,69 @@ def has_local(category: str, name: str) -> bool:
 
 
 def _ensure_parent(category: str, name: str) -> None:
-    os.makedirs(local_path(category, name), exist_ok=True)
+    os.makedirs(os.path.dirname(local_path(category, name)), exist_ok=True)
 
 
-def _copytree(src: str, dst: str) -> None:
-    """copytree,dirs_exist_ok=True,解析符号链接拷真实文件。"""
-    os.makedirs(os.path.dirname(dst), exist_ok=True)
-    shutil.copytree(src, dst, dirs_exist_ok=True, symlinks=False)
+def _new_staging_dir(dst: str) -> str:
+    """Create a same-filesystem staging directory for an atomic publish."""
+    parent = os.path.dirname(dst)
+    os.makedirs(parent, exist_ok=True)
+    return tempfile.mkdtemp(prefix=f".{os.path.basename(dst)}.partial-", dir=parent)
+
+
+def _publish_staging(staging: str, dst: str, *, source: str) -> None:
+    """Publish a fully materialized model without exposing partial downloads."""
+    marker = Path(staging) / _COMPLETE_MARKER
+    marker.write_text(f"source={source}\n", encoding="utf-8")
+    if os.path.exists(dst):
+        # Callers only publish after has_local() returned false, so an existing
+        # destination is empty or an abandoned pre-atomic directory.
+        if os.path.isdir(dst) and not os.listdir(dst):
+            os.rmdir(dst)
+        else:
+            raise FileExistsError(f"refusing to replace non-empty model directory: {dst}")
+    os.replace(staging, dst)
+
+
+def _atomic_copytree(
+    src: str,
+    dst: str,
+    *,
+    source: str,
+    required_files: tuple[str, ...],
+) -> None:
+    """Copy a cached model into place atomically, resolving symlinks."""
+    staging = _new_staging_dir(dst)
+    try:
+        shutil.copytree(src, staging, dirs_exist_ok=True, symlinks=False)
+        _require_model_files(staging, candidates=required_files)
+        _publish_staging(staging, dst, source=source)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+
+
+def _require_model_files(root: str, *, candidates: tuple[str, ...]) -> None:
+    """Reject an apparently successful download that lacks required metadata."""
+    if not any((Path(root) / candidate).is_file() for candidate in candidates):
+        raise RuntimeError(
+            f"model download incomplete: none of {candidates!r} found under {root}"
+        )
+
+
+def _validate_local_revision(root: str, revision: str | None) -> None:
+    """Reject a managed local model published for a different revision.
+
+    Legacy/manual model directories have no marker and remain supported.  All
+    directories published by this resolver carry provenance and can therefore
+    be checked when an operator changes a revision pin.
+    """
+    if not revision:
+        return
+    marker = Path(root) / _COMPLETE_MARKER
+    if marker.is_file() and f"@{revision}" not in marker.read_text(encoding="utf-8"):
+        raise RuntimeError(
+            f"local model revision does not match requested revision {revision}: {root}"
+        )
 
 
 # ---------- HF 模型(ASR / ForcedAligner / pyannote) ----------
@@ -68,12 +129,24 @@ def resolve_hf(repo_id: str, category: str, name: str, revision: str | None = No
     """
     dst = local_path(category, name)
     if has_local(category, name):
+        _require_model_files(dst, candidates=("config.json",))
+        _validate_local_revision(dst, revision)
         logger.info("[MODELS] HF %s/%s 已就绪(本地)", category, name)
         return dst
     _ensure_parent(category, name)
     from huggingface_hub import snapshot_download
     logger.info("[MODELS] 解析 HF %s → %s (复用缓存,物化到本地)", repo_id, dst)
-    snapshot_download(repo_id, revision=revision, local_dir=dst)
+    staging = _new_staging_dir(dst)
+    try:
+        snapshot_download(repo_id, revision=revision, local_dir=staging)
+        _require_model_files(staging, candidates=("config.json",))
+        _publish_staging(
+            staging,
+            dst,
+            source=f"huggingface:{repo_id}@{revision or 'UNPINNED'}",
+        )
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
     return dst
 
 
@@ -106,14 +179,24 @@ def resolve_modelscope(model_id: str, category: str, name: str, revision: str | 
     """
     dst = local_path(category, name)
     if has_local(category, name):
+        _require_model_files(dst, candidates=("configuration.json", "config.json"))
+        _validate_local_revision(dst, revision)
         logger.info("[MODELS] MS %s/%s 已就绪(本地)", category, name)
         return dst
     # 1) 优先从已有缓存 copytree(自动迁移)
-    cached = _modelscope_cache_dir(model_id)
+    # A ModelScope repo cache path does not prove which revision it contains.
+    # For pinned models use snapshot_download(revision=...), which still reuses
+    # the library cache but verifies/resolves the requested revision itself.
+    cached = _modelscope_cache_dir(model_id) if revision is None else None
     if cached:
         try:
             logger.info("[MODELS] 迁移 MS %s ← %s(缓存)", name, cached)
-            _copytree(cached, dst)
+            _atomic_copytree(
+                cached,
+                dst,
+                source=f"modelscope-cache:{model_id}@{revision or 'UNPINNED'}",
+                required_files=("configuration.json", "config.json"),
+            )
             return dst
         except Exception as e:
             logger.warning("[MODELS] 迁移 MS %s 失败,回退到下载: %s", name, e)
@@ -124,7 +207,12 @@ def resolve_modelscope(model_id: str, category: str, name: str, revision: str | 
         logger.info("[MODELS] 下载 MS %s (revision=%s)", model_id, revision)
         downloaded = ms_dl(model_id, revision=revision) if revision else ms_dl(model_id)
         if isinstance(downloaded, str) and os.path.isdir(downloaded):
-            _copytree(downloaded, dst)
+            _atomic_copytree(
+                downloaded,
+                dst,
+                source=f"modelscope:{model_id}@{revision or 'UNPINNED'}",
+                required_files=("configuration.json", "config.json"),
+            )
     except Exception as e:
         # 测试环境 fake modelscope / 网络失败:返回 dst(可能空),上层降级
         logger.warning("[MODELS] %s 下载失败,返回空本地目录让上层处理: %s", name, e)
@@ -133,12 +221,16 @@ def resolve_modelscope(model_id: str, category: str, name: str, revision: str | 
 
 # ---------- Silero VAD(torch.hub) ----------
 
-def _torch_hub_vad_cache() -> str | None:
-    """若 torch hub 缓存里有 silero-vad 目录,返回路径。"""
-    import glob
-    root = os.path.expanduser("~/.cache/torch/hub")
-    cands = sorted(glob.glob(os.path.join(root, "snakers4_silero-vad_*")))
-    return cands[0] if cands else None
+def _torch_hub_vad_cache(revision: str) -> str | None:
+    """Return only the torch-hub checkout for the requested revision."""
+    torch_home = os.path.expanduser(
+        os.environ.get("TORCH_HOME", os.path.join("~", ".cache", "torch"))
+    )
+    normalized = revision.replace("/", "_")
+    candidate = os.path.join(
+        torch_home, "hub", f"snakers4_silero-vad_{normalized}"
+    )
+    return candidate if os.path.isfile(os.path.join(candidate, "hubconf.py")) else None
 
 
 def resolve_silero_vad(name: str = "silero-vad") -> str:
@@ -149,13 +241,21 @@ def resolve_silero_vad(name: str = "silero-vad") -> str:
     """
     category = "vad"
     dst = local_path(category, name)
+    revision = os.environ.get("SILERO_VAD_REVISION", _SILERO_VAD_REVISION)
     if has_local(category, name):
+        _require_model_files(dst, candidates=("hubconf.py",))
+        _validate_local_revision(dst, revision)
         logger.info("[MODELS] VAD %s 已就绪(本地)", name)
         return dst
-    cached = _torch_hub_vad_cache()
+    cached = _torch_hub_vad_cache(revision)
     if cached:
         logger.info("[MODELS] 迁移 VAD ← %s(缓存)", cached)
-        _copytree(cached, dst)
+        _atomic_copytree(
+            cached,
+            dst,
+            source=f"torch-hub-cache:silero-vad@{revision}",
+            required_files=("hubconf.py",),
+        )
         return dst
     # 缓存没有 → 在线下载到 torch hub,再 copy
     logger.info("[MODELS] VAD 本地与缓存均无,联网下载 silero-vad")
@@ -163,10 +263,15 @@ def resolve_silero_vad(name: str = "silero-vad") -> str:
     _ensure_parent(category, name)
     # 下载到默认 torch hub 缓存后取出路径
     torch.hub.load(
-        repo_or_dir=f"snakers4/silero-vad:{os.environ.get('SILERO_VAD_REVISION', '76e3dc408eb2a5c655c34e230d2d5459b4439daa')}",
+        repo_or_dir=f"snakers4/silero-vad:{revision}",
         model="silero_vad", trust_repo=True,
     )
-    cached2 = _torch_hub_vad_cache()
+    cached2 = _torch_hub_vad_cache(revision)
     if cached2:
-        _copytree(cached2, dst)
+        _atomic_copytree(
+            cached2,
+            dst,
+            source=f"torch-hub:silero-vad@{revision}",
+            required_files=("hubconf.py",),
+        )
     return dst

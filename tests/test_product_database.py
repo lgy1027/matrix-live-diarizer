@@ -886,3 +886,34 @@ def test_create_with_job_rolls_back_when_job_insert_fails(product_repos, monkeyp
     # meeting 不应残留(事务回滚,未 commit)
     rows = meetings.list()
     assert rows[0] == 0
+
+
+def test_append_live_segment_concurrent_no_unique_collision(product_repos):
+    """并发追加 live segment 不应撞 UNIQUE(meeting_id, segment_index)。
+
+    回归:append_live_segment 原先 SELECT MAX+1 → INSERT 不在 BEGIN IMMEDIATE
+    写事务里,并发连接读到相同 index 会导致 sqlite3.IntegrityError。
+    """
+    meetings, _jobs, _people = product_repos
+    meeting_id = meetings.create(source="live", title="并发追加")
+
+    def append(index: int):
+        return meetings.append_live_segment(
+            meeting_id,
+            text=f"段{index}",
+            start_time=float(index),
+            end_time=float(index + 1),
+            speaker_label="SPEAKER_00",
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = [executor.submit(append, index) for index in range(32)]
+        # 全部成功(不抛 IntegrityError);失败的 future.result() 会 re-raise
+        inserted_ids = [future.result() for future in futures]
+
+    assert len(inserted_ids) == 32
+    detail = meetings.detail(meeting_id)
+    segments = detail["segments"]
+    # 32 段全部落库,index 0..31 各一次无重复
+    indices = sorted(segment["segment_index"] for segment in segments)
+    assert indices == list(range(32))

@@ -1,13 +1,16 @@
 """Named people and their registered voice samples."""
 from __future__ import annotations
+import logging
 import sqlite3
 import uuid
 from pathlib import Path
 from typing import Optional
 
 from engine.speaker.speaker_factory import resolve_embedding_model_id
-
 from .database import Database
+
+
+logger = logging.getLogger("Matrix_People")
 
 
 class DuplicateVoiceSampleError(ValueError):
@@ -77,10 +80,28 @@ class PeopleRepository:
                     (person_id,),
                 ).fetchall()
             ]
+            # 删 person 前,FK ON DELETE SET NULL 只置空 person_id,会留下
+            # manually_confirmed=1 / identity_status='confirmed' 的矛盾行。
+            # 主动复位这些字段到匿名状态,与"未关联人"语义一致。
+            conn.execute(
+                """UPDATE meeting_speakers
+                   SET person_id = NULL, manually_confirmed = 0,
+                       confidence = NULL, identity_status = 'anonymous',
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE person_id = ?""",
+                (person_id,),
+            )
             cursor = conn.execute("DELETE FROM people WHERE id = ?", (person_id,))
             conn.commit()
+        # commit 后删文件:若进程在 commit 后、unlink 前崩溃,留下孤儿文件
+        # (可接受,浪费磁盘);若 commit 前 unlink 再 commit 崩溃,会留下
+        # voice_samples.audio_path 指向已删文件的悬挂引用(后续匹配读到无效样本)。
+        # 孤儿文件比悬挂引用安全,故文件删除放到 commit 之后。
         for path in paths:
-            Path(path).unlink(missing_ok=True)
+            try:
+                Path(path).unlink(missing_ok=True)
+            except Exception:
+                logger.warning("[People] 删除声样文件失败: %s", path)
         return cursor.rowcount > 0
 
     def add_sample(
@@ -176,7 +197,10 @@ class PeopleRepository:
                 (sample_id, person_id),
             )
             conn.commit()
-        Path(row["audio_path"]).unlink(missing_ok=True)
+        try:
+            Path(row["audio_path"]).unlink(missing_ok=True)
+        except Exception as exc:
+            logger.warning("[people] 删除声样文件失败 %s: %s", row["audio_path"], exc)
         return cursor.rowcount > 0
 
     def matching_samples(self, model_name: str, embedding_dim: int) -> list[dict]:

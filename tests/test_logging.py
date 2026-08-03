@@ -1,4 +1,4 @@
-"""日志规范化测试 - TDD"""
+"""日志规范化测试。"""
 import pytest
 import logging
 from unittest.mock import Mock, patch

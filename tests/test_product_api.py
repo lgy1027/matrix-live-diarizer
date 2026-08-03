@@ -243,6 +243,18 @@ def test_processing_meeting_must_be_cancelled_before_delete(tmp_path):
     assert app.state.meeting_repo.get(meeting_id) is not None
 
 
+def test_live_recording_without_job_cannot_be_deleted(tmp_path):
+    client, app = make_client(tmp_path)
+    meeting_id = app.state.meeting_repo.create(
+        source="live", title="录制中", status="processing"
+    )
+
+    response = client.delete(f"/v1/meetings/{meeting_id}")
+
+    assert response.status_code == 409
+    assert app.state.meeting_repo.get(meeting_id) is not None
+
+
 def test_ready_meeting_can_be_queued_for_reprocessing(tmp_path):
     client, app = make_client(tmp_path)
     audio = tmp_path / "meeting.wav"
@@ -263,6 +275,41 @@ def test_reprocess_rejects_meeting_without_audio(tmp_path):
     meeting_id = app.state.meeting_repo.create(source="live", title="无音频", status="ready")
 
     assert client.post(f"/v1/meetings/{meeting_id}/reprocess").status_code == 409
+
+
+def test_reprocess_rejects_truncated_live_meeting(tmp_path):
+    """capped 实时会话(WAV 截断)的 reprocess 应拒绝,防截断 WAV 覆盖完整转写。"""
+    client, app = make_client(tmp_path)
+    audio = tmp_path / "trunc.wav"
+    audio.write_bytes(b"RIFF")
+    meeting_id = app.state.meeting_repo.create(
+        source="live", title="超长", status="ready", audio_path=str(audio),
+    )
+    app.state.meeting_repo.update(
+        meeting_id, processing_manifest_json='{"truncated": true}',
+    )
+    r = client.post(f"/v1/meetings/{meeting_id}/reprocess")
+    assert r.status_code == 409
+    assert "截断" in r.json()["detail"]
+
+
+def test_reprocess_rejects_truncated_wav_by_duration_mismatch(tmp_path, monkeypatch):
+    """双失败兜底:truncated manifest 未写成 + audio_path 未置空时,
+    按 WAV 实际时长 < duration_sec 拒绝(防截断 WAV 覆盖完整转写)。"""
+    import wave
+    client, app = make_client(tmp_path)
+    # 造一个真实但极短的 WAV(1s),但 duration_sec 标成 3600(说明转写覆盖 1h)
+    audio = tmp_path / "short.wav"
+    with wave.open(str(audio), "wb") as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000)
+        w.writeframes(b"\x00\x00" * 16000)
+    meeting_id = app.state.meeting_repo.create(
+        source="live", title="长", status="failed", audio_path=str(audio),
+    )
+    app.state.meeting_repo.update(meeting_id, duration_sec=3600.0)
+    r = client.post(f"/v1/meetings/{meeting_id}/reprocess")
+    assert r.status_code == 409
+    assert "截断" in r.json()["detail"]
 
 
 def test_search_and_export_use_corrected_identity(tmp_path):
@@ -344,6 +391,25 @@ def test_add_voice_sample_reports_ineligible_when_below_auto_match_threshold(tmp
     )
     assert response.status_code == 201
     assert response.json()["auto_match_eligible"] is False
+
+
+def test_add_voice_sample_returns_503_when_speaker_engine_unavailable(tmp_path, monkeypatch):
+    """声纹引擎降级启动(speaker_engine=None)时,注册声样应返 503 而非 500。"""
+    from app.api import people as people_api
+
+    client, app = make_client(tmp_path)
+    app.state.spk_engine = None  # 引擎降级
+    app.state.runtime = None
+    monkeypatch.setattr(people_api.config.storage, "media_dir", str(tmp_path / "media"))
+    audio = (0.08 * np.sin(2 * np.pi * 220 * np.arange(48000) / 16000)).astype(np.float32)
+    monkeypatch.setattr("librosa.load", lambda *args, **kwargs: (audio, 16000))
+    person_id = client.post("/v1/people", json={"name": "无引擎测试"}).json()["id"]
+    response = client.post(
+        f"/v1/people/{person_id}/samples",
+        files={"file": ("voice.wav", b"RIFF sample", "audio/wav")},
+    )
+    assert response.status_code == 503
+    assert "声纹引擎" in response.json()["detail"]
 
 
 def test_add_voice_sample_rejects_empty_file(tmp_path, monkeypatch):

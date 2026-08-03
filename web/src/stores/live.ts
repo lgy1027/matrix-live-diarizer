@@ -85,7 +85,7 @@ export const useLiveStore = defineStore('live', () => {
     }
     // 转写中占位: VAD 进入 SPEECH 时服务端立刻推这条消息
     if ('type' in m && m.type === 'transcribing') {
-      const seq = (m as any).seq as number
+      const seq = m.seq as number
       // 如果已有占位段,标 stale(折叠成灰色细行)
       const existing = segments.value.find(s => s.status === 'transcribing')
       if (existing) {
@@ -118,7 +118,7 @@ export const useLiveStore = defineStore('live', () => {
       const asr = m as FinalUtterance
       registerSpeaker(asr.speaker)
       // 如果有匹配 seq 的占位段,用 ASR 结果替换它(而不是创建新段)
-      const placeholder = segments.value.find(s => s.status === 'transcribing' && s.seq === (asr as any).seq)
+      const placeholder = segments.value.find(s => s.status === 'transcribing' && s.seq === asr.seq)
       if (placeholder) {
         placeholder.speaker = asr.speaker
         placeholder.text = asr.text
@@ -132,7 +132,7 @@ export const useLiveStore = defineStore('live', () => {
         placeholder.timebase = asr.timebase
         placeholder.isFinal = asr.is_final
         placeholder.speakerState = asr.speaker_state
-        if (typeof (asr as any).score === 'number') placeholder.score = (asr as any).score
+        if (typeof asr.score === 'number') placeholder.score = asr.score
         // 启动打字机
         const fullText = asr.text
         let i = 0
@@ -167,7 +167,7 @@ export const useLiveStore = defineStore('live', () => {
         last.timebase = asr.timebase
         last.isFinal = asr.is_final
         last.speakerState = asr.speaker_state
-        if (typeof (asr as any).score === 'number') last.score = (asr as any).score
+        if (typeof asr.score === 'number') last.score = asr.score
         if (last.typewriterId) {
           clearTimeout(last.typewriterId)
           last.typewriterId = undefined
@@ -182,7 +182,7 @@ export const useLiveStore = defineStore('live', () => {
           displayed: '',
           time: asr.time || new Date().toLocaleTimeString('zh-CN', { hour12: false }),
           words: asr.words,
-          score: typeof (asr as any).score === 'number' ? (asr as any).score : undefined,
+          score: typeof asr.score === 'number' ? asr.score : undefined,
           start: asr.start,
           end: asr.end,
           timebase: asr.timebase,
@@ -270,6 +270,7 @@ export const useLiveStore = defineStore('live', () => {
     sessionId.value = null
     refinementStatus.value = 'idle'
     refinementJobId.value = null
+    clearTypewriters()
     segments.value = []
     speakers.value = new Map()
     sessionSpeakers.value = new Map()
@@ -365,7 +366,20 @@ export const useLiveStore = defineStore('live', () => {
     sessionTitle.value = title
   }
 
+  // 清掉所有 segment 上残留的打字机 setTimeout 自递归链。
+  // 重置 segments 前若不清,被丢弃的 segment 闭包仍持有定时器并继续自调度,
+  // 在已不渲染的 store 数据上空转(每段最多 text.length × 50ms,长转写十余秒)。
+  function clearTypewriters() {
+    for (const s of segments.value) {
+      if (s.typewriterId) {
+        clearTimeout(s.typewriterId)
+        s.typewriterId = undefined
+      }
+    }
+  }
+
   async function clearTranscript() {
+    clearTypewriters()
     segments.value = []
     speakers.value = new Map()
     sessionSpeakers.value = new Map()

@@ -1,6 +1,23 @@
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+testpaths = ["tests"]
+norecursedirs = ["models", "data", "web", "graphify-out"]
 markers = [
     "timeout(seconds): fail a test if it runs longer than the given number of seconds",
     "asyncio: mark test as async (handled by pytest-asyncio)",
 ]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+
+[tool.coverage.run]
+branch = false
+source = ["app", "engine"]
+
+[tool.coverage.report]
+fail_under = 78
+skip_covered = true

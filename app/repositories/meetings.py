@@ -1,13 +1,17 @@
 """Product-facing meeting repository."""
 from __future__ import annotations
 import json
+import logging
 import re
+import sqlite3
 import uuid
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Optional
 
 from .database import Database
+
+logger = logging.getLogger("Matrix_Meetings")
 
 
 class SpeakerNotFoundError(Exception):
@@ -186,8 +190,12 @@ class MeetingRepository:
         where = ["1=1"]
         params: list = []
         if q:
-            where.append("(m.title LIKE ? OR m.original_filename LIKE ?)")
-            params.extend([f"%{q}%", f"%{q}%"])
+            where.append(
+                "(m.title LIKE ? ESCAPE '\\' OR m.original_filename LIKE ? ESCAPE '\\')"
+            )
+            # 转义 LIKE 通配符,防 %/_ 被当模式匹配"意外返回全部"
+            escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            params.extend([f"%{escaped}%", f"%{escaped}%"])
         if status:
             where.append("m.status = ?")
             params.append(status)
@@ -212,11 +220,21 @@ class MeetingRepository:
         return total, [self._parse_meeting(row) for row in rows]
 
     def update(self, meeting_id: str, **fields) -> bool:
+        """Update whitelisted meeting fields.
+
+        不在白名单的字段直接抛 ValueError,而非静默丢弃 —— 防新增可写字段
+        忘加白名单导致调用方以为写入成功实则数据丢失。新增可写字段时扩展 allowed。
+        """
         allowed = {
             "title", "status", "audio_path", "duration_sec", "language",
             "error_message", "processing_mode", "diarization_status",
             "diarization_error", "transcript_state", "processing_manifest_json",
         }
+        unknown = set(fields) - allowed
+        if unknown:
+            raise ValueError(
+                f"不可写入的 meeting 字段: {sorted(unknown)};合法字段: {sorted(allowed)}"
+            )
         values = {key: value for key, value in fields.items() if key in allowed}
         if not values:
             return False
@@ -242,29 +260,77 @@ class MeetingRepository:
         )
 
     def delete(self, meeting_id: str, *, delete_audio: bool = True) -> bool:
+        """Unconditionally delete a meeting (internal cleanup/migration use)."""
         meeting = self.get(meeting_id)
         if meeting is None:
             return False
+        audio_path = meeting.get("audio_path")
         with self.db.connect() as conn:
             conn.execute("DELETE FROM meetings WHERE id = ?", (meeting_id,))
             conn.commit()
-        if delete_audio and meeting.get("audio_path"):
-            Path(meeting["audio_path"]).unlink(missing_ok=True)
+        if delete_audio and audio_path:
+            try:
+                Path(audio_path).unlink(missing_ok=True)
+            except Exception as exc:
+                logger.warning("[meetings] 删除音频文件失败 %s: %s", audio_path, exc)
         return True
+
+    def delete_if_inactive(self, meeting_id: str) -> str:
+        """Atomically delete only a meeting that has no active writer/job.
+
+        Returns ``deleted``, ``not_found`` or ``active``.  The status check and
+        delete share one write transaction so a concurrent reprocess enqueue
+        cannot slip between an API-level preflight check and the delete.
+        """
+        audio_path = None
+        with self.db.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            meeting = conn.execute(
+                "SELECT status, audio_path FROM meetings WHERE id = ?",
+                (meeting_id,),
+            ).fetchone()
+            if meeting is None:
+                conn.rollback()
+                return "not_found"
+            active_job = conn.execute(
+                """SELECT 1 FROM processing_jobs
+                   WHERE meeting_id = ? AND status IN ('queued', 'running')
+                   LIMIT 1""",
+                (meeting_id,),
+            ).fetchone()
+            if meeting["status"] == "processing" or active_job is not None:
+                conn.rollback()
+                return "active"
+            audio_path = meeting["audio_path"]
+            conn.execute("DELETE FROM meetings WHERE id = ?", (meeting_id,))
+            conn.commit()
+        if audio_path:
+            try:
+                Path(audio_path).unlink(missing_ok=True)
+            except Exception as exc:
+                logger.warning("[meetings] 删除音频文件失败 %s: %s", audio_path, exc)
+        return "deleted"
+
+    @staticmethod
+    def _ensure_speaker_on_conn(conn, meeting_id: str, label: str) -> str:
+        """Get/create a speaker using the caller's existing write transaction."""
+        row = conn.execute(
+            "SELECT id FROM meeting_speakers WHERE meeting_id = ? AND label = ?",
+            (meeting_id, label),
+        ).fetchone()
+        if row:
+            return str(row["id"])
+        speaker_id = str(uuid.uuid4())
+        conn.execute(
+            "INSERT INTO meeting_speakers (id, meeting_id, label) VALUES (?, ?, ?)",
+            (speaker_id, meeting_id, label),
+        )
+        return speaker_id
 
     def ensure_speaker(self, meeting_id: str, label: str) -> str:
         with self.db.connect() as conn:
-            row = conn.execute(
-                "SELECT id FROM meeting_speakers WHERE meeting_id = ? AND label = ?",
-                (meeting_id, label),
-            ).fetchone()
-            if row:
-                return row["id"]
-            speaker_id = str(uuid.uuid4())
-            conn.execute(
-                "INSERT INTO meeting_speakers (id, meeting_id, label) VALUES (?, ?, ?)",
-                (speaker_id, meeting_id, label),
-            )
+            conn.execute("BEGIN IMMEDIATE")
+            speaker_id = self._ensure_speaker_on_conn(conn, meeting_id, label)
             conn.commit()
         return speaker_id
 
@@ -280,10 +346,13 @@ class MeetingRepository:
         confidence: float | None = None,
         words: list[dict] | None = None,
     ) -> int:
-        meeting_speaker_id = (
-            self.ensure_speaker(meeting_id, speaker_label) if speaker_label else None
-        )
         with self.db.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            meeting_speaker_id = (
+                self._ensure_speaker_on_conn(conn, meeting_id, speaker_label)
+                if speaker_label
+                else None
+            )
             cursor = conn.execute(
                 """INSERT INTO transcript_segments
                    (meeting_id, segment_index, meeting_speaker_id, text, start_time,
@@ -474,11 +543,20 @@ class MeetingRepository:
         confidence: float | None = None,
         words: list[dict] | None = None,
     ) -> int:
-        """Append one final realtime segment using a repository-owned index."""
-        meeting_speaker_id = (
-            self.ensure_speaker(meeting_id, speaker_label) if speaker_label else None
-        )
+        """Append one final realtime segment using a repository-owned index.
+
+        SELECT MAX + INSERT 包进 BEGIN IMMEDIATE 写事务:并发写同一 meeting
+        (双 WS 会话或 finalize job 并发追加)时序列化,避免读到相同
+        segment_index 撞 UNIQUE(meeting_id, segment_index)。WAL + busy_timeout
+        5s 下第二个写连接会等待第一个提交而非立即报 locked。
+        """
         with self.db.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            meeting_speaker_id = (
+                self._ensure_speaker_on_conn(conn, meeting_id, speaker_label)
+                if speaker_label
+                else None
+            )
             next_index = conn.execute(
                 """SELECT COALESCE(MAX(segment_index), -1) + 1
                    FROM transcript_segments WHERE meeting_id = ?""",
@@ -510,14 +588,65 @@ class MeetingRepository:
                 "SELECT COUNT(*) FROM transcript_segments WHERE meeting_id = ?",
                 (meeting_id,),
             ).fetchone()[0]
-            cursor = conn.execute(
-                """UPDATE meetings SET status = ?, transcript_state = 'draft',
-                          updated_at = CURRENT_TIMESTAMP
-                   WHERE id = ? AND source = 'live'""",
-                ("ready" if segment_count else "draft", meeting_id),
-            )
+            audio_path = conn.execute(
+                "SELECT audio_path FROM meetings WHERE id = ?", (meeting_id,)
+            ).fetchone()
+            audio_path = audio_path["audio_path"] if audio_path else None
+            # 缺音频文件却有转写段:标 failed,避免"看起来完成但无法播放/重处理"死胡同。
+            # 仅覆盖 audio_path 已写但文件丢失的场景(真实路径下 WS 收到首帧即
+            # update(audio_path=...),要产生转写段必先有音频流 → audio_path 恒非 None;
+            # audio_path=None 的纯文本会话按既有契约标 ready)。
+            # 已被 refinement 处理过(transcript_state='refined')的会议不回退状态。
+            if segment_count and audio_path and not Path(audio_path).is_file():
+                cursor = conn.execute(
+                    """UPDATE meetings
+                       SET status = 'failed',
+                           error_message = '实时音频文件缺失,无法完成',
+                           transcript_state = CASE
+                               WHEN transcript_state = 'refined' THEN 'refined'
+                               ELSE 'draft' END,
+                           updated_at = CURRENT_TIMESTAMP
+                       WHERE id = ? AND source = 'live'""",
+                    (meeting_id,),
+                )
+            else:
+                cursor = conn.execute(
+                    """UPDATE meetings
+                       SET status = ?,
+                           transcript_state = CASE
+                           WHEN transcript_state = 'refined' THEN 'refined'
+                           ELSE 'draft' END,
+                           updated_at = CURRENT_TIMESTAMP
+                       WHERE id = ? AND source = 'live'""",
+                    ("ready" if segment_count else "draft", meeting_id),
+                )
             conn.commit()
         return cursor.rowcount > 0
+
+    def mark_completed(self, meeting_id: str, job_id: str, finished_at: str) -> None:
+        """同事务标记 meeting=ready + job=completed。
+
+        替代原本 meeting_repo.update(ready) + job_repo.update(completed) 的多步提交,
+        避免崩溃窗口出现 meeting=ready + job=running 矛盾态(recover 把 running 回
+        queued 后重跑会把 ready 降级回 processing)。
+        """
+        with self.db.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                """UPDATE meetings
+                   SET status = 'ready', error_message = NULL,
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ?""",
+                (meeting_id,),
+            )
+            conn.execute(
+                """UPDATE processing_jobs
+                   SET status = 'completed', stage = 'completed', progress = 100,
+                       finished_at = ?, updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ?""",
+                (finished_at, job_id),
+            )
+            conn.commit()
 
     def save_note(
         self, meeting_id: str, note_type: str, content: str, source: str = "local"
@@ -579,6 +708,7 @@ class MeetingRepository:
             return 0
         placeholders = ",".join("?" for _ in segment_ids)
         with self.db.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             if speaker_id is not None:
                 owner = conn.execute(
                     "SELECT 1 FROM meeting_speakers WHERE id = ? AND meeting_id = ?",
@@ -618,6 +748,7 @@ class MeetingRepository:
             return 0
         placeholders = ",".join("?" for _ in source_ids)
         with self.db.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             owner = conn.execute(
                 "SELECT 1 FROM meeting_speakers WHERE id = ? AND meeting_id = ?",
                 (target_id, meeting_id),
@@ -647,6 +778,7 @@ class MeetingRepository:
         """
         new_id = str(uuid.uuid4())
         with self.db.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             source = conn.execute(
                 "SELECT label FROM meeting_speakers WHERE id = ? AND meeting_id = ?",
                 (source_id, meeting_id),
@@ -663,14 +795,16 @@ class MeetingRepository:
                 f"""UPDATE transcript_segments
                     SET meeting_speaker_id = ?, manually_edited = 1,
                         updated_at = CURRENT_TIMESTAMP
-                    WHERE meeting_id = ? AND id IN ({placeholders})""",
-                [new_id, meeting_id, *segment_ids],
+                    WHERE meeting_id = ? AND meeting_speaker_id = ?
+                      AND id IN ({placeholders})""",
+                [new_id, meeting_id, source_id, *segment_ids],
             )
             conn.commit()
         return new_id
 
     def confirm_speaker(self, meeting_id: str, speaker_id: str, person_id: str | None) -> bool:
         with self.db.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             if person_id is not None and conn.execute(
                 "SELECT 1 FROM people WHERE id = ?", (person_id,)
             ).fetchone() is None:
@@ -721,13 +855,6 @@ class MeetingRepository:
             conn.commit()
         return cursor.rowcount > 0
 
-    def clear_transcript(self, meeting_id: str) -> None:
-        with self.db.connect() as conn:
-            conn.execute("DELETE FROM transcript_segments WHERE meeting_id = ?", (meeting_id,))
-            conn.execute("DELETE FROM meeting_speakers WHERE meeting_id = ?", (meeting_id,))
-            conn.execute("DELETE FROM meeting_notes WHERE meeting_id = ?", (meeting_id,))
-            conn.commit()
-
     def search(self, q: str, limit: int = 50) -> list[dict]:
         """全文搜索: FTS5 trigram 主路径 + LIKE 兜底(2 字/特殊字符)"""
         query = q.strip()
@@ -752,7 +879,9 @@ class MeetingRepository:
             return item
 
         # 1. FTS5 路径(trigram,3+ 字中文命中率高)
+        # 剥离 FTS5 操作符(AND/OR/NOT/NEAR),避免裸操作符触发 MATCH 语法解析失败。
         fts_q = re.sub(r"[^\w一-鿿]+", " ", query, flags=re.UNICODE).strip()
+        fts_q = re.sub(r"\b(AND|OR|NOT|NEAR)\b", " ", fts_q, flags=re.IGNORECASE).strip()
         fts_results: list[dict] = []
         if fts_q:
             with self.db.connect() as conn:
@@ -769,10 +898,15 @@ class MeetingRepository:
                          LEFT JOIN people p ON p.id = ms.person_id
                          WHERE transcript_segments_fts MATCH ?
                          ORDER BY rank LIMIT ?"""
-                rows = conn.execute(sql, (fts_q + "*", limit)).fetchall()
-                fts_results = [_join_cols(dict(r)) for r in rows]
+                try:
+                    rows = conn.execute(sql, (fts_q + "*", limit)).fetchall()
+                    fts_results = [_join_cols(dict(r)) for r in rows]
+                except sqlite3.OperationalError:
+                    # 畸形 MATCH 语法(trigram 分词边界)降级到 LIKE 兜底,不返 500。
+                    fts_results = []
 
-        # 2. LIKE 兜底(2 字/特殊字符场景)
+        # 2. LIKE 兜底(2 字/特殊字符场景);转义通配符,与 list() 一致。
+        escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         like_results: list[dict] = []
         with self.db.connect() as conn:
             rows = conn.execute(
@@ -786,10 +920,10 @@ class MeetingRepository:
                    JOIN meetings m ON m.id = ts.meeting_id
                    LEFT JOIN meeting_speakers ms ON ms.id = ts.meeting_speaker_id
                    LEFT JOIN people p ON p.id = ms.person_id
-                   WHERE ts.text LIKE ? OR m.title LIKE ?
+                   WHERE ts.text LIKE ? ESCAPE '\\' OR m.title LIKE ? ESCAPE '\\'
                    ORDER BY m.created_at DESC, ts.segment_index ASC
                    LIMIT ?""",
-                (f"%{query}%", f"%{query}%", limit),
+                (f"%{escaped}%", f"%{escaped}%", limit),
             ).fetchall()
             like_results = [_join_cols(dict(r)) for r in rows]
 

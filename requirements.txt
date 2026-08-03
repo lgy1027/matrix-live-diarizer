@@ -19,6 +19,10 @@ httpx>=0.27.0,<1.0.0
 torch==2.11.0
 torchaudio==2.11.0
 torchvision==0.26.0
+# transformers: <5 范围内最新版仍有已知 CVE(PYSEC-2026-2289 等,from_pretrained
+# 加载恶意 config.json 可 RCE)。升级到 >=5.5 会破坏 Qwen3-ASR/Speaker 的
+# from_pretrained 加载(功能不变约束下不升级)。本地优先模型下触发需本地缓存
+# 投毒,缓解:asr_engine 传固定 revision pin(防 main 被篡改)+ 限制 models/ 可写。
 transformers>=4.30.0,<5
 
 # transformers 间接依赖(隐式,不写会报 import error)
@@ -56,6 +60,8 @@ pydantic>=2.0.0,<3.0.0
 # 鉴权
 PyJWT>=2.8.0,<3.0.0
 werkzeug>=3.0.0,<4.0.0
+# 部分鉴权/模型依赖会间接安装 cryptography；设置安全下限，避免解析到已知漏洞版本。
+cryptography>=48.0.1,<49.0.0
 
 # 配置管理
 python-dotenv>=1.0.0,<2.0.0
@@ -66,8 +72,8 @@ addict>=2.4.0,<3.0.0
 simplejson>=3.19.0,<4.0.0
 sortedcontainers>=2.4.0,<3.0.0
 
-# soundfile 隐式依赖
-cffi>=1.16.0,<2.0.0
+# soundfile 与 cryptography 的隐式依赖
+cffi>=2.0.0,<3.0.0
 
 # 摘要 (TextRank 兜底) — LLM 不可用时本地提取
 summa==1.2.0

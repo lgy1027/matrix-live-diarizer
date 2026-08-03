@@ -6,6 +6,14 @@ services:
     image: matrix-live-diarizer:local
     container_name: matrix
     restart: unless-stopped
+    # 容器加固:禁止提权 + 丢弃所有 Linux capabilities + 限制进程/内存,
+    # 缩小容器内 RCE(如模型加载漏洞)的爆炸半径。
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 512
+    mem_limit: 8g
     env_file:
       - path: .env
         required: false

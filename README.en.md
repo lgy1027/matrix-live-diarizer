@@ -7,7 +7,7 @@ A local-first meeting transcription tool · no data egress by default · upload 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%E2%80%933.12-blue.svg)](https://www.python.org/)
 [![Node](https://img.shields.io/badge/node-20%2B-green.svg)](https://nodejs.org/)
-![Status](https://img.shields.io/badge/status-WIP-orange.svg)
+![Release](https://img.shields.io/badge/release-v0.2.0--beta-orange.svg)
 
 [中文](README.md) · [Usage](docs/USAGE.md) · [LLM setup](docs/LLM_SETUP.md) · [Privacy](docs/PRIVACY.md) · [Security](docs/SECURITY.md) · [API](docs/API.md) · [Models](docs/MODELS.md)
 
@@ -87,7 +87,7 @@ Two paths in one tool, covering a meeting from live capture to post-meeting proc
 
 ## Quick start
 
-Python 3.10–3.12 (CI only verifies 3.12), Node.js 20+, and FFmpeg are required. The first start downloads ~1.8GB of models and may take tens of minutes depending on network speed; once downloaded, it can run permanently offline when LLM is off.
+Python 3.10–3.12, Node.js 20+, and FFmpeg are required. CI covers Python 3.10–3.12 on Ubuntu and Python 3.12 on macOS and Windows. The first start downloads ~1.8GB of models and may take tens of minutes depending on network speed; once downloaded, it can run permanently offline when LLM is off.
 
 ```bash
 git clone https://github.com/lgy1027/matrix-live-diarizer.git

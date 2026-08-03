@@ -30,7 +30,7 @@ def test_turn_taking_count():
 
 
 def test_word_count_per_speaker_chinese_and_english():
-    """Bug-08 修复后:中文字按单字计(过滤停用词)
+    """中文字按单字计数并过滤停用词。
     "你好"       → 2 字(你/好 都不在停用词)
     "world"      → 1 词
     "今天天气"   → 3 字(今是停用词过滤,剩 天/天/气 = 3)
@@ -46,7 +46,7 @@ def test_word_count_per_speaker_chinese_and_english():
 
 
 def test_hot_words_chinese():
-    """Bug-08 修复后:按单字切(原 bigram 已被移除)
+    """中文关键词按单字切分，不生成 bigram。
     "项目 项目 项目" → '项'×3, '目'×3
     "需求" → '需'×1, '求'×1
     (避开 "会" / "议" 这类单字也是停用词的有歧义词)

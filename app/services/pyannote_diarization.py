@@ -20,6 +20,15 @@ import warnings
 from pathlib import Path
 from typing import List, Tuple
 
+import numpy as np
+
+# Backward-compatible public import.  The alignment implementation lives in a
+# dependency-free module so meeting processing can use it without initializing
+# pyannote, but existing integrations historically imported it from here.
+from app.services.speaker_alignment import (
+    align_speakers_to_segments as align_speakers_to_segments,
+)
+
 # pyannote/audio 在边界帧(样本数<=1、空切片)上会触发数值统计退化:
 #   - std(): degrees of freedom <= 0  (pooling.py:103)
 #   - Mean of empty slice / invalid value encountered in divide
@@ -29,7 +38,6 @@ warnings.filterwarnings("ignore", message="std\\(\\).*degrees of freedom", categ
 warnings.filterwarnings("ignore", message="Mean of empty slice", category=RuntimeWarning)
 warnings.filterwarnings("ignore", message="invalid value encountered in divide", category=RuntimeWarning)
 
-from app.services.speaker_alignment import align_speakers_to_segments
 
 logger = logging.getLogger("Matrix_Pyannote")
 PYANNOTE_REVISION = os.environ.get(
@@ -135,11 +143,22 @@ class PyannoteDiarizer:
     def device(self) -> str:
         return self._device
 
-    def diarize(self, audio_path: str) -> List[Tuple[float, float, str]]:
-        """对音频文件做离线匿名说话人分离
+    def diarize(
+        self,
+        audio_path: str,
+        *,
+        waveform: "np.ndarray | None" = None,
+        sample_rate: int | None = None,
+    ) -> List[Tuple[float, float, str]]:
+        """对音频做离线匿名说话人分离
 
         Args:
-            audio_path: 可由 librosa/soundfile 解码的本地音频文件路径
+            audio_path: 本地音频路径(可由 librosa/soundfile 解码)。当
+                waveform 未提供时用它解码。
+            waveform: 调用方已加载的 1D float32 mono 波形。提供时直接
+                复用,避免对同一段音频二次 librosa.load(长会议 ~576MB×2
+                峰值)。采样率须与 sample_rate 一致。
+            sample_rate: waveform 的采样率;未提供时回退到 16kHz。
 
         Returns:
             List of (start_sec, end_sec, speaker_id) — speaker_id 形如 "SPEAKER_00"
@@ -147,17 +166,40 @@ class PyannoteDiarizer:
         """
         if not self._enabled:
             return []
-        if not Path(audio_path).exists():
+        if waveform is None and not Path(audio_path).exists():
             logger.warning(f"[PYANNOTE] 文件不存在: {audio_path}")
             return []
         try:
             import librosa
             import torch
 
-            waveform, sample_rate = librosa.load(audio_path, sr=None, mono=True)
+            if waveform is not None:
+                sr = int(sample_rate or 16000)
+                raw_wave = np.asarray(waveform)
+                if raw_wave.ndim != 1:
+                    raise ValueError(
+                        f"waveform must be 1D mono, got shape={raw_wave.shape}"
+                    )
+                if np.issubdtype(raw_wave.dtype, np.integer):
+                    info = np.iinfo(raw_wave.dtype)
+                    scale = float(max(abs(info.min), info.max))
+                    wave = raw_wave.astype(np.float32) / scale
+                else:
+                    wave = raw_wave.astype(np.float32, copy=False)
+            else:
+                wave, sr = librosa.load(audio_path, sr=None, mono=True)
+                wave = np.asarray(wave, dtype=np.float32)
+            if int(sr) <= 0:
+                raise ValueError(f"sample_rate must be positive, got {sr}")
+            if wave.ndim != 1 or wave.size == 0:
+                raise ValueError("waveform must be a non-empty 1D mono array")
+            if not np.isfinite(wave).all():
+                raise ValueError("waveform contains NaN or infinity")
+            if float(np.max(np.abs(wave))) > 1.5:
+                raise ValueError("float waveform level must be normalized near [-1, 1]")
             audio_input = {
-                "waveform": torch.as_tensor(waveform, dtype=torch.float32).unsqueeze(0),
-                "sample_rate": int(sample_rate),
+                "waveform": torch.as_tensor(wave, dtype=torch.float32).unsqueeze(0),
+                "sample_rate": int(sr),
             }
             output = self._pipeline(audio_input)
             annotation = getattr(

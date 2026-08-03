@@ -24,8 +24,10 @@ const remember = ref(true)
 
 const safeNext = computed(() => {
   const n = (route.query.next as string) || '/live'
-  // 只允许跳 SPA 内部路径, 防止 open redirect
-  return /^\/(live|library|voice|settings|$)/.test(n) ? n : '/live'
+  // 只允许跳解析到具名 SPA 路由的路径, 防 open redirect 与误跳 API/catch-all。
+  if (!n.startsWith('/') || n.startsWith('//')) return '/live'
+  const resolved = router.resolve(n)
+  return resolved.name && resolved.name !== 'login' ? n : '/live'
 })
 
 async function submit() {
@@ -35,26 +37,38 @@ async function submit() {
   }
   errMsg.value = ''
   submitting.value = true
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), 30000)
   try {
-    const r = await fetch('/v1/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: username.value, password: password.value }),
-    })
+    let r: Response
+    try {
+      r = await fetch('/v1/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: username.value, password: password.value }),
+        signal: ctrl.signal,
+      })
+    } catch (e) {
+      errMsg.value =
+        e instanceof DOMException && e.name === 'AbortError'
+          ? t('login.err.timeout') || '请求超时,请重试'
+          : e instanceof Error
+            ? e.message
+            : String(e)
+      return
+    }
     if (!r.ok) {
       const d = await r.json().catch(() => ({}))
       errMsg.value = d.detail || t('login.err.fail') || '登录失败'
       return
     }
     const data = await r.json()
-    auth.setToken(data.token, data.user)
-    if (remember.value) {
-      // remember 默认 true, token 已存 localStorage, 不需额外
-    }
+    auth.setToken(data.token, data.user, remember.value)
     router.push(safeNext.value)
   } catch (e) {
     errMsg.value = e instanceof Error ? e.message : String(e)
   } finally {
+    clearTimeout(timer)
     submitting.value = false
   }
 }

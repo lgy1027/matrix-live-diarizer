@@ -231,7 +231,14 @@ def export_meeting(detail: dict, fmt: str) -> str:
     from app.services.speaker_identity import speaker_display_name
 
     def speaker(segment: dict) -> str:
-        return speaker_display_name(segment)
+        # speaker 名取自 people.name(用户输入),无字符集限制。换行/控制符会
+        # 破坏 VTT cue(<v NAME> 的 NAME 含 > 提前闭合、换行截断 cue body)和
+        # SRT 块结构。统一去换行/控制符,VTT 额外去掉尖括号。
+        name = speaker_display_name(segment)
+        name = "".join(ch for ch in str(name) if ch not in "\r\n\t")
+        if fmt == "vtt":
+            name = name.replace(">", "")
+        return name
 
     if fmt == "srt":
         blocks = [

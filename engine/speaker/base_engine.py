@@ -157,7 +157,7 @@ class BaseSpeakerEngine(ABC):
         if results['distances'] and len(results['distances'][0]) > 0:
             min_dist = results['distances'][0][0]
             best_id = results['ids'][0][0]
-            metadata = results['metadatas'][0][0]
+            metadata = results['metadatas'][0][0] or {}
             count = metadata.get("count", 1)
 
             low_threshold, high_threshold = self._get_dynamic_threshold(count, is_reliable)

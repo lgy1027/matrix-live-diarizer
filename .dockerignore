@@ -17,3 +17,11 @@ tests/
 node_modules/
 web/node_modules/
 web/dist/
+models/
+.venv/
+venv/
+graphify-out/
+.agents/
+.codex/
+.coverage
+coverage.xml

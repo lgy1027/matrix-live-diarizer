@@ -55,14 +55,16 @@ class ServerConfig:
     port: int = 8000
     workers: int = 1  # 单进程防止 GPU 内存溢出
     debug: bool = False
-    
+    enable_https: bool = False  # 声明服务是否经 HTTPS 反代/uvicorn ssl 暴露
+
     @classmethod
     def from_env(cls) -> "ServerConfig":
         return cls(
             host=get_env_str("HOST", "127.0.0.1"),
             port=get_env_int("PORT", 8000),
             workers=get_env_int("WORKERS", 1),
-            debug=get_env_bool("DEBUG", False)
+            debug=get_env_bool("DEBUG", False),
+            enable_https=get_env_bool("ENABLE_HTTPS", False),
         )
 
 
@@ -293,13 +295,17 @@ class RateLimitConfig:
     enabled: bool = True
     requests_per_minute: int = 60      # 每分钟请求数
     requests_per_hour: int = 1000      # 每小时请求数
+    trusted_proxies: list = None      # 可信反代 CIDR;仅直连 IP 落此网段才采纳 XFF
 
     @classmethod
     def from_env(cls) -> "RateLimitConfig":
+        raw = get_env_str("TRUSTED_PROXIES", "127.0.0.0/8,::1/128")
+        trusted = [c.strip() for c in raw.split(",") if c.strip()] or None
         return cls(
             enabled=get_env_bool("RATE_LIMIT_ENABLED", True),
             requests_per_minute=get_env_int("RATE_LIMIT_REQUESTS_PER_MINUTE", 60),
             requests_per_hour=get_env_int("RATE_LIMIT_REQUESTS_PER_HOUR", 1000),
+            trusted_proxies=trusted,
         )
 
 
@@ -390,7 +396,7 @@ class LLMConfig:
 
 @dataclass
 class AuthConfig:
-    """JWT 鉴权配置(Roadmap 安全项)
+    """JWT 鉴权配置。
 
     jwt_secret: HMAC-SHA256 签名密钥
         ⚠️ 生产部署务必设 JWT_SECRET 环境变量!

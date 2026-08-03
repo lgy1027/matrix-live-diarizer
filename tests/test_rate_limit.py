@@ -1,4 +1,4 @@
-"""速率限制测试 - TDD"""
+"""速率限制单元测试。"""
 import pytest
 from unittest.mock import Mock, patch
 from fastapi.testclient import TestClient

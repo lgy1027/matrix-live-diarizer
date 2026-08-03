@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%E2%80%933.12-blue.svg)](https://www.python.org/)
 [![Node](https://img.shields.io/badge/node-20%2B-green.svg)](https://nodejs.org/)
-![Status](https://img.shields.io/badge/status-WIP-orange.svg)
+![Release](https://img.shields.io/badge/release-v0.2.0--beta-orange.svg)
 
 [English](README.en.md) · [使用说明](docs/USAGE.md) · [LLM 配置](docs/LLM_SETUP.md) · [隐私](docs/PRIVACY.md) · [安全](docs/SECURITY.md) · [API](docs/API.md) · [模型](docs/MODELS.md)
 
@@ -87,7 +87,7 @@
 
 ## 快速开始
 
-要求 Python 3.10–3.12（CI 仅验证 3.12）、Node.js 20+ 和 FFmpeg。首次启动会下载约 1.8GB 模型，视网速可能需要数十分钟；下载完成后 LLM 关闭时可永久断网运行。
+要求 Python 3.10–3.12、Node.js 20+ 和 FFmpeg。CI 在 Ubuntu 验证 Python 3.10–3.12，并在 macOS、Windows 验证 Python 3.12。首次启动会下载约 1.8GB 模型，视网速可能需要数十分钟；下载完成后 LLM 关闭时可永久断网运行。
 
 ```bash
 git clone https://github.com/lgy1027/matrix-live-diarizer.git
@@ -178,7 +178,7 @@ macOS / Linux 也可以继续使用兼容入口 `bash scripts/gen_self_cert.sh`�
 ## 开发验证
 
 ```bash
-pytest -q --ignore=tests/test_smoke_boot.py
+python -m pytest tests/ -q --ignore=tests/test_smoke_boot.py
 ```
 
 ```bash
