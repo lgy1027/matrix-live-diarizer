@@ -1,6 +1,6 @@
 # Web 框架
 fastapi>=0.115.0,<1.0.0
-uvicorn>=0.23.0,<1.0.0
+uvicorn>=0.52.0,<1.0.0
 python-multipart>=0.0.9,<1.0.0
 # httpx: LLM gateway (app/services/llm_gateway.py) 的运行时 HTTP 客户端,
 # 必须在主依赖里(之前只在 requirements-dev.txt,生产装 requirements.txt
