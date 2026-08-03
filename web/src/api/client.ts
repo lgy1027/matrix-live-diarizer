@@ -7,11 +7,11 @@ export const apiClient = axios.create({
   timeout: 30_000,
 })
 
-// 请求拦截: Bearer 注入 (除 login / logout)
+// 请求拦截: Bearer 注入 (除 login;logout 需带 token 才能注销当前会话)
 apiClient.interceptors.request.use((config) => {
   const auth = useAuthStore()
   const url = config.url || ''
-  if (auth.token && !/\/v1\/auth\/(login|logout)$/.test(url)) {
+  if (auth.token && !/\/v1\/auth\/login$/.test(url)) {
     config.headers = config.headers || {}
     config.headers.Authorization = `Bearer ${auth.token}`
   }

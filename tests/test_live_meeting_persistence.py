@@ -39,8 +39,10 @@ def test_live_meeting_refinement_is_queued_once(tmp_path):
         source="live", title="实时记录", audio_path=str(audio), status="processing"
     )
 
-    job_id, created = jobs.enqueue_refinement(meeting_id)
-    same_job_id, created_again = jobs.enqueue_refinement(meeting_id)
+    # live 会话结束时 WS finalize 路径排队 refinement,需 allow_live=True
+    # (默认拒绝 status=processing 的 meeting,防 refinement 与活跃 WS 写并发)
+    job_id, created = jobs.enqueue_refinement(meeting_id, allow_live=True)
+    same_job_id, created_again = jobs.enqueue_refinement(meeting_id, allow_live=True)
 
     assert created is True
     assert created_again is False

@@ -82,10 +82,10 @@ def test_log_injection_payload_neutralized():
     assert out == "alice_ERROR__fake_log_entry"
 
 
-# ========== L5: WebSocket 连接速率限制 ==========
+# ========== WebSocket 连接速率限制 ==========
 
 def test_ws_rate_limit_blocks_after_threshold():
-    """L5: 同一 IP 在窗口内连接数超阈值后被限流。"""
+    """同一 IP 在窗口内连接数超过阈值后被限流。"""
     from app.services import realtime_auth
     realtime_auth._ws_connect_log.clear()
     host = "203.0.113.7"
@@ -98,7 +98,7 @@ def test_ws_rate_limit_blocks_after_threshold():
 
 
 def test_ws_rate_limit_empty_host_skipped():
-    """L5: 空客户端 host 不限流(不阻塞无 client 信息的情况)。"""
+    """客户端 host 缺失时不启用按 IP 限流。"""
     from app.services import realtime_auth
     realtime_auth._ws_connect_log.clear()
     assert realtime_auth._ws_rate_limited("") is False
@@ -106,7 +106,7 @@ def test_ws_rate_limit_empty_host_skipped():
 
 
 def test_ws_rate_limit_per_ip_independent():
-    """L5: 不同 IP 计数独立,A 被限不影响 B。"""
+    """不同 IP 独立计数。"""
     from app.services import realtime_auth
     realtime_auth._ws_connect_log.clear()
     a, b = "203.0.113.7", "198.51.100.9"
@@ -118,7 +118,7 @@ def test_ws_rate_limit_per_ip_independent():
 
 
 def test_ws_rate_limit_dict_garbage_collects_empty_keys():
-    """#6: 队列清空后删除 dict 键,防 IP 扩散(NAT/IPv6 扫描)撑爆内存。"""
+    """队列清空后删除 dict 键，防止 IP 扩散撑大内存。"""
     from app.services import realtime_auth
     realtime_auth._ws_connect_log.clear()
     host = "203.0.113.7"
@@ -135,7 +135,7 @@ def test_ws_rate_limit_dict_garbage_collects_empty_keys():
 
 
 def test_ws_client_ip_uses_xff_from_trusted_proxy():
-    """#5: 直连来自可信反代(127.0.0.1)时读 X-Forwarded-For,避免反代后全站共享
+    """直连来自可信反代时读取 X-Forwarded-For，避免反代后全站共享
     proxy IP 的 20 连接配额(单点 DoS)。"""
     from app.services import realtime_auth
     from unittest.mock import MagicMock
@@ -153,7 +153,7 @@ def test_ws_client_ip_uses_xff_from_trusted_proxy():
 
 
 def test_ws_client_ip_ignores_xff_from_untrusted():
-    """#5: 直连不可信时不读 XFF(防客户端伪造绕过限流)。"""
+    """直连不可信时不读取 XFF，防止客户端伪造地址绕过限流。"""
     from app.services import realtime_auth
     from unittest.mock import MagicMock
 
@@ -161,3 +161,75 @@ def test_ws_client_ip_ignores_xff_from_untrusted():
     ws.client.host = "203.0.113.50"  # 非可信反代
     ws.headers = {"X-Forwarded-For": "1.2.3.4"}
     assert realtime_auth._ws_client_ip(ws) == "203.0.113.50"
+
+
+# ============================================================
+# WS 长连接周期复验:logout/改密后踢掉盗号连接
+# ============================================================
+
+def test_ws_revalidate_rejects_revoked_token(tmp_path):
+    """logout 后 token 进 revoked 集合,长连接复验应返 False 让主循环踢掉。"""
+    from app.services.realtime_auth import ws_revalidate
+    from app.services.auth import AuthService
+    from app.repositories.database import Database
+    from unittest.mock import MagicMock
+    import time as _time
+
+    db = Database(str(tmp_path / "rv.db"))
+    db.init_schema()
+    auth = AuthService(db)
+    token = auth.create_token(1, "admin", pwd_iat=0)
+
+    ws = MagicMock()
+    ws._auth_token = token
+    ws._auth_checked_at = 0.0  # 强制触发复验
+    state = MagicMock()
+    state.auth_service = auth
+    app = MagicMock()
+    app.state = state
+    ws.app = app
+
+    # 复验前 token 有效
+    import asyncio
+    assert asyncio.run(ws_revalidate(ws)) is True
+    # logout → revoked
+    auth.revoke_token(token)
+    ws._auth_checked_at = 0.0
+    assert asyncio.run(ws_revalidate(ws)) is False
+
+
+def test_ws_revalidate_rejects_after_password_change(tmp_path):
+    """改密后 password_changed_at > pwd_iat,长连接复验应返 False。"""
+    from app.services.realtime_auth import ws_revalidate
+    from app.services.auth import AuthService
+    from app.repositories.database import Database
+    from unittest.mock import MagicMock
+    import asyncio
+
+    db = Database(str(tmp_path / "rp.db"))
+    db.init_schema()
+    auth = AuthService(db)
+    # pwd_iat=0,改密后 password_changed_at=100 > 0
+    token = auth.create_token(1, "admin", pwd_iat=0)
+    with db.connect() as conn:
+        conn.execute("UPDATE users SET password_changed_at=100 WHERE id=1")
+        conn.commit()
+
+    ws = MagicMock()
+    ws._auth_token = token
+    ws._auth_checked_at = 0.0
+    state = MagicMock(); state.auth_service = auth
+    app = MagicMock(); app.state = state
+    ws.app = app
+    assert asyncio.run(ws_revalidate(ws)) is False
+
+
+def test_ws_revalidate_no_token_local_bypass_passes():
+    """local/测试 bypass 分支无 _auth_token,复验直接放行。"""
+    from app.services.realtime_auth import ws_revalidate
+    from unittest.mock import MagicMock
+    import asyncio
+    ws = MagicMock()
+    # 无 _auth_token 属性(bypass 路径)
+    del ws._auth_token
+    assert asyncio.run(ws_revalidate(ws)) is True

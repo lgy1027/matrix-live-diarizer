@@ -1,4 +1,4 @@
-"""速率限制集成测试 - TDD"""
+"""速率限制集成测试。"""
 import pytest
 from unittest.mock import Mock, patch
 from pathlib import Path

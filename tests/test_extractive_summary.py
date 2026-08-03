@@ -105,7 +105,7 @@ def test_minutes_extract_explicit_decision_only():
     assert "小王负责准备发布说明" in minutes
 
 
-# ========== 回归测试: summa 1.2.0 API 兼容 ==========
+# ========== summa 1.2.0 API 兼容 ==========
 
 def test_summarize_works_with_summa_words_api(monkeypatch):
     """summa 1.2.0 API 是 words/ratio 不是 sentences,代码必须用新 API"""

@@ -1,11 +1,13 @@
 import asyncio
 
+import pytest
 from fastapi import FastAPI
 
 from app import _configure_event_loop
 from app import _is_expected_windows_transport_reset
 from app import _register_lifecycle_handlers
 from app import _shutdown_application
+from app import _validate_runtime_safety
 
 
 async def _startup():
@@ -14,6 +16,13 @@ async def _startup():
 
 async def _shutdown():
     return None
+
+
+def test_runtime_rejects_multiple_process_workers(monkeypatch):
+    runtime_config = _validate_runtime_safety.__globals__["config"]
+    monkeypatch.setattr(runtime_config.server, "workers", 2)
+    with pytest.raises(RuntimeError, match="WORKERS 必须为 1"):
+        _validate_runtime_safety()
 
 
 def test_lifecycle_registration_does_not_require_fastapi_convenience_method():
@@ -44,8 +53,29 @@ def test_shutdown_stops_jobs_before_releasing_engines():
     assert events == ["jobs", "engines"]
 
 
+def test_shutdown_does_not_close_runtime_while_job_worker_is_alive():
+    events = []
+
+    class Runner:
+        async def stop(self):
+            events.append("jobs-timeout")
+            return False
+
+    class Runtime:
+        async def close(self):
+            events.append("engines")
+
+    class App:
+        class state:
+            ws_background_tasks = None
+
+    asyncio.run(_shutdown_application(Runner(), Runtime(), App()))
+
+    assert events == ["jobs-timeout"]
+
+
 def test_shutdown_does_not_hang_on_stuck_ws_background_task(monkeypatch):
-    """#1: deferred processor 卡在不可取消的 to_thread 时,_shutdown_application
+    """deferred processor 卡在不可取消的 to_thread 时，_shutdown_application
     的 gather 包超时,放弃等待后仍调用 runtime.close(),不让单只卡死的
     WS 拖死整个进程关停。"""
     events = []

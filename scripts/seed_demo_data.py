@@ -6,6 +6,7 @@
     python scripts/seed_demo_data.py --no-audio
 """
 import argparse
+import os
 import ssl
 import sys
 import tempfile
@@ -19,7 +20,7 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from app.config import config  # noqa: E402
 from app.repositories.database import Database  # noqa: E402
-from app.repositories.transcripts import TranscriptRepository  # noqa: E402
+from app.repositories.meetings import MeetingRepository  # noqa: E402
 
 DEMO_AUDIO = [
     {
@@ -42,19 +43,21 @@ DEMO_AUDIO = [
 def download_to_temp(url: str, max_bytes: int = 200 * 1024 * 1024) -> Path:
     """下载 URL 到临时文件,带超时 + SSL 校验 + 大小限制
 
-    Args:
-        url: 音频源 URL
-        max_bytes: 最大下载字节数,默认 200MB(防止被劫持到 GB 级文件)
-
     Returns:
-        临时文件路径,调用方负责 unlink
+        临时文件路径,调用方负责 unlink。失败时自动清理。
     """
-    tmp = Path(tempfile.mkstemp(suffix=".mp3")[1])
+    fd, tmp_path = tempfile.mkstemp(suffix=".mp3")
+    os.close(fd)
+    tmp = Path(tmp_path)
     ctx = ssl.create_default_context()
     req = urllib.request.Request(url, headers={"User-Agent": "Matrix-Seed/0.2"})
     try:
         with urllib.request.urlopen(req, timeout=120, context=ctx) as resp:
-            content_length = int(resp.headers.get("Content-Length", 0))
+            # 非数字 Content-Length 一律按未知处理,靠下载累计字节兜底
+            try:
+                content_length = int(resp.headers.get("Content-Length", 0))
+            except (TypeError, ValueError):
+                content_length = 0
             if content_length > max_bytes:
                 tmp.unlink(missing_ok=True)
                 raise ValueError(
@@ -75,15 +78,18 @@ def download_to_temp(url: str, max_bytes: int = 200 * 1024 * 1024) -> Path:
                             f"下载超过 {max_bytes // 1024 // 1024}MB 限制,中止"
                         )
                     f.write(chunk)
-    except (urllib.error.URLError, ssl.SSLError, TimeoutError) as e:
+    except (urllib.error.URLError, ssl.SSLError, TimeoutError):
         tmp.unlink(missing_ok=True)
-        raise RuntimeError(f"下载失败: {e}") from e
+        raise
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
     return tmp
 
 
-def is_demo_session(session: dict) -> bool:
-    """判断是否是示例 session(标题以"示例:"开头)"""
-    return (session.get("title") or "").startswith("示例:")
+def is_demo_meeting(meeting: dict) -> bool:
+    """判断是否是示例会议(标题以"示例:"开头)。"""
+    return (meeting.get("title") or "").startswith("示例:")
 
 
 def main():
@@ -94,10 +100,10 @@ def main():
 
     db = Database(config.storage.db_path)
     db.init_schema()
-    repo = TranscriptRepository(db)
+    repo = MeetingRepository(db)
 
     # 检查已有示例
-    existing = [s for s in repo.list_sessions() if is_demo_session(s)]
+    existing = [s for s in repo.list() if (s.get("title") or "").startswith("示例:")]
     if existing and not args.force:
         print(f"已存在 {len(existing)} 个示例会话,跳过。用 --force 重新生成。")
         for s in existing:
@@ -106,56 +112,50 @@ def main():
 
     if args.force and existing:
         for s in existing:
-            repo.delete_session(s["id"])
+            repo.delete(s["id"])
             print(f"  已删除: {s['title']}")
 
     if args.no_audio:
         print("--no-audio 模式: 跳过下载,只注入空 session")
         for demo in DEMO_AUDIO:
-            sid = repo.create_session(source=demo["source"], title=demo["title"])
+            sid = repo.create(source=demo["source"], title=demo["title"])
             print(f"  ✓ {demo['title']} ({sid})")
-        print("\n完成!打开 web/history.html 查看示例。")
+        print("\n完成!")
         return 0
 
-    # 真实转写模式
-    print("加载 ASR + 声纹引擎...")
-    from engine.asr_engine import ASREngine
-    from engine.speaker.speaker_factory import SpeakerEngineManager
-    from app.services.transcribe import transcribe_file
-
-    asr = ASREngine()
-    spk = SpeakerEngineManager.get_engine()
+    # 真实转写模式:下载音频到 media 目录持久化(不删),由 job_runner 转写。
+    # 注:不在此加载 ASR/声纹引擎 —— 脚本只建会议占位,真实转写由服务启动后
+    # job_runner 领出 job 完成,加载引擎会强制下载 1.8GB 模型且全程未使用。
+    media_dir = Path(config.storage.media_dir).resolve()
+    media_dir.mkdir(parents=True, exist_ok=True)
 
     for demo in DEMO_AUDIO:
         print(f"\n处理: {demo['title']}")
         print(f"  URL: {demo['url']}")
         print(f"  License: {demo['license']}")
         try:
-            audio_path = download_to_temp(demo["url"])
-            print(f"  下载完成: {audio_path.stat().st_size // 1024} KB")
-            # 先建空 session 拿 id(转写用),再更新元信息
-            sid = repo.create_session(source=demo["source"], title=demo["title"])
-            result = transcribe_file(
-                audio_path=str(audio_path),
-                asr_engine=asr,
-                spk_engine=spk,
-                session_id=sid,
-                sample_rate=config.audio.sample_rate,
+            tmp = download_to_temp(demo["url"])
+            print(f"  下载完成: {tmp.stat().st_size // 1024} KB")
+            # 持久化到 media 目录(不入 uploads,job_runner 直接用该路径),
+            # 否则临时文件被删后 job_runner 领出必然 "meeting audio not found"。
+            persistent = media_dir / f"{demo['id']}.mp3"
+            tmp.replace(persistent)
+            # 建会议 + job,等 JobRunner 处理(本脚本不直接调 meeting_processor,
+            # 因其依赖运行时 DB/runtime 注入;仅创建会议占位,真实转写请用
+            # POST /v1/meetings/upload 或运行服务后手动触发)
+            meeting_id, job_id = repo.create_with_job(
+                source=demo["source"],
+                title=demo["title"],
+                audio_path=str(persistent),
+                status="processing",
             )
-            # 写 segments
-            for idx, seg in enumerate(result.segments):
-                repo.insert_segment(
-                    sid, idx, seg.text,
-                    seg.start_time, seg.end_time,
-                    speaker_id=seg.speaker_id,
-                )
-            print(f"  ✓ 注入完成 ({len(result.segments)} 段, {result.duration_sec:.1f}s)")
-            audio_path.unlink(missing_ok=True)
+            print(f"  ✓ 已建示例会议 {meeting_id} (job={job_id})")
+            print("    启动服务后由 job_runner 自动转写,或在前端手动 reprocess")
         except Exception as e:
             print(f"  ✗ 失败: {e}")
-            print(f"  跳过此条")
+            print("  跳过此条")
 
-    print("\n完成!打开 web/history.html 查看示例。")
+    print("\n完成!启动服务查看示例会议。")
     return 0
 
 

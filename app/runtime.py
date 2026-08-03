@@ -128,6 +128,20 @@ class InferenceCoordinator:
         # 有 offline 已过饿死超时、正等待让位。live 见此会谦让一次,
         # 保证 starved offline 在下一个槽释放时优先进入。
         self._offline_starving = False
+        # 看门狗回调:槽 acquire/release 时通知 ApplicationRuntime 记录时刻 +
+        # 当前持有者类型("live"/"offline"),用于区分 live 卡死(可疑泄漏)与
+        # offline 长任务(pyannote 分离 1h 音频可能十几分钟,合法长持)。
+        # None 时无监控(测试用)。
+        self._on_acquired = None
+        self._on_released = None
+
+    def bind_watchdog(self, on_acquired, on_released) -> None:
+        """绑定槽占用看门狗回调(ApplicationRuntime 注入)。
+
+        on_acquired(holder: str) 收 "live"/"offline";on_released() 无参。
+        """
+        self._on_acquired = on_acquired
+        self._on_released = on_released
 
     @asynccontextmanager
     async def live(self):
@@ -138,6 +152,8 @@ class InferenceCoordinator:
                     lambda: not self._active and not self._offline_starving
                 )
                 self._active = True
+                if self._on_acquired is not None:
+                    self._on_acquired("live")
             finally:
                 self._live_waiters -= 1
                 # 等待期间被取消时,live_waiters 已减为 0,但等 live_waiters==0
@@ -181,10 +197,14 @@ class InferenceCoordinator:
                         self._offline_starving = True
                 self._offline_starving = False
                 self._active = True
+                if self._on_acquired is not None:
+                    self._on_acquired("offline")
             finally:
-                # 正常退出时上面已清;取消退出时此处兜底复位,防 live 死锁。
-                if starved:
-                    self._offline_starving = False
+                # 正常退出时上面已清;取消/异常退出时此处兜底复位,避免 _offline_starving
+                # 残留 True 导致 live 永久阻塞。无论是否 starved 都 notify_all,
+                # 让等待的 live/offline 重新评估谓词,防止丢失唤醒。
+                self._offline_starving = False
+                self._condition.notify_all()
         try:
             yield
         finally:
@@ -193,6 +213,8 @@ class InferenceCoordinator:
     async def _release(self) -> None:
         async with self._condition:
             self._active = False
+            if self._on_released is not None:
+                self._on_released()
             self._condition.notify_all()
 
 
@@ -207,11 +229,50 @@ class EngineSnapshot:
 class ApplicationRuntime:
     """The application's single source of truth for process-local engines."""
 
+    # 槽泄漏看门狗:**只对 live 路径**生效。deferred processor 120s 超时放弃后,
+    # to_thread 推理不可取消,live 槽可能被永久占有(InferenceCoordinator._active
+    # 卡 True),新 live 会冻死。live 持槽超此阈值标记 unhealthy,/ready 转 not_ready。
+    # offline 不受此阈值约束:offline job(pyannote 分离 1h 音频)合法长持槽十几
+    # 分钟,固定阈值会误判;offline 卡死由 job_runner 无进度兜底,不在此检测。
+    # live 卡死的另一信号是 _finish_deferred_processor 120s 超时直接置位。
+    _SLOT_LEAK_THRESHOLD = 600.0  # 10 分钟:远超正常单次 live 推理时长
+
     def __init__(self, asr: object, speaker: object) -> None:
         self._asr = asr
         self._speaker = speaker
         self.inference = InferenceCoordinator()
         self._closed = False
+        # 槽被连续占用的起始 monotonic 时刻;None 表示当前空闲。
+        self._slot_held_since: Optional[float] = None
+        # 当前槽持有者类型("live"/"offline"/None);看门狗只对 live 启用阈值。
+        self._slot_holder: Optional[str] = None
+        # 检测到槽泄漏后置 True,直到进程重启。手动恢复需重启服务。
+        self._slot_leaked = False
+        # 绑定看门狗:coordinator 在 acquire/release 槽时回调本对象记录时刻+持有者。
+        self.inference.bind_watchdog(self._mark_slot_acquired, self._mark_slot_released)
+
+    def _mark_slot_acquired(self, holder: str) -> None:
+        """推理槽被占用时记录起始时刻 + 持有者类型(看门狗用)。"""
+        if self._slot_held_since is None:
+            self._slot_held_since = time.monotonic()
+            self._slot_holder = holder
+
+    def _mark_slot_released(self) -> None:
+        """推理槽释放时清零起始时刻与持有者。"""
+        self._slot_held_since = None
+        self._slot_holder = None
+
+    @property
+    def slot_leaked(self) -> bool:
+        """槽是否被泄漏占有(仅 live 路径;offline 长任务不算泄漏)。"""
+        if self._slot_leaked:
+            return True
+        if self._slot_held_since is not None and self._slot_holder == "live":
+            held = time.monotonic() - self._slot_held_since
+            if held > self._SLOT_LEAK_THRESHOLD:
+                self._slot_leaked = True
+                return True
+        return False
 
     @property
     def asr(self) -> object:

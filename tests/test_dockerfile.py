@@ -65,10 +65,11 @@ def test_dockerfile_has_healthcheck():
 
 
 def test_dockerfile_targets_amd64_and_arm64():
-    """buildx 兼容双架构(检查有 ARG TARGETARCH)"""
+    """Native dependency wheels must be built for the target architecture."""
     content = DOCKERFILE.read_text(encoding="utf-8")
     assert "ARG TARGETARCH" in content, "需要 ARG TARGETARCH 让 buildx 多架构构建"
-    assert "$BUILDPLATFORM" in content, "需要用 $BUILDPLATFORM 做 buildx 多架构"
+    assert "FROM --platform=$TARGETPLATFORM python:3.12-slim AS builder" in content
+    assert "FROM --platform=$BUILDPLATFORM python:3.12-slim AS builder" not in content
 
 
 def test_dockerfile_exposes_8000():
@@ -132,3 +133,13 @@ def test_dockerignore_excludes_data():
     assert "data/" in content
     assert "uploads/" in content
     assert "engine/speaker/speaker_db/" not in content
+    assert "models/" in content
+    assert ".venv/" in content
+    assert "graphify-out/" in content
+
+
+def test_healthcheck_supports_http_and_https():
+    content = DOCKERFILE.read_text(encoding="utf-8")
+    assert "ENABLE_HTTPS" in content
+    assert "https://127.0.0.1:${PORT:-8000}/health" in content
+    assert "http://127.0.0.1:${PORT:-8000}/health" in content

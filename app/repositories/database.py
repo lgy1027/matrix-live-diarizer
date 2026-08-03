@@ -57,6 +57,8 @@ CREATE TABLE IF NOT EXISTS processing_jobs (
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_status_created
     ON processing_jobs(status, created_at ASC);
+CREATE INDEX IF NOT EXISTS idx_jobs_meeting
+    ON processing_jobs(meeting_id);
 
 CREATE TABLE IF NOT EXISTS people (
     id         TEXT PRIMARY KEY,
@@ -152,7 +154,7 @@ CREATE TABLE IF NOT EXISTS settings (
     value TEXT NOT NULL
 );
 
--- 用户表 (Roadmap 安全项: admin/admin 默认账户 + 强制改密)
+-- 用户表：admin/admin 默认账户，首次登录强制改密
 CREATE TABLE IF NOT EXISTS users (
     id                    INTEGER PRIMARY KEY AUTOINCREMENT,
     username              TEXT UNIQUE NOT NULL,
@@ -392,16 +394,16 @@ class Database:
         自动初始化:空数据库第一次连接时创建产品 schema。
         """
         conn = sqlite3.connect(self.db_path, timeout=5.0)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys=ON")
-        conn.execute("PRAGMA busy_timeout=5000")
-        # 兜底:检查产品根表是否存在,没有就建。
-        cur = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='product_meta'"
-        )
-        if cur.fetchone() is None:
-            self._init_schema_on_conn(conn)
         try:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA foreign_keys=ON")
+            conn.execute("PRAGMA busy_timeout=5000")
+            # 兜底:检查产品根表是否存在,没有就建。
+            cur = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='product_meta'"
+            )
+            if cur.fetchone() is None:
+                self._init_schema_on_conn(conn)
             yield conn
         finally:
             conn.close()

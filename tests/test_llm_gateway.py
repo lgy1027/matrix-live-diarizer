@@ -164,7 +164,7 @@ def test_no_api_key_omits_authorization_header(monkeypatch):
 
 
 def test_call_llm_rejects_redirect_response(monkeypatch):
-    """#14: follow_redirects=False,3xx 重定向响应直接抛 EndpointSecurityError,
+    """关闭自动跳转后，3xx 响应直接抛出 EndpointSecurityError，
     不跟随(防被劫持的 LLM endpoint 借 302 SSRF 外发会议文本)。"""
     import app.services.llm_gateway as gw_mod
 
@@ -488,7 +488,7 @@ def test_concurrent_dns_pinned_requests_are_serialized(monkeypatch):
     assert LLMGateway._socket_patch_active is False
 
 
-# ========== #16 prompt 渲染(花括号不触发 KeyError 兜底)==========
+# ========== prompt 渲染与花括号兼容 ==========
 
 def test_render_prompt_with_braces_in_transcript():
     """转写含花括号 { 不再留字面 {max_words}。
@@ -512,7 +512,7 @@ def test_render_prompt_without_max_words():
     assert prompt == "提取行动项: 转写内容"
 
 
-# ========== #17 map-reduce 超长摘要 ==========
+# ========== map-reduce 超长摘要 ==========
 
 def test_one_hour_meeting_does_not_trigger_mapreduce(monkeypatch):
     """回归:默认 max_input_tokens=8000 下,1 小时会议(~100 段 100 字)

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { setLocale } from '../i18n'
 
@@ -24,8 +24,15 @@ function toggle(e: Event) {
   open.value = !open.value
 }
 
+function _onDocClick() {
+  open.value = false
+}
+
 onMounted(() => {
-  document.addEventListener('click', () => (open.value = false))
+  document.addEventListener('click', _onDocClick)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('click', _onDocClick)
 })
 </script>
 

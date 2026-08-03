@@ -31,7 +31,7 @@ async function reprocess(){reprocessing.value=true;try{await reprocessMeeting(St
 function seek(segment:Segment){if(player.value){player.value.currentTime=segment.start_time;void player.value.play()}}
 function beginEdit(segment:Segment){if(isRefining.value)return;editingId.value=segment.id;draft.value=segment.text}
 function cancelEdit(){editingId.value=null;draft.value=''}
-async function saveEdit(segment:Segment){const text=draft.value.trim();if(!text)return;await updateSegmentText(String(route.params.id),segment.id,text);segment.text=text;(segment as any).manually_edited=1;cancelEdit()}
+async function saveEdit(segment:Segment){const text=draft.value.trim();if(!text)return;await updateSegmentText(String(route.params.id),segment.id,text);segment.text=text;segment.manually_edited=1;cancelEdit()}
 function toggle(id:number){if(isRefining.value)return;const next=new Set(selected.value);next.has(id)?next.delete(id):next.add(id);selected.value=next}
 async function batchAssign(speakerId:string){if(!selected.value.size||!speakerId)return;await assignSegmentSpeaker(String(route.params.id),[...selected.value],speakerId==='__clear__'?null:speakerId);selected.value=new Set();await load()}
 function openNote(type:'summary'|'minutes'|'actions'){noteType.value=type;noteDraft.value=detail.value?.notes.find(n=>n.note_type===type)?.content||''}
@@ -41,7 +41,7 @@ function beginTitleEdit(){if(!detail.value)return;titleDraft.value=detail.value.
 async function saveTitle(){const title=titleDraft.value.trim();if(!title||!detail.value)return;titleSaving.value=true;try{detail.value.meeting=await updateMeeting(detail.value.meeting.id,title);titleEditing.value=false}finally{titleSaving.value=false}}
 
 let refreshTimer:ReturnType<typeof setInterval>|null=null
-onMounted(async()=>{await Promise.all([load(),loadAudio()]);refreshTimer=setInterval(()=>{if(detail.value?.meeting.status==='processing')void load()},2000);const segment=Number(route.query.segment);if(segment){requestAnimationFrame(()=>document.getElementById(`segment-${segment}`)?.scrollIntoView({behavior:'smooth',block:'center'}))}})
+onMounted(async()=>{await Promise.all([load(),loadAudio()]);refreshTimer=setInterval(async()=>{const st=detail.value?.meeting.status;if(st!=='processing')return;await load();if(detail.value?.meeting.status==='ready'&&!audioUrl.value)void loadAudio()},2000);const segment=Number(route.query.segment);if(segment){requestAnimationFrame(()=>document.getElementById(`segment-${segment}`)?.scrollIntoView({behavior:'smooth',block:'center'}))}})
 onBeforeUnmount(()=>{if(refreshTimer)clearInterval(refreshTimer);if(audioUrl.value)URL.revokeObjectURL(audioUrl.value)})
 </script>
 

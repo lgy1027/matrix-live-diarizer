@@ -199,6 +199,91 @@ def test_runtime_close_releases_engine_hooks_once():
     assert speaker.calls == 1
 
 
+def test_slot_watchdog_marks_leak_after_threshold(monkeypatch):
+    """live 槽被占超过阈值后 slot_leaked 为 True,标记 unhealthy。"""
+    import time as _time
+
+    fake_now = [1000.0]
+    monkeypatch.setattr(
+        "app.runtime.time.monotonic", lambda: fake_now[0]
+    )
+
+    runtime = ApplicationRuntime(asr=object(), speaker=object())
+
+    # 槽未被占用 → 不泄漏
+    assert runtime.slot_leaked is False
+
+    # 模拟 live 槽被占用
+    runtime._mark_slot_acquired("live")
+    assert runtime.slot_leaked is False
+
+    # 推进时间未超阈值
+    fake_now[0] += runtime._SLOT_LEAK_THRESHOLD - 1
+    assert runtime.slot_leaked is False
+
+    # 超阈值 → 泄漏
+    fake_now[0] += 2
+    assert runtime.slot_leaked is True
+
+    # 释放后仍标记泄漏(需重启恢复)
+    runtime._mark_slot_released()
+    assert runtime.slot_leaked is True
+
+
+def test_slot_watchdog_offline_long_job_not_false_positive(monkeypatch):
+    """offline 长任务(pyannote 分离)合法持槽超过阈值不应误判泄漏。"""
+    fake_now = [0.0]
+    monkeypatch.setattr(
+        "app.runtime.time.monotonic", lambda: fake_now[0]
+    )
+
+    runtime = ApplicationRuntime(asr=object(), speaker=object())
+
+    async def scenario():
+        async with runtime.inference.offline():
+            # offline 持槽远超 600s 阈值(模拟 pyannote 跑十几分钟)
+            fake_now[0] += runtime._SLOT_LEAK_THRESHOLD * 2
+            assert runtime.slot_leaked is False, "offline 长任务不应误判泄漏"
+
+    asyncio.run(scenario())
+
+
+def test_slot_watchdog_live_long_hold_is_false_positive_flagged(monkeypatch):
+    """live 持槽超阈值应判泄漏(live 卡死是 deferred 超时的兜底信号)。"""
+    fake_now = [0.0]
+    monkeypatch.setattr(
+        "app.runtime.time.monotonic", lambda: fake_now[0]
+    )
+
+    runtime = ApplicationRuntime(asr=object(), speaker=object())
+
+    async def scenario():
+        async with runtime.inference.live():
+            fake_now[0] += runtime._SLOT_LEAK_THRESHOLD + 100
+            assert runtime.slot_leaked is True, "live 持槽超阈值应判泄漏"
+
+    asyncio.run(scenario())
+
+
+def test_slot_watchdog_clears_on_normal_release(monkeypatch):
+    """正常 acquire/release 周期不触发泄漏(看门狗复位)。"""
+    fake_now = [0.0]
+    monkeypatch.setattr(
+        "app.runtime.time.monotonic", lambda: fake_now[0]
+    )
+
+    runtime = ApplicationRuntime(asr=object(), speaker=object())
+
+    async def scenario():
+        async with runtime.inference.live():
+            fake_now[0] += 1.0  # 短暂占用
+        # 释放后 held_since 清零,即便后续推进时间也不泄漏
+        fake_now[0] += runtime._SLOT_LEAK_THRESHOLD + 100
+        assert runtime.slot_leaked is False
+
+    asyncio.run(scenario())
+
+
 def test_audio_dependency_diagnostics_marks_optional_components(monkeypatch):
     versions = {
         "torch": "2.11.0",

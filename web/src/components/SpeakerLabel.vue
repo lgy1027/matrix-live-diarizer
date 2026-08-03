@@ -42,8 +42,8 @@ const displayText = computed(() => {
   user-select: none;
 }
 .confidence-high {
-  border: 1px solid var(--amber, #f59e0b);
-  color: var(--amber, #f59e0b);
+  border: 1px solid var(--amber, #ff6b35);
+  color: var(--amber, #ff6b35);
   background: transparent;
 }
 .confidence-medium {

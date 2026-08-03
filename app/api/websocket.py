@@ -8,13 +8,12 @@ import logging
 import wave
 from pathlib import Path
 from fastapi import APIRouter, WebSocket
-from starlette.websockets import WebSocketState
 
 from app.config import config
 from app.constants import SYSTEM_SPEAKER
 from app.services import SessionContext
 from app.runtime import EngineSnapshot
-from app.services.realtime_auth import authenticate_websocket
+from app.services.realtime_auth import authenticate_websocket, ws_revalidate
 from engine.speaker.speaker_factory import get_engine_info
 
 logger = logging.getLogger("Matrix_Core")
@@ -79,8 +78,12 @@ async def _ensure_live_meeting(
     if meeting_id:
         return meeting_id
     default_title = f"实时记录-{time.strftime('%H%M%S')}"
-    meeting_id = websocket.app.state.meeting_repo.create(
-        source="live", title=default_title, processing_mode="quick", status="processing"
+    meeting_id = await asyncio.to_thread(
+        websocket.app.state.meeting_repo.create,
+        source="live",
+        title=default_title,
+        processing_mode="quick",
+        status="processing",
     )
     websocket._meeting_id = meeting_id
     if notify:
@@ -94,6 +97,18 @@ async def _ensure_live_meeting(
 async def _append_live_audio(
     websocket: WebSocket, client_id: str, pcm_bytes: bytes
 ) -> None:
+    # per-connection 实时录音上限(对齐上传 upload_max_duration),防已鉴权
+    # WS 持续推 PCM 无限写盘(磁盘 DoS)。超限后停止写盘,不中断转写。
+    max_samples = config.audio.upload_max_duration * config.audio.sample_rate
+    samples_seen = getattr(websocket, "_received_audio_samples", 0)
+    if isinstance(samples_seen, int) and samples_seen > max_samples:
+        if not getattr(websocket, "_live_audio_capped", False):
+            logger.warning(
+                "[WS] %s 实时录音超过 %ds 上限,停止写盘",
+                client_id, config.audio.upload_max_duration,
+            )
+            websocket._live_audio_capped = True
+        return
     meeting_id = await _ensure_live_meeting(websocket, client_id)
     writer = getattr(websocket, "_audio_writer", None)
     if writer is None:
@@ -106,7 +121,8 @@ async def _append_live_audio(
         writer.setframerate(config.audio.sample_rate)
         websocket._audio_writer = writer
         websocket._audio_path = str(audio_path)
-        websocket.app.state.meeting_repo.update(
+        await asyncio.to_thread(
+            websocket.app.state.meeting_repo.update,
             meeting_id,
             audio_path=str(audio_path),
         )
@@ -446,7 +462,6 @@ async def audio_processor(
     # 检查配置
     try:
         sample_rate = config.audio.sample_rate
-        max_buffer_seconds = config.audio.max_buffer_seconds
         skip_frame_threshold = config.audio.skip_frame_threshold
         timeout_seconds = config.audio.timeout_seconds
         # 新增：语音段最大长度（秒）
@@ -526,7 +541,17 @@ async def audio_processor(
         # 转换音频格式。新队列条目携带完整已保存音频中的绝对 offset；
         # fallback 只用于兼容直接向处理器传 bytes 的内部调用。
         chunk_start_sample, data = _unpack_audio_queue_item(item, samples_seen)
-        chunk = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
+        # int16 PCM 要求偶数字节;反代截断/恶意客户端可能发奇数长度。
+        # 截断到最近的偶数边界,避免 frombuffer 抛 ValueError 杀死 processor。
+        if len(data) % 2 != 0:
+            data = data[:-1]
+        if not data:
+            continue
+        try:
+            chunk = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
+        except ValueError:
+            logger.warning("[WS] 收到无法解码的音频帧长度 %d,丢帧", len(data))
+            continue
         chunk_end_sample = chunk_start_sample + len(chunk)
         samples_seen = max(samples_seen, chunk_end_sample)
 
@@ -735,7 +760,10 @@ async def _process_speech_segment(
         spk_id, spk_score = "Spk_unknown", 0.0
         if embedding is not None:
             try:
-                spk_id, spk_score = engines.speaker.compare_and_identify(
+                # 包 to_thread:ChromaDB + numpy 同步操作不阻塞 event loop,
+                # 避免多路 live 并发时 collection 写使其他路的 query 排队卡顿。
+                spk_id, spk_score = await asyncio.to_thread(
+                    engines.speaker.compare_and_identify,
                     embedding,
                     speaker_scope,
                     audio_duration,
@@ -770,7 +798,25 @@ async def _process_speech_segment(
                 result_start = segment_start_time + native_start
                 result_end = segment_start_time + native_end
 
+        # Persist before notifying the client.  A successful WebSocket message
+        # must mean the finalized segment is already durable; otherwise users
+        # can see text that disappears after refresh when SQLite is contended.
         if incr_text:
+            try:
+                await asyncio.to_thread(
+                    websocket.app.state.meeting_repo.append_live_segment,
+                    meeting_id,
+                    text=incr_text,
+                    start_time=result_start,
+                    end_time=result_end,
+                    speaker_label=spk_id,
+                    confidence=spk_score,
+                    words=absolute_words,
+                )
+            except Exception as e:
+                logger.warning(f"[WS] 实时会议存档失败: {e}")
+                return
+
             try:
                 # ASR 结果带 seq,与前面推的 transcribing 占位(seq=N)配对
                 seq_counter = getattr(websocket, "_seq_counter", None)
@@ -789,29 +835,15 @@ async def _process_speech_segment(
                         "unknown" if spk_id == "Spk_unknown" else "provisional"
                     ),
                 }
-                # 字级时间戳:在 incr_text 上做近似对齐(整体偏移到 segment 起始时间 0)
-                # 真实精确对齐需要 segment 累积时间偏移,留作 v0.3.x 增量
                 if incremental_words:
                     msg["words"] = absolute_words
                 await websocket.send_json(msg)
-                logger.info(f"[{client_id} | {spk_id}]: {incr_text}")
-            except Exception as e:
-                logger.debug(f"[PROCESSOR] 发送结果失败: {e}")
-
-        # 实时结果直接进入产品会议模型，与上传任务共享校正/搜索/导出链路。
-        if incr_text:
-            try:
-                websocket.app.state.meeting_repo.append_live_segment(
-                    meeting_id,
-                    text=incr_text,
-                    start_time=result_start,
-                    end_time=result_end,
-                    speaker_label=spk_id,
-                    confidence=spk_score,
-                    words=absolute_words,
+                logger.debug(
+                    "[%s] segment emitted spk=%s len=%d seq=%s",
+                    client_id, spk_id, len(incr_text), seq,
                 )
             except Exception as e:
-                logger.warning(f"[WS] 实时会议存档失败: {e}")
+                logger.debug(f"[PROCESSOR] 发送结果失败: {e}")
 
 
 async def _finalize_live_session(websocket: WebSocket, client_id: str) -> None:
@@ -824,18 +856,85 @@ async def _finalize_live_session(websocket: WebSocket, client_id: str) -> None:
             "refinement_status": "ready",
         }
         try:
-            meeting = websocket.app.state.meeting_repo.get(meeting_id)
+            meeting = await asyncio.to_thread(
+                websocket.app.state.meeting_repo.get, meeting_id
+            )
             audio_path = Path(meeting.get("audio_path") or "") if meeting else None
-            if audio_path is not None and audio_path.is_file():
-                job_id, created = websocket.app.state.job_repo.enqueue_refinement(meeting_id)
+            capped = getattr(websocket, "_live_audio_capped", False)
+            # 音频文件存在且未被写盘上限截断时,排队精修(高精度说话人分离 + 重转写)。
+            # capped 时 WAV 只含前 upload_max_duration 部分,排队精修会用截断 WAV
+            # 重新转写并 replace_generated_transcript(DELETE 旧 segment),会永久删除
+            # 直播中累积的超限部分转写 → 走 finalize_live 保留完整直播转写,标 ready。
+            if audio_path is not None and audio_path.is_file() and not capped:
+                job_id, created = await asyncio.to_thread(
+                    websocket.app.state.job_repo.enqueue_refinement,
+                    meeting_id,
+                    allow_live=True,
+                )
                 if created:
                     websocket.app.state.job_runner.notify()
                 notification.update(job_id=job_id, refinement_status="queued")
             else:
-                websocket.app.state.meeting_repo.finalize_live(meeting_id)
+                if capped:
+                    notification["refinement_status"] = "capped"
+                    logger.warning(
+                        "[WS] %s 实时录音超过写盘上限,保留直播转写不排队精修"
+                        "(防截断 WAV 覆盖转写)", meeting_id,
+                    )
+                    # truncated manifest 必须在 finalize_live 之前写,否则两步
+                    # 之间崩溃会留下 ready 但无 truncated 标记的会议,reprocess
+                    # 会用截断 WAV 重转写、删掉直播累积的完整转写。
+                    manifest_written = False
+                    try:
+                        await asyncio.to_thread(
+                            websocket.app.state.meeting_repo.update,
+                            meeting_id,
+                            processing_manifest_json=json.dumps({
+                                "truncated": True,
+                                "truncated_reason": (
+                                    "live audio exceeded upload_max_duration; "
+                                    "WAV contains only the first segment"
+                                ),
+                            }),
+                        )
+                        manifest_written = True
+                    except Exception:
+                        logger.warning(
+                            "[WS] %s 写 truncated manifest 失败,删除截断 WAV 防 reprocess 覆盖转写",
+                            meeting_id,
+                        )
+                        notification["refinement_status"] = "unavailable"
+                        try:
+                            if audio_path is not None and audio_path.is_file():
+                                await asyncio.to_thread(
+                                    audio_path.unlink, missing_ok=True
+                                )
+                            await asyncio.to_thread(
+                                websocket.app.state.meeting_repo.update,
+                                meeting_id,
+                                audio_path=None,
+                            )
+                        except Exception:
+                            logger.warning(
+                                "[WS] %s 删除截断 WAV 失败,留 processing 待 recover",
+                                meeting_id,
+                            )
+                    if manifest_written:
+                        await asyncio.to_thread(
+                            websocket.app.state.meeting_repo.finalize_live, meeting_id
+                        )
+                else:
+                    await asyncio.to_thread(
+                        websocket.app.state.meeting_repo.finalize_live, meeting_id
+                    )
         except Exception as exc:
             logger.warning("[WS] 实时会议精修排队失败，保留实时文稿: %s", exc)
-            websocket.app.state.meeting_repo.finalize_live(meeting_id)
+            try:
+                await asyncio.to_thread(
+                    websocket.app.state.meeting_repo.finalize_live, meeting_id
+                )
+            except Exception:
+                logger.warning("[WS] %s finalize_live 失败,留 processing 待 recover", meeting_id)
             notification["refinement_status"] = "unavailable"
         try:
             await websocket.send_json(notification)
@@ -847,7 +946,9 @@ async def _finalize_live_session(websocket: WebSocket, client_id: str) -> None:
         # 这里再加一层兜底,防 _engine_snapshot/speaker 访问偶发抛导致 finalize
         # 中断(后续 WS 流程崩在收尾)。
         try:
-            _engine_snapshot(websocket).speaker.cleanup_client(speaker_scope)
+            await asyncio.to_thread(
+                _engine_snapshot(websocket).speaker.cleanup_client, speaker_scope
+            )
         except Exception:
             logger.warning("[WS] 清理说话人资源异常 %s", speaker_scope, exc_info=True)
     logger.info("[WS] 用户 %s 连接已释放", client_id)
@@ -872,6 +973,15 @@ async def _finish_deferred_processor(
             "[WS] %s deferred processor %.0fs 未完成,放弃等待(可能推理死锁,槽需重启回收)",
             client_id, DEFERRED_PROCESSOR_TIMEOUT_SECONDS,
         )
+        # 看门狗:处理器未在超时内返回,to_thread 推理可能卡住、槽无法释放。
+        # 标记 runtime 槽泄漏,/ready 将转 not_ready 提示运维重启,而非静默卡死。
+        runtime = getattr(websocket.app.state, "runtime", None)
+        if runtime is not None:
+            runtime._slot_leaked = True
+            logger.error(
+                "[WS] %s 推理槽疑似泄漏,已标记 unhealthy,需重启服务回收",
+                client_id,
+            )
     except Exception:
         logger.warning("[WS] %s 后台 processor 异常", client_id, exc_info=True)
     finally:
@@ -949,6 +1059,15 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
     try:
         # 接收循环（主协程）
         while not stop_event.is_set():
+            # 周期复验凭证:logout/改密后踢掉盗号长连接(对齐 HTTP 每请求复验)
+            if not await ws_revalidate(websocket):
+                logger.info("[WS] %s 凭证已失效(logout/改密),断开长连接", client_id)
+                try:
+                    await websocket.close(code=4401, reason="凭证已失效")
+                except Exception:
+                    pass
+                stop_event.set()
+                break
             try:
                 message = await asyncio.wait_for(
                     websocket.receive(),
@@ -972,13 +1091,17 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                                 websocket, client_id, notify=False
                             )
                             if new_title:
-                                websocket.app.state.meeting_repo.update(
-                                    meeting_id, title=new_title[:200]
+                                await asyncio.to_thread(
+                                    websocket.app.state.meeting_repo.update,
+                                    meeting_id,
+                                    title=new_title[:200],
                                 )
                             else:
-                                new_title = websocket.app.state.meeting_repo.get(
-                                    meeting_id
-                                )["title"]
+                                # 会议可能已被另一客户端删除,get 返 None
+                                row = await asyncio.to_thread(
+                                    websocket.app.state.meeting_repo.get, meeting_id
+                                )
+                                new_title = row["title"] if row else "未命名会议"
                             await websocket.send_json({
                                 "type": "renamed", "title": new_title[:200],
                                 "meeting_id": meeting_id,
@@ -1028,6 +1151,9 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
 
         # ASR can legitimately take longer than two seconds. A bounded graceful
         # drain is safer than cancelling a worker thread that keeps running.
+        # CancelledError(进程关停命中 drain 窗口)是 BaseException,不被 except Exception
+        # 捕获,会跳过后续清理 → 留下孤儿 WAV fd / Chroma 簇 / stuck meeting。
+        # 显式捕获后执行强制收尾再 re-raise。
         deferred = False
         try:
             deferred = not await _wait_for_processor(
@@ -1038,6 +1164,14 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                     "[WS] %s processor 30s 内未退出；转为后台持有推理槽并延后 finalize",
                     client_id,
                 )
+        except asyncio.CancelledError:
+            logger.warning("[WS] %s 关停中断清理, 强制收尾 live 资源", client_id)
+            _close_live_audio(websocket)
+            try:
+                await _finalize_live_session(websocket, client_id)
+            except Exception as e:
+                logger.warning("[WS] %s 强制 finalize 失败: %s", client_id, e)
+            raise
         except Exception as e:
             logger.warning(f"[WS] {client_id} processor 异常: {e}")
 

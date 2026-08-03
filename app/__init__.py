@@ -19,11 +19,12 @@ from app.middleware.security import SecurityHeadersMiddleware
 tf_logging.set_verbosity_error()
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG if config.server.debug else logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
 logger = logging.getLogger("Matrix_Core")
+APP_VERSION = "0.2.0-beta"
 
 
 def _is_expected_windows_transport_reset(context: dict) -> bool:
@@ -74,20 +75,33 @@ def _register_lifecycle_handlers(app: FastAPI, *, startup, shutdown) -> None:
 
 async def _shutdown_application(job_runner, runtime, app) -> None:
     """Stop background work before releasing process-local model resources."""
-    await job_runner.stop()
+    # Older embedders may implement ``stop`` without a return value.  Only an
+    # explicit False means a provider worker is known to still be alive.
+    runner_stopped = await job_runner.stop()
     tasks = getattr(app.state, "ws_background_tasks", None)
     if tasks:
-        # deferred processor 卡在不可取消的 to_thread 推理时,gather 会无限等。
-        # 加超时:超时后放弃等待(deferred 内部已有自己的最终超时,正常应先退出),
-        # 不让单只卡死的 WS 拖死整个进程关停。
+        # 上限对齐 deferred processor 超时(120s),避免推理进行中卸载模型触发
+        # use-after-free;超时后显式 cancel 残余 task 再 short-await,再 close。
         try:
             await asyncio.wait_for(
                 asyncio.gather(*tasks, return_exceptions=True),
-                timeout=60.0,
+                timeout=120.0,
             )
         except asyncio.TimeoutError:
-            logger.warning("[shutdown] %d 个 WS 后台任务 60s 未完成,放弃等待", len(tasks))
-    await runtime.close()
+            # wait_for 已 cancel gather(传播给内部 task);不直接操作 t(tasks
+            # 里可能是裸 coroutine 无 done()/cancel())。120s 对齐 deferred
+            # processor 超时,正常应已收尾;极端未完成则由进程退出回收。
+            logger.warning(
+                "[shutdown] %d 个 WS 后台任务 120s 未完成, 放弃等待",
+                len(tasks),
+            )
+    if runner_stopped is not False:
+        await runtime.close()
+    else:
+        # A provider worker can outlive cancellation of its asyncio wrapper.
+        # Closing model objects here would race that worker; process teardown is
+        # the safe final resource reclamation path.
+        logger.warning("[shutdown] 后台推理仍在运行，跳过显式模型卸载")
 
 
 def _is_running_under_pytest() -> bool:
@@ -98,6 +112,10 @@ def _is_running_under_pytest() -> bool:
 def _validate_runtime_safety() -> None:
     """拒绝明显危险的生产运行配置."""
     mode = config.deployment.mode
+    if config.server.workers != 1:
+        raise RuntimeError(
+            "WORKERS 必须为 1：任务队列、限流、会话撤销和推理引擎均为进程内状态"
+        )
     if (
         os.environ.get("TEST_AUTH_BYPASS") == "1"
         and mode in ("lan", "public")
@@ -114,6 +132,11 @@ def _validate_runtime_safety() -> None:
             raise RuntimeError(f"DEPLOYMENT_MODE={mode} 时必须设置 JWT_SECRET")
         if "*" in config.cors.allowed_origins:
             raise RuntimeError(f"DEPLOYMENT_MODE={mode} 时必须把 ALLOWED_ORIGINS 收紧到可信 Origin")
+        if not getattr(config.server, "enable_https", False):
+            logger.warning(
+                "DEPLOYMENT_MODE=%s 未启用 HTTPS: JWT 明文传输有 MITM 风险,"
+                "请置于 HTTPS 反代后或设置 ENABLE_HTTPS=true", mode,
+            )
     if mode == "public":
         logger.warning("DEPLOYMENT_MODE=public: 本项目不推荐公网裸露部署,请确认已启用 HTTPS/反向代理/防火墙")
 
@@ -124,15 +147,18 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=APP_TITLE,
         description="实时音频转写与说话人识别系统",
-        version="0.4.0-beta.0"
+        version=APP_VERSION,
     )
     
     # 速率限制中间件(从 config.rate_limit 读取,支持 .env 调参)
+    # trusted_proxies 与 WS realtime_auth 共用同一 TRUSTED_PROXIES 来源,
+    # 避免 LAN 反代下 HTTP 限流不信任 XFF → 全 LAN 共享单桶被单点 DoS。
     app.add_middleware(
         RateLimitMiddleware,
         enabled=config.rate_limit.enabled,
         requests_per_minute=config.rate_limit.requests_per_minute,
         requests_per_hour=config.rate_limit.requests_per_hour,
+        trusted_proxies=config.rate_limit.trusted_proxies,
     )
     
     # CORS — 本地默认全开,LAN 部署可通过 .env 收紧
@@ -175,11 +201,14 @@ def create_app() -> FastAPI:
 
         @app.get("/{full_path:path}", include_in_schema=False)
         async def spa_catch_all(full_path: str) -> FileResponse:
-            # /v1/* /health /ready /ws 走路由, 已由 API 注册; 这里只兜底 SPA
-            if full_path.startswith(("v1/", "health", "ready", "ws", "docs", "openapi.json")):
-                from fastapi import HTTPException
-                raise HTTPException(status_code=404, detail="Not Found")
-            return FileResponse(dist_index)
+            # 只兜底已知 SPA 路由前缀;未知路径(/v2 /api /internal 等)返 404,
+            # 避免吞掉未来 v2 路由或让未知 API 调用方拿到 HTML。
+            from fastapi import HTTPException
+            spa_prefixes = ("live", "meetings", "people", "settings", "login", "tasks")
+            first = full_path.split("/")[0] if full_path else ""
+            if not full_path or first in spa_prefixes:
+                return FileResponse(dist_index)
+            raise HTTPException(status_code=404, detail="Not Found")
 
         logger.info(f"🟢 SPA 已挂载: / → {dist_index}")
     else:
@@ -189,16 +218,36 @@ def create_app() -> FastAPI:
 
 
 def _init_engines(app: FastAPI):
-    """初始化推理引擎"""
+    """初始化推理引擎。
+
+    引擎加载失败不应击穿整个 app:用降级模式(None 引擎)继续启动,
+    /ready 自然返 not_ready,前端只读模式可用,而不是进程崩溃。
+    """
     from engine.asr import get_asr_manager
-    from engine.speaker import get_speaker_engine, get_engine_info
+    from engine.speaker import get_speaker_engine
 
-    asr_manager = get_asr_manager()
-    asr_engine = asr_manager.get_engine()
-    spk_engine = get_speaker_engine()
+    asr_engine = None
+    asr_manager = None
+    try:
+        asr_manager = get_asr_manager()
+        asr_engine = asr_manager.get_engine()
+    except Exception as exc:
+        logger.error("[APP] ASR 引擎初始化失败,降级为无 ASR 模式: %s", exc)
+    spk_engine = None
+    try:
+        spk_engine = get_speaker_engine()
+    except Exception as exc:
+        logger.error("[APP] 声纹引擎初始化失败,降级为无声纹模式: %s", exc)
 
-    asr_info = asr_manager.get_engine_info()
-    engine_info = get_engine_info()
+    try:
+        asr_info = asr_manager.get_engine_info()
+    except Exception:
+        asr_info = {"name": "unavailable", "model": "unavailable"}
+    try:
+        from engine.speaker import get_engine_info
+        engine_info = get_engine_info()
+    except Exception:
+        engine_info = {"name": "unavailable", "model": "unavailable"}
     logger.info(f"ASR 引擎: {asr_info['name']}, 模型: {asr_info['model']}")
     logger.info(f"声纹引擎: {engine_info['name']}, 模型: {engine_info['model']}")
 
@@ -240,9 +289,8 @@ def _init_engines(app: FastAPI):
     app.state.auth_service = AuthService(db)
 
     app.state.runtime = runtime
-    # Compatibility aliases for integrations; application code reads runtime.
-    app.state.asr_engine = asr_engine
-    app.state.asr_manager = asr_manager
+    # people.py 注册声样时保留 spk_engine 作为兼容入口；其余推理统一由
+    # runtime 管理。
     app.state.spk_engine = spk_engine
     app.state.config = config  # SPA 重构: 让 health.py 读 storage 配置
 

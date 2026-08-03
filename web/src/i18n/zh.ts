@@ -52,7 +52,6 @@ const zh: Record<string, string> = {
   'library.delete.ok': '已删除',
   'library.empty.hint': '录制会话或上传音频后，转写将显示在此处。',
   'library.empty.title': '文稿库为空。',
-  /* 整改 1: 删 library.head.title/sub, 由 view.library.title/sub 替代 */
   'library.load.fail': '无法加载文稿库。',
   'library.search.ph': '搜索转写内容',
   'library.spk.plural': '声音',
@@ -191,7 +190,7 @@ const zh: Record<string, string> = {
   'upload.uploading': '正在上传 {0}…',
   'view.library.ai.actionItems': 'Extract action items',
   'view.library.ai.disabled': '尚未启用本地大模型，请前往设置配置。',
-  'view.library.ai.generating': '生成中…',  /* 整改 3+4: zh 改中文, ellipsis 也改 … */
+  'view.library.ai.generating': '生成中…',
   'view.library.ai.minutes': 'Generate minutes',
   'view.library.ai.result': 'Result',
   'view.library.ai.summarize': 'Generate summary',
@@ -206,7 +205,7 @@ const zh: Record<string, string> = {
   'view.library.meta.source': '来源',
   'view.library.meta.speakers': '说话人',
   'view.library.meta.turns': '话轮',
-  'view.library.segments.empty': '暂无转写',  /* 整改 3+4: 原 zh.ts 写英文, 改中文 */
+  'view.library.segments.empty': '暂无转写',
   'view.library.source.live': 'Live',
   'view.library.source.upload': '上传',
   'view.library.stats.hotWords': 'Hot words',
@@ -258,11 +257,10 @@ const zh: Record<string, string> = {
   'view.voice.untitled': '未命名',
   'view.settings.engine': 'Engine',
   'view.settings.llm': 'Local LLM',
-  'view.settings.about': '关于<em>本机</em>',  /* 整改 4: 加中文主标 + em 副 */
+  'view.settings.about': '关于<em>本机</em>',
   'view.library.tab.all': '全部',
   'view.library.tab.live': '实时',
   'view.library.tab.upload': '上传',
-  /* 整改 3: 删重复 key view.library.untitled, 实际使用 library.untitled */
   'view.detail.tab.transcript': '📝 转写',
   'view.detail.tab.stats': '📊 统计',
   'view.detail.tab.export': '📤 导出',
@@ -276,7 +274,6 @@ const zh: Record<string, string> = {
   'view.live.status.recording': '录制中',
   'view.live.status.stopped': '已停止',
   'view.live.title': '实时 <em>转写</em>',
-  /* 整改 1: 删孤儿 view.live.title.post / .pre (从未引用) */
   'view.live.transcript.label': '转写',
   'view.live.wavePH': '待机 · 点击录音键开始',
   'view.live.wavePH.ended': '会话已结束 · 在文稿库中查看',
@@ -356,7 +353,6 @@ const zh: Record<string, string> = {
   'voice.enroll.name.title': '输入显示名 (可选)',
   'voice.enroll.ok': '已注册',
   'voice.enroll.uploading': '正在注册声纹…',
-  /* 整改 1: 删 voice.head.title/sub, 由 view.voice.title/sub 替代 */
   'voice.load.fail': '无法加载声纹数据。',
   'voice.menu.delete': '删除',
   'voice.menu.rename': '重命名',
@@ -388,7 +384,6 @@ const zh: Record<string, string> = {
   'login.hidePassword': '隐藏',
   'speaker.unknown': '未知说话人',
   'live.transcribing': '正在识别…',
-  /* 整改 3+4: 补全 login 页面英文 (之前 en.ts 无对应 key) */
   'login.hint1': '默认账户',
   'login.hint2': '密码',
   'login.hint3': '首次登录后系统强制修改密码',
@@ -396,6 +391,9 @@ const zh: Record<string, string> = {
   'login.sub': 'Live transcription & speaker diarization',
   'login.submit': '登 录',
   'login.submitting': '登录中…',
+  'login.err.empty': '请输入用户名和密码',
+  'login.err.fail': '登录失败,请检查用户名和密码',
+  'login.err.timeout': '请求超时,请重试',
   'common.loading': '加载中…',
   'live.clear.confirmDetail': '（服务器端会话不受影响）',
   'settings.about.enginesLabel': 'Diarization:',

@@ -18,7 +18,8 @@
    npm run typecheck
    npm run build
    cd ..
-   python -m pytest -q
+   python -m pytest tests/ -q --ignore=tests/test_smoke_boot.py
+   ruff check app engine main.py scripts
    ```
 4. 提 PR 时说明:
    - 改了什么行为

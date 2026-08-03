@@ -37,15 +37,21 @@ def validate_audio_file(path: str | Path, *, max_duration_sec: float | None = No
     import librosa
 
     path = str(path)
+    # 用前 1 秒探测是否可解码(快速失败);时长独立用 get_duration 精确计算。
+    # 注意:get_duration(path=path) 不可用时的 fallback 不能复用只加载了 1 秒的
+    # audio,否则几小时的长音频会被误判为 1 秒。fallback 重新无 duration 限制加载。
     audio, sample_rate = librosa.load(path, sr=None, mono=True, duration=1.0)
     if sample_rate <= 0 or len(audio) == 0:
         raise ValueError("音频中没有可解码的采样")
     get_duration = getattr(librosa, "get_duration", None)
-    duration = (
-        float(get_duration(path=path))
-        if get_duration is not None
-        else len(audio) / float(sample_rate)
-    )
+    if get_duration is not None:
+        duration = float(get_duration(path=path))
+    else:
+        # fallback(旧 librosa 无 get_duration):只解码到 max_duration+1 秒上限,
+        # 避免几小时的长音频被全量解码进内存 OOM。若实际更长,下面 max 检查会拒绝。
+        cap = (max_duration_sec + 1.0) if max_duration_sec else 1.0
+        full_audio, _ = librosa.load(path, sr=None, mono=True, duration=cap)
+        duration = len(full_audio) / float(sample_rate)
     if duration <= 0:
         raise ValueError("音频时长无效")
     if max_duration_sec and duration > max_duration_sec:

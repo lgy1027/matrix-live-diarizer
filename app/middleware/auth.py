@@ -1,4 +1,4 @@
-"""JWT 鉴权中间件 (Roadmap 安全项)
+"""JWT 鉴权中间件。
 
 策略: 全部 /v1/* 需 Bearer token,白名单路径除外
 - 白名单: /v1/auth/login, /v1/auth/logout, /health, /ready, /v1/models, /v1/llm/status
@@ -16,8 +16,9 @@ from app.middleware.security import is_trusted_browser_origin
 
 logger = logging.getLogger("Matrix_Auth_MW")
 
-# 白名单路径前缀(不需要鉴权)
-WHITELIST_PATHS = (
+# 白名单路径前缀(不需要鉴权)。/v1/models /v1/engines 在 lan/public 模式下
+# 会移出白名单,避免未认证主机枚举已安装模型(见 _whitelist_for_mode)。
+_LOCAL_WHITELIST_PATHS = (
     "/v1/auth/login",
     "/v1/auth/logout",
     "/health",
@@ -26,6 +27,23 @@ WHITELIST_PATHS = (
     "/v1/engines",
     "/v1/llm/status",
 )
+# lan/public 模式收紧:移除会泄露模型目录的端点。
+_RESTRICTED_WHITELIST_PATHS = (
+    "/v1/auth/login",
+    "/v1/auth/logout",
+    "/health",
+    "/ready",
+    "/v1/llm/status",
+)
+
+
+def whitelist_for_mode(mode: str) -> tuple:
+    """返回当前部署模式下的鉴权白名单。
+
+    local 模式:本机默认无 token 可用(可信),保留 /v1/models /v1/engines。
+    lan/public 模式:这些端点泄露模型目录,需鉴权。
+    """
+    return _RESTRICTED_WHITELIST_PATHS if mode in ("lan", "public") else _LOCAL_WHITELIST_PATHS
 
 PASSWORD_CHANGE_ALLOWED_PATHS = (
     "/v1/auth/me",
@@ -62,8 +80,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # 静态文件 + WebSocket 不走此中间件
         if not path.startswith("/v1/"):
             return await call_next(request)
-        # 白名单放行
-        if any(path == p or path.startswith(p + "/") for p in WHITELIST_PATHS):
+        from app.config import config
+        # 白名单放行(按部署模式收紧:lan/public 不暴露 /v1/models /v1/engines)
+        _whitelist = whitelist_for_mode(config.deployment.mode)
+        if any(path == p or path.startswith(p + "/") for p in _whitelist):
             return await call_next(request)
         # OPTIONS 预检放行(CORS)
         if request.method == "OPTIONS":
@@ -95,6 +115,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
         payload = auth_service.decode_token(token)
         if not payload:
             return _auth_error_response(request, 401, "token 无效或已过期")
+        # 主动 logout 的 token 立即失效(进程内 revoked 集合)
+        if auth_service.is_revoked(token):
+            return _auth_error_response(request, 401, "token 已注销,请重新登录")
         # 把 user_id 注入 request.state 给 endpoint 用
         try:
             user_id = int(payload["sub"])
