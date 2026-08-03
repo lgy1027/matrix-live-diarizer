@@ -64,11 +64,18 @@ def _ws_client_ip(websocket) -> str:
     if direct and _is_ws_trusted(direct):
         forwarded = websocket.headers.get("X-Forwarded-For")
         if forwarded:
-            return forwarded.split(",")[0].strip()
+            return _canonical_ip(forwarded.split(",")[0])
         real_ip = websocket.headers.get("X-Real-IP")
         if real_ip:
-            return real_ip.strip()
-    return direct or "unknown"
+            return _canonical_ip(real_ip)
+    return _canonical_ip(direct)
+
+
+def _canonical_ip(value: str) -> str:
+    try:
+        return str(ipaddress.ip_address(value.strip()))
+    except (ValueError, AttributeError):
+        return "unknown"
 
 
 def _is_ws_trusted(ip_str: str) -> bool:
@@ -104,7 +111,8 @@ async def authenticate_websocket(websocket, client_id: str) -> bool:
     client_host = _ws_client_ip(websocket)
     # WS 连接限流在鉴权之前,防空打 WS 占 fd/协程
     if _ws_rate_limited(client_host):
-        logger.warning("[WS] %s 连接被限流 (%.0fs 内超 %d)", client_host,
+        safe_client_host = client_host.replace("\r", r"\r").replace("\n", r"\n")[:64]
+        logger.warning("[WS] %s 连接被限流 (%.0fs 内超 %d)", safe_client_host,
                        _WS_CONNECT_WINDOW, _WS_CONNECT_MAX)
         try:
             await websocket.close(code=4429, reason="连接过于频繁")

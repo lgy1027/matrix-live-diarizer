@@ -163,6 +163,17 @@ def test_ws_client_ip_ignores_xff_from_untrusted():
     assert realtime_auth._ws_client_ip(ws) == "203.0.113.50"
 
 
+def test_ws_client_ip_rejects_malformed_forwarded_value():
+    from app.services import realtime_auth
+    from unittest.mock import MagicMock
+
+    ws = MagicMock()
+    ws.client.host = "127.0.0.1"
+    ws.headers = {"X-Forwarded-For": "203.0.113.9\r\nforged-log: true"}
+
+    assert realtime_auth._ws_client_ip(ws) == "unknown"
+
+
 # ============================================================
 # WS 长连接周期复验:logout/改密后踢掉盗号连接
 # ============================================================

@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 
 from app.api import llm as llm_api
 from app.config import LLMConfig
+from app.services.llm_gateway import EndpointSecurityError
 
 
 class MemorySettings:
@@ -121,6 +122,33 @@ def test_explicit_test_calls_probe_once_and_status_reuses_result(monkeypatch):
     assert status.json()["available"] is True
     assert status.json()["last_tested_at"] == tested.json()["last_tested_at"]
     assert calls["count"] == 1
+
+
+def test_connection_test_does_not_expose_endpoint_security_details(monkeypatch):
+    monkeypatch.setenv("TEST_AUTH_BYPASS", "1")
+    monkeypatch.setattr(
+        llm_api,
+        "_env_llm_cfg",
+        lambda: LLMConfig(
+            enabled=True,
+            endpoint="http://127.0.0.1:11434/v1",
+            model="test-model",
+        ),
+    )
+
+    class UnsafeGateway:
+        def __init__(self, _cfg):
+            pass
+
+        async def is_available(self):
+            raise EndpointSecurityError("resolved host contains internal-secret.example")
+
+    monkeypatch.setattr(llm_api, "LLMGateway", UnsafeGateway)
+    response = TestClient(_llm_app()).post("/v1/llm/test")
+
+    assert response.status_code == 200
+    assert response.json()["error"] == "LLM endpoint 配置不安全"
+    assert "internal-secret" not in response.text
 
 
 def test_saving_settings_clears_probe_without_testing(monkeypatch):

@@ -10,7 +10,6 @@ import numpy as np
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator
-
 from app.config import config
 from app.services.audio_files import (
     ALLOWED_AUDIO_EXTENSIONS,
@@ -119,12 +118,25 @@ async def add_voice_sample(
     request: Request,
     file: UploadFile = File(...),
 ):
-    if request.app.state.people_repo.get(person_id) is None:
+    try:
+        parsed_person_id = uuid.UUID(person_id)
+    except (ValueError, AttributeError):
+        raise HTTPException(status_code=404, detail="人物不存在") from None
+    canonical_person_id = str(parsed_person_id)
+    if canonical_person_id != person_id:
+        raise HTTPException(status_code=404, detail="人物不存在")
+    if request.app.state.people_repo.get(canonical_person_id) is None:
         raise HTTPException(status_code=404, detail="人物不存在")
     extension = Path(file.filename or "sample.wav").suffix.lower()
     if extension not in ALLOWED_AUDIO_EXTENSIONS:
         raise HTTPException(status_code=400, detail="不支持的声音样本格式")
-    voice_dir = Path(config.storage.media_dir).resolve() / "voices" / person_id
+    voice_root = (Path(config.storage.media_dir).resolve() / "voices").resolve()
+    # 文件系统目录仅使用 UUID 解析器生成的固定长度十六进制值，不直接使用 URL 参数。
+    voice_dir = (voice_root / parsed_person_id.hex).resolve()
+    try:
+        voice_dir.relative_to(voice_root)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="声音样本路径无效") from None
     voice_dir.mkdir(parents=True, exist_ok=True)
     target = voice_dir / f"{uuid.uuid4().hex}{extension}"
     try:
@@ -196,7 +208,7 @@ async def add_voice_sample(
             )
             raise HTTPException(status_code=422, detail=detail)
         audio_sha256 = hashlib.sha256(audio.astype("<f4", copy=False).tobytes()).hexdigest()
-        if request.app.state.people_repo.has_sample_hash(person_id, audio_sha256):
+        if request.app.state.people_repo.has_sample_hash(canonical_person_id, audio_sha256):
             raise HTTPException(status_code=409, detail="该人物已注册相同的声音样本")
         runtime = getattr(request.app.state, "runtime", None)
         speaker_engine = (
@@ -238,7 +250,7 @@ async def add_voice_sample(
         quality_score = assessment.quality_score
         try:
             sample_id = request.app.state.people_repo.add_sample(
-                person_id,
+                canonical_person_id,
                 audio_path=str(target),
                 duration_sec=duration,
                 embedding=vector.tobytes(),
