@@ -10,7 +10,7 @@ numpy>=1.24,<3
 soundfile>=0.12,<1
 summa==1.2.0
 PyJWT>=2.8,<3
-werkzeug>=3,<4
+werkzeug>=3.1.8,<4
 setuptools>=68,<81
 addict>=2.4,<3
 simplejson>=3.19,<4
