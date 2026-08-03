@@ -27,6 +27,26 @@ _WS_TRUSTED_NETWORKS = [
     if c.strip()
 ]
 _ws_connect_log: dict[str, collections.deque] = {}
+# 进程级 IP 字典容量上限,防公网扫描/IPv6 轮换 never-again 的 IP 永驻内存。
+_WS_MAX_TRACKED_IPS = 50_000
+
+# 已建立的 WS 长连接复验凭证的间隔。HTTP 每请求都查 revoked/pwd_iat,
+# 但 WS 长连接在 logout/改密后默认不会断,盗号者可继续导出实时转写/声纹。
+# 每 N 秒在主接收循环复验一次,失效即 close(4401)。
+_WS_REVALIDATE_INTERVAL = 10.0
+
+
+def _ws_sweep_tracked() -> None:
+    """全局容量上限淘汰:超 _WS_MAX_TRACKED_IPS 时按最近连接时间 LRU 丢弃。"""
+    if len(_ws_connect_log) <= _WS_MAX_TRACKED_IPS:
+        return
+    ranked = sorted(
+        _ws_connect_log.items(),
+        key=lambda kv: kv[1][-1] if kv[1] else 0.0,
+    )
+    drop = len(_ws_connect_log) - _WS_MAX_TRACKED_IPS
+    for ip, _ in ranked[:drop]:
+        _ws_connect_log.pop(ip, None)
 
 
 def _ws_client_ip(websocket) -> str:
@@ -35,6 +55,10 @@ def _ws_client_ip(websocket) -> str:
     与 RateLimitMiddleware._get_client_ip 同策略。反代后所有 WS 直连都是 proxy IP,
     不读 XFF 会导致全站共享同一限流桶(单点 DoS);但无条件信任 XFF 又可被伪造。
     仅在直连 IP ∈ trusted_proxies 时采纳。
+
+    注意:local 模式直连恒为 loopback(命中默认 trusted_proxies),此时也采纳 XFF,
+    以支持"本机起反代(如 nginx)再回连"的部署形态。local 威胁模型假定本机可信;
+    若担心本机进程伪造 XFF 绕限流,应切 lan/public 模式 + 显式配 TRUSTED_PROXIES。
     """
     direct = websocket.client.host if websocket.client else ""
     if direct and _is_ws_trusted(direct):
@@ -60,6 +84,7 @@ def _ws_rate_limited(client_host: str) -> bool:
     if not client_host:
         return False
     now = time.time()
+    _ws_sweep_tracked()
     dq = _ws_connect_log.setdefault(client_host, collections.deque())
     cutoff = now - _WS_CONNECT_WINDOW
     while dq and dq[0] < cutoff:
@@ -117,6 +142,10 @@ async def authenticate_websocket(websocket, client_id: str) -> bool:
         if not decoded:
             await websocket.close(code=4401, reason="token 无效")
             return False
+        # logout 后的 token 立即失效(与 HTTP 中间件一致的 revoked 集合)
+        if auth_service.is_revoked(token):
+            await websocket.close(code=4401, reason="token 已注销")
+            return False
         try:
             user_id = int(decoded["sub"])
             user = auth_service.get_user(user_id)
@@ -133,6 +162,11 @@ async def authenticate_websocket(websocket, client_id: str) -> bool:
             await websocket.close(code=4401, reason="token 格式错")
             return False
         logger.info("[WS] %s 鉴权通过 (user_id=%s)", client_id, user_id)
+        # 存 token 供主接收循环周期复验(logout/改密后踢掉盗号长连接)。
+        # local/测试 bypass 分支无 token,_auth_token 保持未设,复验直接放行。
+        websocket._auth_token = token
+        websocket._auth_user_id = user_id
+        websocket._auth_checked_at = time.time()
         return True
     except asyncio.TimeoutError:
         await websocket.close(code=4401, reason="auth 超时")
@@ -140,3 +174,53 @@ async def authenticate_websocket(websocket, client_id: str) -> bool:
     except json.JSONDecodeError:
         await websocket.close(code=4401, reason="auth 格式错")
         return False
+    except Exception as exc:
+        # DB 异常 / decode_token 内部错误等:关闭 WS,避免连接悬空
+        logger.warning("[WS] 鉴权内部错误: %s", exc)
+        try:
+            await websocket.close(code=4401, reason="鉴权内部错误")
+        except Exception:
+            pass
+        return False
+
+
+async def ws_revalidate(websocket) -> bool:
+    """已建立的 WS 长连接周期复验凭证。
+
+    HTTP 每请求都查 is_revoked/pwd_iat,但 WS 长连接在用户 logout 或改密后
+    默认不断开,盗号者可继续接收实时转写/说话人数据。主接收循环每
+    _WS_REVALIDATE_INTERVAL 秒调一次本函数,失效即由调用方 close(4401)。
+
+    local/测试 bypass 分支无 _auth_token,直接放行(不复验)。
+    返 False 表示凭证已失效。DB 异常时不踢(避免瞬时抖动误断合法连接)。
+    """
+    token = getattr(websocket, "_auth_token", None)
+    if not token:
+        return True
+    now = time.time()
+    if now - getattr(websocket, "_auth_checked_at", 0.0) < _WS_REVALIDATE_INTERVAL:
+        return True  # 未到复验周期
+    websocket._auth_checked_at = now
+    app = getattr(websocket, "app", None)
+    auth_service = getattr(getattr(app, "state", None), "auth_service", None) if app else None
+    if auth_service is None:
+        return True
+    try:
+        if auth_service.is_revoked(token):
+            return False
+        decoded = auth_service.decode_token(token)
+        if not decoded:
+            return False
+        try:
+            user = auth_service.get_user(int(decoded["sub"]))
+        except (ValueError, KeyError, TypeError):
+            return False
+        if not user or not user.get("is_active"):
+            return False
+        if float(user.get("password_changed_at") or 0) > float(decoded.get("pwd_iat", 0)):
+            return False
+    except Exception as exc:
+        # DB 瞬时抖动:不踢,避免误断合法连接;下次复验再判
+        logger.warning("[WS] 复验内部错误(不踢): %s", exc)
+        return True
+    return True

@@ -1,6 +1,8 @@
 """People and registered voice samples API."""
 import asyncio
 import hashlib
+import logging
+import math
 import uuid
 from pathlib import Path
 
@@ -14,6 +16,7 @@ from app.services.audio_files import (
     ALLOWED_AUDIO_EXTENSIONS,
     UploadTooLargeError,
     persist_upload,
+    validate_audio_file,
 )
 from app.services.voice_sample_quality import assess_voice_sample
 from app.services.voice_matcher import (
@@ -23,6 +26,8 @@ from app.services.voice_matcher import (
 from app.repositories.people import DuplicateVoiceSampleError
 from engine.speaker.speaker_factory import embedding_model_id
 
+
+logger = logging.getLogger("Matrix_People")
 
 router = APIRouter(prefix="/v1/people", tags=["people"])
 
@@ -38,6 +43,15 @@ class PersonBody(BaseModel):
         if not value:
             raise ValueError("人物姓名不能为空")
         return value
+
+    @field_validator("notes")
+    @classmethod
+    def validate_notes(cls, value: str | None) -> str | None:
+        # strip 后纯空白归一为 None,防 "   " 原样入库
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
 
 
 @router.get("")
@@ -130,11 +144,38 @@ async def add_voice_sample(
             raise HTTPException(status_code=400, detail="声音样本为空")
         import librosa
 
-        audio, _ = await asyncio.to_thread(
-            librosa.load, str(target), sr=config.audio.sample_rate, mono=True
-        )
+        # 先用前 1 秒探测 + 元数据算时长,超限在此拒绝,避免超长低码率
+        # 样本被全量解码进内存(50MB MP3 可解码成数小时 PCM → OOM)。
+        try:
+            await asyncio.to_thread(
+                validate_audio_file,
+                target,
+                max_duration_sec=config.audio.upload_max_duration,
+            )
+        except ValueError as exc:
+            msg = str(exc)
+            logger.warning("[voice] 样本校验失败 %s: %s", target, exc)
+            if "超过" in msg:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"声音样本超过 {config.audio.upload_max_duration}s 上限",
+                ) from None
+            raise HTTPException(status_code=400, detail="声音样本无法解码,请检查文件格式") from None
+        try:
+            audio, _ = await asyncio.to_thread(
+                librosa.load, str(target), sr=config.audio.sample_rate, mono=True
+            )
+        except Exception as exc:
+            logger.warning("[voice] 样本解码失败 %s: %s", target, exc)
+            raise HTTPException(status_code=400, detail="声音样本无法解码,请检查文件格式") from None
         audio = np.asarray(audio, dtype=np.float32)
         duration = len(audio) / config.audio.sample_rate
+        # validate_audio_file 已在上游探测时长上限;此处保留双保险。
+        if duration > config.audio.upload_max_duration:
+            raise HTTPException(
+                status_code=400,
+                detail=f"声音样本超过 {config.audio.upload_max_duration}s 上限",
+            )
         if duration < 2:
             raise HTTPException(status_code=400, detail="声音样本至少需要 2 秒")
         assessment = assess_voice_sample(audio, config.audio.sample_rate)
@@ -157,6 +198,13 @@ async def add_voice_sample(
         speaker_engine = (
             runtime.speaker if runtime is not None else request.app.state.spk_engine
         )
+        # 引擎降级启动(模型下载失败/损坏)时 speaker 可能为 None。
+        # WS 路径有 check_engines 守卫,上传声样路径无,需显式拦截避免
+        # AttributeError('NoneType'...) 裸抛成 500。
+        if speaker_engine is None:
+            raise HTTPException(
+                status_code=503, detail="声纹引擎不可用,无法注册声样"
+            )
         if runtime is not None:
             async with runtime.inference.offline():
                 embedding_result = await asyncio.to_thread(
@@ -176,8 +224,10 @@ async def add_voice_sample(
         if embedding is None:
             raise HTTPException(status_code=422, detail="无法从该样本提取有效声纹")
         vector = np.asarray(embedding, dtype=np.float32).reshape(-1)
+        if not vector.size or not np.isfinite(vector).all():
+            raise HTTPException(status_code=422, detail="无法从该样本提取有效声纹")
         norm = float(np.linalg.norm(vector))
-        if not vector.size or norm <= 1e-8:
+        if norm <= 1e-8 or not math.isfinite(norm):
             raise HTTPException(status_code=422, detail="无法从该样本提取有效声纹")
         vector = vector / norm
         model_name = embedding_model_id(speaker_engine, int(vector.size))

@@ -517,9 +517,9 @@ onMounted(load)
 
 <style scoped>
 .capability-map{display:grid;grid-template-columns:1.25fr repeat(3,1fr);gap:1px;margin:0 0 34px;border:1px solid var(--border);background:var(--border);border-radius:10px;overflow:hidden}.capability-map>*{background:var(--ink-2);padding:20px}.capability-intro span,.capability-map article>b{color:var(--amber);font:9px var(--mono);letter-spacing:.12em}.capability-intro h2{font:22px var(--serif);margin:8px 0}.capability-map h3{font-size:13px;margin:10px 0 5px}.capability-map p{color:var(--text-3);font-size:11px;line-height:1.55}@media(max-width:900px){.capability-map{grid-template-columns:1fr 1fr}}@media(max-width:560px){.capability-map{grid-template-columns:1fr}}
-.set-wrap { padding: 32px 48px 48px; }  /* 整改: 删 max-width */
+.set-wrap { padding: 32px 48px 48px; }
 .set-head { padding-bottom: 24px; border-bottom: 1px solid var(--border); margin-bottom: 0; }
-/* 整改 1: 改用 .page-title / .page-sub (components.css), scoped 块里不再重复定义 */
+/* Page title styles are shared through components.css. */
 .set-grid {
   display: grid;
   grid-template-columns: 1.6fr 1fr 1fr;
@@ -530,7 +530,6 @@ onMounted(load)
 /* 声纹引擎 (第 1 个 set-row): 占左 1 列, 跨 2 行 (引擎列表高度自适应) */
 .set-grid .set-row.engine-row,
 .set-grid .set-row.asr-row { grid-row: span 2; }
-/* 整改 1: 删除 dead .set-wrap h1 规则 (无 live 元素匹配, 行内 section header 实际用 .set-row .l) */
 .set-row { padding: 22px 24px; background: var(--ink-2); }
 .set-row + .set-row { border-top: 1px solid var(--border-soft); }
 .set-row .l {
@@ -543,7 +542,7 @@ onMounted(load)
   margin-bottom: 4px;
 }
 .set-row .l span { color: var(--text); }
-.set-row .l em { font-style: italic; color: var(--amber); font-variation-settings: 'SOFT' 100, 'WONK' 1; opacity: 0.55; }  /* 整改 4: em 英文副标与主标同字号 18px, 只 italic + amber, 透明度温和降以视觉二级 */
+.set-row .l em { font-style: italic; color: var(--amber); font-variation-settings: 'SOFT' 100, 'WONK' 1; opacity: 0.55; }
 .set-row .d {
   font-family: var(--mono);
   font-size: 11px;

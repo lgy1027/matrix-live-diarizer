@@ -76,3 +76,69 @@ def test_diarize_prefers_exclusive_annotation(monkeypatch, tmp_path):
     assert result == [(0.0, 1.0, "EXCLUSIVE")]
     assert set(captured["audio"]) == {"waveform", "sample_rate"}
     assert tuple(captured["audio"]["waveform"].shape) == (1, 16000)
+
+
+def test_diarize_reuses_provided_waveform_without_decoding_file(monkeypatch, tmp_path):
+    """传 waveform 时应直接复用,不再 librosa.load 二次解码(长会议峰值内存)。"""
+    import sys
+
+    import numpy as np
+
+    class FakeTensor:
+        def __init__(self, value):
+            self.value = np.asarray(value)
+
+        @property
+        def shape(self):
+            return self.value.shape
+
+        def unsqueeze(self, axis):
+            self.value = np.expand_dims(self.value, axis)
+            return self
+
+    monkeypatch.setattr(
+        sys.modules["torch"],
+        "as_tensor",
+        lambda value, dtype=None: FakeTensor(value),
+        raising=False,
+    )
+
+    class Turn:
+        def __init__(self, start, end):
+            self.start = start
+            self.end = end
+
+    class Annotation:
+        def itertracks(self, yield_label=False):
+            for start, end, speaker in [(0.0, 2.0, "SPEAKER_00")]:
+                yield Turn(start, end), None, speaker
+
+    class Output:
+        speaker_diarization = Annotation()
+        exclusive_speaker_diarization = None
+
+    captured = {}
+
+    class Pipeline:
+        def __call__(self, audio):
+            captured["audio"] = audio
+            return Output()
+
+    # librosa.load 若被调用,说明没有复用 waveform —— 测试应失败
+    import librosa as _librosa_mod
+
+    def _fail_if_called(*_a, **_k):
+        raise AssertionError("diarize 应复用 waveform,不应再调 librosa.load")
+
+    monkeypatch.setattr(_librosa_mod, "load", _fail_if_called)
+
+    diarizer = object.__new__(PyannoteDiarizer)
+    diarizer._enabled = True
+    diarizer._pipeline = Pipeline()
+
+    wave = np.ones(32000, dtype=np.float32)  # 2s @ 16kHz
+    result = diarizer.diarize("irrelevant.wav", waveform=wave, sample_rate=16000)
+
+    assert result == [(0.0, 2.0, "SPEAKER_00")]
+    assert captured["audio"]["sample_rate"] == 16000
+    assert tuple(captured["audio"]["waveform"].shape) == (1, 32000)

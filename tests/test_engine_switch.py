@@ -1,4 +1,4 @@
-"""声纹引擎动态切换测试 - TDD"""
+"""声纹引擎动态切换测试。"""
 import pytest
 import os
 import sys

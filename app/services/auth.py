@@ -1,4 +1,4 @@
-"""鉴权服务 (Roadmap 安全项)
+"""鉴权服务。
 
 提供:
 - hash_password / verify_password(werkzeug pbkdf2 哈希)
@@ -37,6 +37,9 @@ class AuthService:
                 + "=" * 70
             )
         self._ttl_hours = config.auth.token_ttl_hours
+        # 进程内已注销 token 集合(重启丢失,本地单用户可接受;
+        # 改密失效走 pwd_iat 比较,这里只覆盖主动 logout)。
+        self._revoked_tokens: set[str] = set()
 
     # ---- 密码哈希 ----
 
@@ -84,6 +87,45 @@ class AuthService:
         except jwt.InvalidTokenError as e:
             logger.info(f"[AUTH] token 无效: {e}")
         return None
+
+    def revoke_token(self, token: str) -> None:
+        """注销 token:加入进程内 revoked 集合,使其立即失效。
+
+        先 decode 校验为合法 JWT 才入集合(防白名单 logout 端点接收任意串投毒
+        撑爆内存),并记录其 exp 供惰性过期清理(过期 token 本就会被 decode_token 拒)。
+        """
+        if not token:
+            return
+        payload = self.decode_token(token)
+        if not payload:
+            # 无效/过期 token 不需要 revoke(decode 已拒),避免任意串入集合
+            return
+        self._revoked_tokens.add(token)
+        # 容量上界:超限时惰性清理过期条目,防无界增长
+        if len(self._revoked_tokens) > 10_000:
+            self._prune_revoked()
+
+    def _prune_revoked(self) -> None:
+        """清理已过期的 revoked token(exp < now),它们本就会被 decode_token 拒。"""
+        now = int(time.time())
+        to_keep = set()
+        for tok in self._revoked_tokens:
+            try:
+                payload = jwt.decode(
+                    tok, self._secret, algorithms=["HS256"],
+                    audience=self._AUD, issuer=self._ISS,
+                )
+                if payload.get("exp", 0) > now:
+                    to_keep.add(tok)
+            except jwt.PyJWTError:
+                # 过期或无效 → 不保留
+                continue
+        self._revoked_tokens = to_keep
+
+    def is_revoked(self, token: str) -> bool:
+        if not token:
+            return False
+        return token in self._revoked_tokens
 
     # ---- 用户 CRUD ----
 

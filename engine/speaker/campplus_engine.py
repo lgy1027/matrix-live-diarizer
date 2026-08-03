@@ -11,7 +11,7 @@ from modelscope.models import Model
 import time
 import logging
 from collections import defaultdict
-from typing import List, Dict, Optional, Tuple
+from typing import Optional, Tuple
 
 from engine.speaker.base_engine import BaseSpeakerEngine
 from engine.speaker.speaker_factory import ENGINE_CONFIG
@@ -131,7 +131,7 @@ class CamPlusEngine(BaseSpeakerEngine):
 
         pending_list = self.pending_speakers[client_id]
 
-        for i, (pending_emb, _, spk_id, count) in enumerate(pending_list):
+        for i, (pending_emb, pending_dur, spk_id, count, pending_name) in enumerate(pending_list):
             # 计算相似度
             similarity = np.dot(emb, pending_emb)
             distance = 1 - similarity
@@ -143,7 +143,8 @@ class CamPlusEngine(BaseSpeakerEngine):
                 new_emb = (pending_emb * count + emb) / new_count
                 new_emb = new_emb / (np.linalg.norm(new_emb) + 1e-6)
 
-                pending_list[i] = (new_emb, 0, spk_id, new_count)
+                # 保留原 duration(最早累积段的时长),勿写 0 丢失可靠性信息
+                pending_list[i] = (new_emb, pending_dur, spk_id, new_count, pending_name)
 
                 # 如果累积足够样本，正式注册
                 if new_count >= self.PENDING_THRESHOLD:
@@ -199,7 +200,7 @@ class CamPlusEngine(BaseSpeakerEngine):
         is_reliable = (segment_class == "reliable")
 
         # 阈值: 距离越小越相似
-        # 方向 A: 收紧 LOW(避免误合) + 放宽 HIGH(容错短段) + 加宽 grace
+        # 收紧 LOW 以减少误合，放宽 HIGH 以容忍短片段，并增加缓冲区间。
         LOW_THRESHOLD = 0.50      # 高置信度(原 0.40,收紧避免误合)
         HIGH_THRESHOLD = 0.60     # 边缘区域(原 0.50,放宽容错短段)
         # 短段(0.3-0.5s)用更宽松阈值
@@ -212,8 +213,6 @@ class CamPlusEngine(BaseSpeakerEngine):
         # 0.05-0.10 是常态,太严会把同一个人的短段误判成新说话人。
         GRACE_PERIOD_SAMPLES = 3
         GRACE_THRESHOLD_BOOST = 0.08
-        import time as _time
-        current_ts = _time.time()
 
         # 实时流：用滑动窗口平滑（抖动场景）
         # 文件上传：直接用当前 embedding（避免 buffer 跨文件污染）
@@ -356,13 +355,13 @@ class CamPlusEngine(BaseSpeakerEngine):
             )
             logger.info(f"[NEW SPEAKER] {new_id} name={display_name!r} (reliable, {audio_duration:.1f}s)")
         else:
-            # 不可靠样本：放入待确认缓存
-            self.pending_speakers[client_id].append((smoothed_emb, audio_duration, new_id, 1))
+            # 不可靠样本：放入待确认缓存(元组带 name,溢出注册时用其自身名而非当前新 speaker 名)
+            self.pending_speakers[client_id].append((smoothed_emb, audio_duration, new_id, 1, display_name))
             logger.info(f"[PENDING] {new_id} name={display_name!r} (unreliable, {audio_duration:.1f}s, need {self.PENDING_THRESHOLD} samples)")
 
             # 如果待确认缓存超过限制，强制注册最老的一个
             if len(self.pending_speakers[client_id]) > 5:
-                old_emb, _, old_id, old_count = self.pending_speakers[client_id].pop(0)
+                old_emb, _, old_id, old_count, old_name = self.pending_speakers[client_id].pop(0)
                 self.collection.add(
                     ids=[old_id],
                     embeddings=[old_emb.tolist()],
@@ -371,10 +370,10 @@ class CamPlusEngine(BaseSpeakerEngine):
                         "count": old_count,
                         "last_update": time.time(),
                         "confirmed": False,
-                        "name": display_name,
+                        "name": old_name,
                     }],
                 )
-                logger.info(f"[FORCE REGISTER] {old_id} (pending overflow)")
+                logger.info(f"[FORCE REGISTER] {old_id} name={old_name!r} (pending overflow)")
 
         # 新建 Spk 时的置信度:有候选时返 (1 - best_dist) 反映"与最近候选的相似度"
         # 无候选(空 DB)时返 0.0;前端可据此判断"是否值得展示给用户看"

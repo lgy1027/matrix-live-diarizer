@@ -1,4 +1,4 @@
-"""声纹引擎基类测试 - TDD"""
+"""声纹引擎基类测试。"""
 import pytest
 import inspect
 from abc import ABC, abstractmethod

@@ -1,4 +1,4 @@
-"""鉴权端点 + 中间件单测 (Roadmap 安全项 Bug-79)
+"""鉴权端点和中间件测试。
 
 覆盖:
 - 默认 admin 初始化
@@ -236,7 +236,7 @@ def test_login_unknown_user_returns_401(monkeypatch):
 
 
 def test_login_validation_short_password(monkeypatch):
-    """空密码返 401 (Bug-90 模糊化,不暴露 schema)"""
+    """空密码返回 401，避免暴露登录字段结构。"""
     client = _make_client(monkeypatch)
     r = client.post("/v1/auth/login", json={"username": "admin", "password": ""})
     assert r.status_code == 401
@@ -308,7 +308,7 @@ def test_security_headers_are_present(monkeypatch):
 
 
 def test_csp_connect_src_tightened_with_explicit_origins(monkeypatch):
-    """L2: 显式 ALLOWED_ORIGINS → connect-src 收紧到具体 ws/wss host,
+    """显式配置 ALLOWED_ORIGINS 时，connect-src 收紧到具体 ws/wss host，
     不再放行任意 ws 服务器(降低 XSS 经 WS 外泄)。"""
     monkeypatch.setenv("ALLOWED_ORIGINS", "http://127.0.0.1:8000,http://localhost:8000")
     client = _make_client(monkeypatch)
@@ -321,7 +321,7 @@ def test_csp_connect_src_tightened_with_explicit_origins(monkeypatch):
 
 
 def test_csp_connect_src_falls_back_to_wildcard_when_star(monkeypatch):
-    """L2: ALLOWED_ORIGINS=* 时无法枚举具体 host,回退 ws: wss:(不改现状)。"""
+    """ALLOWED_ORIGINS=* 时无法枚举具体 host，回退到 ws: wss:。"""
     monkeypatch.setenv("ALLOWED_ORIGINS", "*")
     client = _make_client(monkeypatch)
     r = client.get("/health")
@@ -330,7 +330,7 @@ def test_csp_connect_src_falls_back_to_wildcard_when_star(monkeypatch):
 
 
 def test_csp_connect_src_includes_lan_origin_when_configured(monkeypatch):
-    """L2: LAN 部署设了具体 origin → CSP 包含该 host 的 ws/wss,不误伤同源 WS。"""
+    """LAN 部署设置具体 origin 后，CSP 包含对应的 ws/wss 地址。"""
     monkeypatch.setenv("ALLOWED_ORIGINS", "http://192.168.1.50:8000")
     client = _make_client(monkeypatch)
     r = client.get("/health")
@@ -474,6 +474,21 @@ def test_logout_endpoint(monkeypatch):
     assert r.status_code == 200
 
 
+def test_logout_with_token_revokes_it(monkeypatch):
+    """logout 带 Bearer token 后,该 token 立即失效(/v1/auth/me 返 401)。
+    前端 client.ts 注入 token 给 logout 请求,后端 revoke_token 才生效。"""
+    client = _make_client(monkeypatch)
+    lr = client.post("/v1/auth/login", json={"username": "admin", "password": "admin"})
+    token = lr.json()["token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    # logout 带 token
+    out = client.post("/v1/auth/logout", headers=headers)
+    assert out.status_code == 200
+    # 同 token 再访问 /v1/auth/me 应 401(revoked)
+    me = client.get("/v1/auth/me", headers=headers)
+    assert me.status_code == 401, f"logout 后 token 应已失效: {me.status_code}"
+
+
 # ========== Options 预检放行(CORS) ==========
 
 def test_options_request_passes(monkeypatch):
@@ -484,10 +499,10 @@ def test_options_request_passes(monkeypatch):
     assert r.status_code != 401
 
 
-# ========== 审核 #1-#12 修复覆盖 ==========
+# ========== 登录与会话安全回归测试 ==========
 
 def test_login_rate_limit_blocks_brute_force(monkeypatch):
-    """审核 #1: /v1/auth/login 限流(防暴力破解, 5次/60s, 触发锁 60s)"""
+    """登录失败达到阈值后触发限流。"""
     client = _make_client(monkeypatch)
     # 6 次错误登录(同 IP)
     for i in range(6):
@@ -500,6 +515,33 @@ def test_login_rate_limit_blocks_brute_force(monkeypatch):
             assert r.status_code == 429, f"第 6 次应触发限流 429, 实际 {r.status_code}"
             assert "登录尝试过多" in r.json()["detail"]
             assert "Retry-After" in r.headers
+
+
+def test_login_success_clears_failure_history(monkeypatch):
+    """登录成功后清理该 IP 的历史失败记录，避免后续一次输错
+    因旧失败累积触发误锁。"""
+    client = _make_client(monkeypatch)
+    # 先用默认 admin/admin 登录拿 token 改密(满足 must_change_password)
+    lr = client.post("/v1/auth/login", json={"username": "admin", "password": "admin"})
+    token = lr.json()["token"]
+    client.post(
+        "/v1/auth/change-password",
+        json={"old_password": "admin", "new_password": "MatrixTest2026"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    # 改密后旧 token 失效,重新登录拿新 token + 清 must_change
+    lr2 = client.post("/v1/auth/login", json={"username": "admin", "password": "MatrixTest2026"})
+    assert lr2.status_code == 200
+    # 制造 4 次失败(不触发 5 次锁)
+    for _ in range(4):
+        r = client.post("/v1/auth/login", json={"username": "admin", "password": "wrong"})
+        assert r.status_code == 401
+    # 第 5 次成功 → 应清失败记录
+    ok = client.post("/v1/auth/login", json={"username": "admin", "password": "MatrixTest2026"})
+    assert ok.status_code == 200
+    # 再输错 1 次:不应因旧 4 次累积触发锁(应 401 非 429)
+    again = client.post("/v1/auth/login", json={"username": "admin", "password": "wrong"})
+    assert again.status_code == 401, f"成功登录后旧失败应已清,不应误锁: {again.status_code}"
 
 
 def test_change_password_weak_password_returns_400_without_invalidating_session(monkeypatch):
@@ -567,7 +609,7 @@ def test_change_password_rejects_reusing_current_password(monkeypatch):
 
 
 def test_change_password_strong_password_works(monkeypatch):
-    """审核 #5: 强密码(8+ 字符, 字母+数字)通过"""
+    """包含字母和数字的八位以上密码可以通过校验。"""
     client = _make_client(monkeypatch)
     lr = client.post("/v1/auth/login", json={"username": "admin", "password": "admin"})
     token = lr.json()["token"]
@@ -580,7 +622,7 @@ def test_change_password_strong_password_works(monkeypatch):
 
 
 def test_old_token_invalidated_after_password_change(monkeypatch):
-    """审核 #7: 改密后旧 token 失效"""
+    """修改密码后旧 token 失效。"""
     client = _make_client(monkeypatch)
     lr = client.post("/v1/auth/login", json={"username": "admin", "password": "admin"})
     old_token = lr.json()["token"]
@@ -602,7 +644,7 @@ def test_old_token_invalidated_after_password_change(monkeypatch):
 
 
 def test_jwt_includes_iss_aud_claims(monkeypatch):
-    """审核 #10: JWT 包含 iss/aud claims, 错 iss 拒绝"""
+    """JWT 包含 iss/aud claims，错误 issuer 会被拒绝。"""
     import jwt
     # 拿到 token
     client = _make_client(monkeypatch)
@@ -615,7 +657,7 @@ def test_jwt_includes_iss_aud_claims(monkeypatch):
 
 
 def test_jwt_aud_validation_rejects_wrong_aud():
-    """审核 #10: 错 aud 的 token 应解码失败"""
+    """错误 audience 的 token 应解码失败。"""
     import jwt
     from werkzeug.security import generate_password_hash
     secret = "test-secret"
@@ -630,7 +672,7 @@ def test_jwt_aud_validation_rejects_wrong_aud():
 
 
 def test_login_with_bad_password_returns_401_not_422(monkeypatch):
-    """审核 #12: 缺字段返 401 (模糊), 不返 422 暴露 schema"""
+    """登录字段缺失时返回 401，不通过 422 暴露字段结构。"""
     client = _make_client(monkeypatch)
     # 完全没字段
     r = client.post("/v1/auth/login", json={})
@@ -645,7 +687,7 @@ def test_login_with_bad_password_returns_401_not_422(monkeypatch):
 
 
 def test_unauthorized_response_carries_cors_for_trusted_origin(monkeypatch):
-    """#7: 跨源 401 带 Access-Control-Allow-Origin,否则浏览器当网络错误,
+    """可信跨源请求的 401 带 Access-Control-Allow-Origin，否则浏览器会视为网络错误，
     前端无法区分未登录、不能自动跳登录页。"""
     import importlib
     tmp = tempfile.mkdtemp()
@@ -663,7 +705,7 @@ def test_unauthorized_response_carries_cors_for_trusted_origin(monkeypatch):
 
 
 def test_unauthorized_response_no_cors_for_untrusted_origin(monkeypatch):
-    """#7: 不可信 Origin 的 401 不带 ACAO,防给任意 Origin 回填造成跨源信息泄露。"""
+    """不可信 Origin 的 401 不带 ACAO，避免跨源信息泄露。"""
     import importlib
     tmp = tempfile.mkdtemp()
     monkeypatch.setenv("STORAGE_DB_PATH", os.path.join(tmp, "test.db"))

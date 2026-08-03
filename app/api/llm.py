@@ -179,7 +179,7 @@ def _is_authenticated_status_request(request: Request) -> bool:
 
 
 class LLMSettingsRequest(BaseModel):
-    provider: str = Field("ollama", max_length=40)
+    provider: str = Field("ollama", min_length=1, max_length=40)
     enabled: bool = False
     endpoint: str = Field(..., min_length=1, max_length=500)
     model: str = Field(..., min_length=1, max_length=200)
@@ -200,7 +200,10 @@ class LLMSettingsRequest(BaseModel):
     @field_validator("provider", "model")
     @classmethod
     def _strip_text(cls, value: str) -> str:
-        return value.strip()
+        value = value.strip()
+        if not value:
+            raise ValueError("不能为空")
+        return value
 
 
 @router.get("/v1/llm/status")
@@ -344,6 +347,19 @@ def update_prompts(payload: dict, request: Request):
             status_code=422,
             detail=f"未知 prompt 字段: {sorted(unknown_keys)};合法字段: {sorted(DEFAULT_PROMPTS.keys())}",
         )
+    # 长度/类型校验:防恶意写入超大 prompt 撑爆 DB 与 LLM 调用成本。
+    for key, value in payload.items():
+        if not isinstance(value, str):
+            raise HTTPException(status_code=422, detail=f"prompt {key} 必须为字符串")
+        if not value:
+            # 拒空串:_load_prompts 读回时空串被当 falsy 跳过用默认,用户以为清空
+            # 实则默认值仍在用,行为不一致。明确要求非空。
+            raise HTTPException(status_code=422, detail=f"prompt {key} 不能为空")
+        if len(value) > 20_000:
+            raise HTTPException(
+                status_code=422,
+                detail=f"prompt {key} 超过 20000 字符上限",
+            )
     repo = _settings_repo(request)
     if repo is None:
         raise HTTPException(status_code=500, detail="settings 仓库不可用")

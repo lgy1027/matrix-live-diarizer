@@ -110,7 +110,14 @@ export class LiveWs {
 
   sendAudio(int16: Int16Array) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(int16.buffer)
+      // 背压保护:慢网络下浏览器发送缓冲持续累积,超过阈值丢帧避免
+      // 内存膨胀 + 时间戳越拉越滞后。
+      if (this.ws.bufferedAmount > 1_048_576) {
+        return
+      }
+      // Send the view, not its backing buffer: callers may pass a subarray and
+      // the backing buffer can contain samples outside the requested frame.
+      this.ws.send(int16)
     }
   }
 

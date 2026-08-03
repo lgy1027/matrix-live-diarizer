@@ -7,10 +7,9 @@ import numpy as np
 import torch
 import chromadb
 from chromadb.config import Settings
-import time
 import logging
 from collections import defaultdict
-from typing import List, Dict, Optional, Tuple
+from typing import Tuple
 
 from engine.speaker.base_engine import BaseSpeakerEngine
 from engine.speaker.speaker_factory import ENGINE_CONFIG

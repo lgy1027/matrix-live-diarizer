@@ -242,7 +242,7 @@ def _isolate_os_environ():
 
 @pytest.fixture(autouse=True)
 def _enable_auth_test_bypass():
-    """Bug-79: 鉴权中间件在测试模式放行,避免改所有测试 client fixture
+    """测试模式下绕过鉴权，避免业务测试重复创建登录会话。
 
     机制: 设环境变量 TEST_AUTH_BYPASS=1,AuthMiddleware 跳过鉴权。
     这样新加的鉴权不会破坏现有 53 个测试。

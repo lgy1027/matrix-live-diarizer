@@ -192,7 +192,7 @@ class SpeakerEngineManager:
                 if self._current_engine is None:
                     self._current_engine = self._load_engine(self._current_type)
         return self._current_engine
-    
+
     def _load_engine(self, engine_type: str) -> Any:
         """加载引擎"""
         if engine_type in self._engine_cache:
@@ -212,7 +212,9 @@ class SpeakerEngineManager:
             engine = CamPlusEngine()
 
         self._engine_cache[engine_type] = engine
-        # LRU 淘汰:超过 max_cache 时,evict 非当前引擎(优先释放老模型占的内存)
+        # LRU 淘汰:超过 max_cache 时,evict 非当前引擎(优先释放老模型占的内存)。
+        # Python 3.7+ dict 保持插入序,新引擎在末尾,to_evict[:N] 从前面删最旧的,
+        # 新引擎不会被自身淘汰逻辑 pop 掉。
         if len(self._engine_cache) > self._max_cache:
             to_evict = [k for k in self._engine_cache if k != self._current_type]
             for k in to_evict[:len(self._engine_cache) - self._max_cache]:

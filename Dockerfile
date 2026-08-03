@@ -1,6 +1,9 @@
 # syntax=docker/dockerfile:1.6
 # ---------- Stage 1: builder ----------
-FROM --platform=$BUILDPLATFORM python:3.12-slim AS builder
+# Native wheels must be built for the image target. BuildKit will use
+# emulation when BUILDPLATFORM != TARGETPLATFORM; reusing host wheels here
+# would produce an image that builds successfully but cannot import them.
+FROM --platform=$TARGETPLATFORM python:3.12-slim AS builder
 
 ARG TARGETARCH
 ARG TORCH_VERSION=2.11.0
@@ -94,7 +97,11 @@ USER matrix
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
-    CMD curl -fsS http://127.0.0.1:8000/health || exit 1
+    CMD if [ "${ENABLE_HTTPS:-}" = "1" ] || [ "${ENABLE_HTTPS:-}" = "true" ]; then \
+          curl -kfsS "https://127.0.0.1:${PORT:-8000}/health"; \
+        else \
+          curl -fsS "http://127.0.0.1:${PORT:-8000}/health"; \
+        fi
 
 ENTRYPOINT ["/app/docker/entrypoint.sh"]
 CMD ["python", "main.py"]

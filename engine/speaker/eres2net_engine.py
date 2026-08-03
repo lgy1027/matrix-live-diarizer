@@ -8,10 +8,9 @@ import torch
 import chromadb
 from chromadb.config import Settings
 from modelscope.models import Model
-import time
 import logging
 from collections import defaultdict
-from typing import List, Dict, Optional, Tuple
+from typing import Tuple
 
 from engine.speaker.base_engine import BaseSpeakerEngine
 from engine.speaker.speaker_factory import ENGINE_CONFIG

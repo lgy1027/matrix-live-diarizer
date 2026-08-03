@@ -1,4 +1,6 @@
 """ASR 语音识别引擎"""
+import os
+
 import torch
 import numpy as np
 import asyncio
@@ -8,9 +10,20 @@ import time
 import scipy.signal as signal
 from qwen_asr import Qwen3ASRModel
 from engine.asr.contracts import empty_asr_result, make_asr_result
+from engine.asr.common import filter_hallucinations
 from app.services.model_resolver import resolve_hf, resolve_silero_vad
 
 logger = logging.getLogger("ASR_Engine")
+
+
+# Immutable upstream revisions are security boundaries, not optional tuning.
+# Environment overrides remain available for reviewed upgrades and mirrors.
+QWEN_ASR_REVISION = os.environ.get(
+    "QWEN_ASR_REVISION", "4ce9cc728b473a5aedbe7b6e1ea45646316824dc"
+)
+QWEN_ALIGNER_REVISION = os.environ.get(
+    "QWEN_ALIGNER_REVISION", "cf1c50164ea3ac48240d12bef5ead74aee0720cc"
+)
 
 
 class ASREngine:
@@ -74,10 +87,12 @@ class ASREngine:
                         return
                     # 本地优先:模型物化到 models/asr/Qwen3-ASR-0.6B/(复用 HF 缓存,
                     # 不重新下载),from_pretrained 接受本地目录路径。
-                    # resolve_hf 不传 revision,modelscope 的 revision hash 在 HF 上
-                    # 不存在,统一走 main 分支从已缓存物化。
+                    # revision pin(可由 QWEN_ASR_REVISION env 覆盖):固定到 HF commit,
+                    # 防 main 分支被篡改后 from_pretrained 加载恶意 config 触发 RCE
+                    # (transformers PYSEC-2026-2289 的本地缓存投毒缓解)。
                     model_dir = resolve_hf(
                         "Qwen/Qwen3-ASR-0.6B", "asr", "Qwen3-ASR-0.6B",
+                        revision=QWEN_ASR_REVISION,
                     )
                     if result["cancelled"]:
                         return
@@ -94,6 +109,7 @@ class ASREngine:
                         forced_aligner_id = resolve_hf(
                             "Qwen/Qwen3-ForcedAligner-0.6B", "asr",
                             "Qwen3-ForcedAligner-0.6B",
+                            revision=QWEN_ALIGNER_REVISION,
                         )
                         logger.info("[ASR] forced aligner 本地路径: %s", forced_aligner_id)
                     if result["cancelled"]:
@@ -132,7 +148,9 @@ class ASREngine:
                 if result.get("asr_model") is not None:
                     del result["asr_model"]
                     try:
-                        import gc; gc.collect()
+                        import gc
+
+                        gc.collect()
                     except Exception:
                         pass
 
@@ -343,23 +361,20 @@ class ASREngine:
         if audio_data is None or len(audio_data) < 1600:
             return empty_asr_result()
 
-        # 音频质量评估
-        quality = self.evaluate_audio_quality(audio_data)
-        if quality["score"] < 30:
-            logger.warning(f"[ASR] 音频质量较差: {quality}")
-            return empty_asr_result()
+        # 质量评估 + 预处理 + VAD(含 Silero 前向)都是 CPU/GPU 同步重活,
+        # 在协程里直接跑会阻塞 event loop,多 WS 并发时串联放大。整段丢进
+        # 线程池,只把轻量的判空/分支留在协程。
+        loop = asyncio.get_running_loop()
+        prepared = await loop.run_in_executor(
+            None, lambda: self._prepare_and_check(audio_data, use_preprocessing)
+        )
 
-        # 预处理
-        if use_preprocessing:
-            audio_data = self.preprocess_audio(audio_data)
-
-        # VAD 检测是否有语音
-        if self.is_silent(audio_data, use_vad=True):
-            logger.debug("[ASR] VAD 检测为静音，跳过")
+        # prepared 为 None 表示质量过差或 VAD 判静音,跳过推理
+        if prepared is None:
             return empty_asr_result()
+        audio_data = prepared
 
         try:
-            loop = asyncio.get_event_loop()
             # 字级时间戳需要 forced aligner 初始化(已在 _load_with_fallback 完成)
             want_words = bool(self.config.asr_word_timestamps and self.asr_model.forced_aligner)
             res = await loop.run_in_executor(
@@ -373,7 +388,7 @@ class ASREngine:
             if not res:
                 return empty_asr_result()
 
-            text = res[0].text.strip()
+            text = filter_hallucinations(res[0].text.strip())
             words = None
             if want_words and res[0].time_stamps:
                 words = [
@@ -386,6 +401,24 @@ class ASREngine:
         except Exception as e:
             logger.error(f"[ASR] 推理异常: {e}")
             return empty_asr_result()
+
+    def _prepare_and_check(self, audio_data, use_preprocessing):
+        """同步执行质量评估 + 预处理 + VAD 静音检测。
+
+        返回处理后的音频;若质量过差或 VAD 判静音则返回 None(调用方跳过推理)。
+        """
+        quality = self.evaluate_audio_quality(audio_data)
+        if quality["score"] < 30:
+            logger.warning(f"[ASR] 音频质量较差: {quality}")
+            return None
+
+        if use_preprocessing:
+            audio_data = self.preprocess_audio(audio_data)
+
+        if self.is_silent(audio_data, use_vad=True):
+            logger.debug("[ASR] VAD 检测为静音，跳过")
+            return None
+        return audio_data
 
     def __del__(self):
         if hasattr(self, 'asr_model'):

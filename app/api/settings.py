@@ -10,7 +10,7 @@ router = APIRouter()
 
 class AsrSwitchRequest(BaseModel):
     """ASR 切换请求."""
-    engine_type: str = Field(..., min_length=1, description="ASR 引擎类型")
+    engine_type: str = Field(..., min_length=1, max_length=64, description="ASR 引擎类型")
 
 
 class AsrSwitchResponse(BaseModel):
@@ -48,7 +48,6 @@ async def switch_asr_engine(body: AsrSwitchRequest, request: Request):
     runtime = getattr(request.app.state, "runtime", None)
     if runtime is not None:
         runtime.set_asr(new_engine)
-    request.app.state.asr_engine = new_engine
-    request.app.state.asr_manager = manager
+    # ASR 引擎统一由 runtime 管理。
 
     return AsrSwitchResponse(**result)

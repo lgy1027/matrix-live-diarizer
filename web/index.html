@@ -5,12 +5,13 @@
     <link rel="icon" type="image/x-icon" href="/favicon.ico" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Matrix · Live Diarizer</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600&family=Outfit:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self' ws: wss:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
     />
+    <!-- 字体改用系统回退栈(零外传:不加载 Google Fonts CDN)。
+         如需恢复 Fraunces/Outfit/JetBrains Mono 视觉,可将 woff2 下载到
+         src/assets/fonts/ 自托管,并在 CSS @font-face 引用。 -->
   </head>
   <body>
     <div id="app"></div>

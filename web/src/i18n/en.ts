@@ -52,7 +52,6 @@ const en: Record<string, string> = {
   'library.delete.ok': 'Deleted',
   'library.empty.hint': 'Record a session or upload audio to see transcripts here.',
   'library.empty.title': 'Library is empty.',
-  /* 整改 1: 删 library.head.title/sub, 由 view.library.title/sub 替代 */
   'library.load.fail': 'Could not load library.',
   'library.search.ph': 'search transcripts',
   'library.spk.plural': 'voices',
@@ -245,7 +244,6 @@ const en: Record<string, string> = {
   'view.live.status.recording': 'Recording',
   'view.live.status.stopped': 'Stopped',
   'view.live.title': 'Live <em>Transcription</em>',
-  /* 整改 1: 删孤儿 view.live.title.post / .pre (从未引用) */
   'view.live.transcript.label': 'Transcript',
   'view.live.wavePH': 'Listening · hit record to begin',
   'view.live.wavePH.ended': 'session ended · review in Library',
@@ -328,7 +326,6 @@ const en: Record<string, string> = {
   'voice.enroll.name.title': 'Enter display name (optional)',
   'voice.enroll.ok': 'Enrolled',
   'voice.enroll.uploading': 'Enrolling voice…',
-  /* 整改 1: 删 voice.head.title/sub, 由 view.voice.title/sub 替代 */
   'voice.load.fail': 'Could not load voices.',
   'voice.menu.delete': 'Delete',
   'voice.menu.rename': 'Rename',
@@ -356,7 +353,6 @@ const en: Record<string, string> = {
   'view.library.tab.all': 'All',
   'view.library.tab.live': 'Live',
   'view.library.tab.upload': 'Upload',
-  /* 整改 3: 删重复 key view.library.untitled, 实际使用 library.untitled */
   'view.detail.tab.transcript': '📝 Transcript',
   'view.detail.tab.stats': '📊 Stats',
   'view.detail.tab.export': '📤 Export',
@@ -388,7 +384,6 @@ const en: Record<string, string> = {
   'login.hidePassword': 'Hide',
   'speaker.unknown': 'Unknown speaker',
   'live.transcribing': 'Transcribing…',
-  /* 整改 3+4: 补全 login 页面英文 (之前只有 zh fallback) */
   'login.hint1': 'Default account',
   'login.hint2': 'Password',
   'login.hint3': 'First login requires password change',
@@ -396,6 +391,9 @@ const en: Record<string, string> = {
   'login.sub': 'Live transcription & speaker diarization',
   'login.submit': 'Sign in',
   'login.submitting': 'Signing in…',
+  'login.err.empty': 'Please enter username and password',
+  'login.err.fail': 'Login failed, please check your credentials',
+  'login.err.timeout': 'Request timed out, please retry',
   'common.loading': 'Loading…',
   'live.clear.confirmDetail': '(Server-side session is not affected)',
   'settings.about.enginesLabel': 'Diarization:',

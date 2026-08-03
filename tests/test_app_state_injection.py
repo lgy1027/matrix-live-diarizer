@@ -66,7 +66,10 @@ def test_app_state_has_settings_repo():
 
 
 def test_app_state_has_asr_engine():
+    """ASR 引擎统一通过 runtime.asr 访问。"""
     from app import create_app
     app = create_app()
-    assert hasattr(app.state, "asr_engine")
-    assert app.state.asr_engine is not None
+    assert not hasattr(app.state, "asr_engine")
+    assert not hasattr(app.state, "asr_manager")
+    assert app.state.runtime is not None
+    assert app.state.runtime.asr is not None

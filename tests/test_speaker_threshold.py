@@ -1,4 +1,4 @@
-"""声纹识别阈值 + 短段过滤单测(Bug-68 / 方向 A+B)
+"""声纹识别阈值和短音频过滤测试。
 
 不依赖真模型(避免 Qwen3/CamPlus 加载),用纯函数 + MagicMock 测:
 - 段时长分类(纯函数 _classify_segment_duration)
@@ -28,7 +28,7 @@ from engine.speaker.campplus_engine import CamPlusEngine
 # ========== 常量值(锁死,免被无意改) ==========
 
 def test_min_usable_duration_constant():
-    """MIN_USABLE_DURATION = 0.3s — 短于此跳过声纹(方向 B)"""
+    """短于 MIN_USABLE_DURATION 的音频跳过声纹提取。"""
     assert CamPlusEngine.MIN_USABLE_DURATION == 0.3
 
 
@@ -109,7 +109,7 @@ def test_compare_zero_duration_returns_unknown():
 
 
 def test_compare_none_embedding_returns_unknown():
-    """embedding=None 返 ('Spk_unknown', 0.0) — L4: 用 Spk_unknown 而非 'Unknown',
+    """embedding=None 返回 ('Spk_unknown', 0.0)，保持说话人标签格式一致，
     保持 ^Spk_ 格式一致(与下游默认值 / speaker_id 校验 pattern 对齐)。"""
     eng = _make_engine_mock()
     result = eng.compare_and_identify(None, client_id="test", audio_duration=5.0)
@@ -119,7 +119,7 @@ def test_compare_none_embedding_returns_unknown():
 
 
 def test_compare_none_embedding_returns_unknown_all_engines():
-    """L4: 三引擎(CamPlus/ERes2Net/Wespeaker)在 embedding=None 时都返 Spk_unknown。
+    """三个声纹引擎在 embedding=None 时都返回 Spk_unknown。
     None 分支是 compare_and_identify 第一行,不触碰实例状态,用 __new__ 构造即可。"""
     from engine.speaker.eres2net_engine import ERes2NetEngine
     from engine.speaker.wespeaker_engine import WespeakerEngine
@@ -132,10 +132,10 @@ def test_compare_none_embedding_returns_unknown_all_engines():
         assert result[1] == 0.0, f"{engine_cls.__name__}"
 
 
-# ========== 阈值常量(方向 A 调整) ==========
+# ========== 阈值常量 ==========
 
 def test_threshold_direction_a_values():
-    """方向 A: LOW 0.40→0.50, HIGH 0.50→0.60"""
+    """低、高置信度阈值保持在预期值。"""
     # 用 _make_engine_mock + 跑一次"正常段"路径,extract 阈值
     # 通过 inspect 内部逻辑或用嵌入测试 — 实际无法在不改 __new__ 的情况下直接调
     # 这里只用 MagicMock 直接 patch _classify_segment_duration,验证阈值流

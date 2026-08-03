@@ -19,6 +19,10 @@ httpx>=0.27.0,<1.0.0
 torch==2.11.0
 torchaudio==2.11.0
 torchvision==0.26.0
+# transformers: <5 范围内最新版仍有已知 CVE(PYSEC-2026-2289 等,from_pretrained
+# 加载恶意 config.json 可 RCE)。升级到 >=5.5 会破坏 Qwen3-ASR/Speaker 的
+# from_pretrained 加载(功能不变约束下不升级)。本地优先模型下触发需本地缓存
+# 投毒,缓解:asr_engine 传固定 revision pin(防 main 被篡改)+ 限制 models/ 可写。
 transformers>=4.30.0,<5
 
 # transformers 间接依赖(隐式,不写会报 import error)

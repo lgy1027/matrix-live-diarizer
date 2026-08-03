@@ -7,7 +7,7 @@ from typing import Any
 
 import numpy as np
 
-from .common import evaluate_audio_quality, rms_is_silent
+from .common import evaluate_audio_quality, filter_hallucinations, rms_is_silent
 from .contracts import ASRResult, ASRSegment, ASRWord, empty_asr_result, make_asr_result
 
 logger = logging.getLogger("ASR_Engine")
@@ -129,19 +129,33 @@ class FunASREngine:
     async def run_asr(self, audio_data, use_preprocessing=True):
         if audio_data is None or len(audio_data) < 1600:
             return empty_asr_result()
-        quality = self.evaluate_audio_quality(audio_data)
-        if quality["score"] < 30:
-            logger.warning(f"[ASR] 音频质量较差: {quality}")
-            return empty_asr_result()
-        if self.is_silent(audio_data):
+
+        loop = asyncio.get_running_loop()
+        # 质量评估 + VAD 是同步重活,丢线程池,避免阻塞 event loop。
+        # FunASR 系引擎不做 preprocess_audio(无该方法),use_preprocessing 参数
+        # 仅保持接口签名兼容 run_asr 契约,此处不实际使用。
+        # 返回 None 表示质量过差/VAD 判静音,跳过推理。
+        prepared = await loop.run_in_executor(
+            None, self._prepare_and_check, audio_data
+        )
+        if prepared is None:
             return empty_asr_result()
 
-        loop = asyncio.get_event_loop()
         try:
-            return await loop.run_in_executor(None, self._transcribe_sync, audio_data)
+            return await loop.run_in_executor(None, self._transcribe_sync, prepared)
         except Exception as e:
             logger.error(f"[ASR] FunASR 推理异常: {e}")
             return empty_asr_result()
+
+    def _prepare_and_check(self, audio_data):
+        """同步执行质量评估 + VAD。返回处理后的音频或 None(跳过推理)。"""
+        quality = self.evaluate_audio_quality(audio_data)
+        if quality["score"] < 30:
+            logger.warning(f"[ASR] 音频质量较差: {quality}")
+            return None
+        if self.is_silent(audio_data):
+            return None
+        return audio_data
 
     def _transcribe_sync(self, audio_data: np.ndarray) -> ASRResult:
         kwargs: dict[str, Any] = {"input": audio_data.astype(np.float32)}
@@ -180,7 +194,7 @@ class FunASREngine:
                 result["text"] = self._postprocess(result["text"])
             except Exception:
                 logger.debug("[ASR] SenseVoice rich postprocess failed", exc_info=True)
-        result["text"] = result["text"].strip()
+        result["text"] = filter_hallucinations(result["text"]).strip()
         return result
 
     @classmethod

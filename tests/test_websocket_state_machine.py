@@ -279,7 +279,7 @@ def test_compute_skip_count_keep_at_least_one():
     assert compute_skip_count(100, 50, keep_recent=0) == 99
 
 
-# ========== _strip_filler_words (Bug-12) ==========
+# ========== _strip_filler_words ==========
 
 def test_strip_filler_basic_chinese():
     """中文典型填充词:嗯,这个,呃 等独立位置应被删"""

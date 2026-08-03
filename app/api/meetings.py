@@ -1,12 +1,13 @@
 """Meeting list, detail, correction, audio, and deletion API."""
 import asyncio
+import logging
 import uuid
 from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.config import config
 from app.repositories.meetings import SpeakerNotFoundError
@@ -19,11 +20,21 @@ from app.services.audio_files import (
 from app.services.exporter import export_meeting as render_meeting_export
 
 
+logger = logging.getLogger("Matrix_Meetings")
+
 router = APIRouter(prefix="/v1/meetings", tags=["meetings"])
 
 
 class MeetingUpdate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
+
+    @field_validator("title")
+    @classmethod
+    def _strip_title(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("title 不能为空")
+        return v
 
 
 class SegmentAssignment(BaseModel):
@@ -38,9 +49,25 @@ class SpeakerConfirmation(BaseModel):
 class SegmentTextUpdate(BaseModel):
     text: str = Field(min_length=1, max_length=20_000)
 
+    @field_validator("text")
+    @classmethod
+    def _strip_text(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("text 不能为空")
+        return v
+
 
 class NoteUpdate(BaseModel):
     content: str = Field(min_length=1, max_length=100_000)
+
+    @field_validator("content")
+    @classmethod
+    def _strip_content(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("content 不能为空")
+        return v
 
 
 class SpeakerMergeRequest(BaseModel):
@@ -117,7 +144,8 @@ async def create_upload_meeting(
                 max_duration_sec=config.audio.upload_max_duration,
             )
         except Exception as exc:
-            raise HTTPException(status_code=400, detail=f"音频无法解码: {exc}") from None
+            logger.warning("[upload] 音频解码失败 %s: %s", target, exc)
+            raise HTTPException(status_code=400, detail="音频无法解码,请检查文件格式是否为支持的音频类型") from None
         meeting_id, job_id = request.app.state.meeting_repo.create_with_job(
             source="upload",
             title=Path(filename).stem or "未命名会议",
@@ -174,9 +202,10 @@ def update_meeting(meeting_id: str, body: MeetingUpdate, request: Request):
 
 @router.delete("/{meeting_id}")
 def delete_meeting(meeting_id: str, request: Request):
-    if request.app.state.job_repo.has_active_for_meeting(meeting_id):
+    result = request.app.state.meeting_repo.delete_if_inactive(meeting_id)
+    if result == "active":
         raise HTTPException(status_code=409, detail="会议仍在处理中，请先取消任务")
-    if not request.app.state.meeting_repo.delete(meeting_id):
+    if result == "not_found":
         raise HTTPException(status_code=404, detail="会议不存在")
     return {"message": "会议及本地音频已删除"}
 
@@ -186,13 +215,48 @@ def reprocess_meeting(meeting_id: str, request: Request):
     meeting = request.app.state.meeting_repo.get(meeting_id)
     if meeting is None:
         raise HTTPException(status_code=404, detail="会议不存在")
+    if meeting.get("status") == "processing":
+        raise HTTPException(
+            status_code=409, detail="会议正在实时录制或处理中,无法启动精修"
+        )
     path = Path(meeting.get("audio_path") or "")
     if not path.is_file():
         raise HTTPException(status_code=409, detail="会议没有可重新处理的本地音频")
+    # capped 会话:WAV 被写盘上限截断(只含前 upload_max_duration),但转写段
+    # 覆盖完整时长。reprocess 会用截断 WAV 重转写 + replace_generated_transcript
+    # 删掉完整转写 → 数据丢失。检测 truncated 标记拒绝。
+    manifest = meeting.get("processing_manifest")
+    if isinstance(manifest, dict) and manifest.get("truncated"):
+        raise HTTPException(
+            status_code=409,
+            detail="实时录音超过时长上限已截断,重新精修会丢失超限转写,已拒绝",
+        )
+    # 双失败兜底:truncated manifest 写失败时 audio_path 已被置空;但若
+    # 置空也失败(recover 前仍指向截断 WAV),这里按 WAV 实际时长与
+    # duration_sec 不一致判定为截断,拒绝 reprocess。用 wave 读头(轻量,不依赖 librosa)。
+    if meeting.get("source") == "live" and meeting.get("duration_sec"):
+        try:
+            import wave
+            with wave.open(str(path), "rb") as _wf:
+                wav_dur = _wf.getnframes() / float(_wf.getframerate() or 16000)
+            if wav_dur + 1.0 < float(meeting["duration_sec"]):
+                raise HTTPException(
+                    status_code=409,
+                    detail="实时音频文件已截断,重新精修会丢失转写,已拒绝",
+                )
+        except HTTPException:
+            raise
+        except Exception:
+            logger.debug("[reprocess] %s WAV 时长探测失败,跳过截断校验", meeting_id)
     try:
         job_id, created = request.app.state.job_repo.enqueue_refinement(meeting_id)
     except FileNotFoundError:
         raise HTTPException(status_code=409, detail="会议音频不可用") from None
+    except RuntimeError as exc:
+        logger.warning("[reprocess] %s 拒绝精修: %s", meeting_id, exc)
+        raise HTTPException(
+            status_code=409, detail="会议正在实时录制,无法启动精修"
+        ) from exc
     if not created:
         raise HTTPException(status_code=409, detail="会议已经在处理中")
     runner = getattr(request.app.state, "job_runner", None)

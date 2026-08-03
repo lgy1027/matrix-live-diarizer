@@ -373,7 +373,7 @@ async def test_upload_meeting_publishes_text_draft_before_speaker_refinement(
     monkeypatch.setattr(
         processor,
         "_offline_diarize",
-        lambda _path, segments: (
+        lambda _path, segments, _audio=None: (
             [{**segments[0], "speaker": "SPEAKER_00"}],
             "completed",
             None,

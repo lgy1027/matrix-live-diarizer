@@ -75,8 +75,14 @@ def login(body: dict, request: Request):
 
 
 @router.post("/v1/auth/logout")
-def logout():
-    """Acknowledge logout; the client removes the stateless token."""
+def logout(request: Request):
+    """注销当前 token:加入进程内 revoked 集合,使其立即失效(而非等 TTL)。"""
+    auth = _auth_service(request)
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.lower().startswith("bearer "):
+        token = auth_header.split(" ", 1)[1].strip()
+        if token:
+            auth.revoke_token(token)
     return {"message": "已退出登录"}
 
 

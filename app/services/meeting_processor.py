@@ -25,7 +25,7 @@ def normalize_offline_asr_result(value: object, audio_duration: float) -> dict:
 
     result = normalize_asr_result(value, audio_duration=audio_duration)
     if not result["is_final"]:
-        raise RuntimeError(
+        raise PermanentJobError(
             "ASR engine returned a non-final result for offline transcription"
         )
     return result
@@ -47,6 +47,37 @@ def merge_overlapping_text(previous: str, current: str, max_chars: int = 80) -> 
 
 class JobCancelled(Exception):
     pass
+
+
+class PermanentJobError(RuntimeError):
+    """A deterministic input/contract failure that automatic retry cannot fix."""
+
+
+async def await_uninterruptible(awaitable):
+    """Delay task cancellation until model work has actually left its worker.
+
+    ``asyncio.to_thread`` and provider executors cannot stop their underlying
+    thread when the awaiting coroutine is cancelled.  Letting cancellation
+    unwind an inference-slot context at that point would make the same model
+    available to another request (or close it during shutdown) while it is
+    still in use.
+    """
+    task = asyncio.ensure_future(awaitable)
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        try:
+            await task
+        except asyncio.CancelledError:
+            # The child may implement real cancellation itself.  Either way it
+            # has now stopped, so it is safe for the caller to release its slot.
+            pass
+        except Exception:
+            # Cancellation is the externally visible outcome.  A provider
+            # failure that happens while draining is still useful for logs but
+            # must not turn shutdown into a retryable job failure.
+            logger.debug("model work failed while draining cancellation", exc_info=True)
+        raise
 
 
 def _normalized_words(
@@ -275,10 +306,10 @@ class MeetingProcessor:
         meeting_id = job["meeting_id"]
         meeting = self.meeting_repo.get(meeting_id)
         if meeting is None:
-            raise RuntimeError("meeting not found")
+            raise PermanentJobError("meeting not found")
         audio_path = meeting.get("audio_path")
         if not audio_path or not os.path.isfile(audio_path):
-            raise RuntimeError("meeting audio not found")
+            raise PermanentJobError("meeting audio not found")
 
         await self._checkpoint(job_id, "decoding", 5)
         import librosa
@@ -287,7 +318,7 @@ class MeetingProcessor:
             librosa.load, audio_path, sr=config.audio.sample_rate, mono=True
         )
         if len(audio) == 0:
-            raise RuntimeError("audio contains no samples")
+            raise PermanentJobError("audio contains no samples")
         duration = len(audio) / config.audio.sample_rate
         self.meeting_repo.update(
             meeting_id, status="processing", duration_sec=duration, error_message=None
@@ -306,7 +337,9 @@ class MeetingProcessor:
             progress = 10 + round(60 * (index / max(1, len(chunks))))
             await self._checkpoint(job_id, "transcribing", progress)
             async with self.runtime.inference.offline():
-                result = await engines.asr.run_asr(chunk, use_preprocessing=True)
+                result = await await_uninterruptible(
+                    engines.asr.run_asr(chunk, use_preprocessing=True)
+                )
             result = normalize_offline_asr_result(
                 result, audio_duration=len(chunk) / config.audio.sample_rate
             )
@@ -351,8 +384,12 @@ class MeetingProcessor:
                 )
             await self._checkpoint(job_id, "identifying-speakers", 75)
             async with self.runtime.inference.offline():
-                final_segments, diarization_status, diarization_error = await asyncio.to_thread(
-                    self._offline_diarize, audio_path, asr_segments
+                final_segments, diarization_status, diarization_error = (
+                    await await_uninterruptible(
+                        asyncio.to_thread(
+                            self._offline_diarize, audio_path, asr_segments, audio,
+                        )
+                    )
                 )
             self.meeting_repo.update(
                 meeting_id,
@@ -366,6 +403,10 @@ class MeetingProcessor:
             ) if diarization_status == "completed" else "anonymous"
 
         await self._checkpoint(job_id, "saving", 92)
+        # 全部 chunk 转写后无任何有效文本:音频过短或纯静音。
+        # 不应标记 ready,落 failed 让用户知道转写未产出。
+        if not final_segments and not asr_segments:
+            raise PermanentJobError("音频过短或未识别到有效语音")
         generated_at = datetime.now(timezone.utc).isoformat()
         manifest = {
             "version": 1,
@@ -412,24 +453,51 @@ class MeetingProcessor:
                     "人物声纹建议生成失败；保留已完成的会议文稿",
                     exc_info=True,
                 )
-        self.meeting_repo.update(meeting_id, status="ready", error_message=None)
-        self.job_repo.update(
-            job_id,
-            status="completed",
-            stage="completed",
-            progress=100,
-            finished_at=datetime.now(timezone.utc).isoformat(),
-        )
+        # meeting ready 与 job completed 同事务,避免崩溃窗口 ready+job_running
+        # 矛盾态(recover 把 running 回 queued 重跑会把 ready 降级回 processing)。
+        # 用 getattr 兼容旧 fake repo(无 mark_completed 时回退多步提交)。
+        mark_completed = getattr(self.meeting_repo, "mark_completed", None)
+        if mark_completed is not None:
+            mark_completed(
+                meeting_id,
+                job_id,
+                datetime.now(timezone.utc).isoformat(),
+            )
+        else:
+            self.meeting_repo.update(meeting_id, status="ready", error_message=None)
+            self.job_repo.update(
+                job_id,
+                status="completed",
+                stage="completed",
+                progress=100,
+                finished_at=datetime.now(timezone.utc).isoformat(),
+            )
 
     def _offline_diarize(
-        self, audio_path: str, segments: list[dict]
+        self,
+        audio_path: str,
+        segments: list[dict],
+        audio: np.ndarray | None = None,
     ) -> tuple[list[dict], str, str | None]:
+        """离线说话人分离。
+
+        audio 为调用方已加载的波形时直接复用,避免 pyannote 内部二次
+        librosa.load(长会议峰值内存从 ~1.2GB 降到 ~576MB)。audio 为 None
+        时回退到从 audio_path 解码。
+        """
         try:
             from app.services.pyannote_diarization import get_pyannote_diarizer
 
             diarizer = get_pyannote_diarizer()
             if diarizer.enabled:
-                turns = diarizer.diarize(audio_path)
+                if audio is not None:
+                    turns = diarizer.diarize(
+                        audio_path,
+                        waveform=audio,
+                        sample_rate=config.audio.sample_rate,
+                    )
+                else:
+                    turns = diarizer.diarize(audio_path)
                 if turns:
                     return align_speakers_to_segments(turns, segments), "completed", None
                 return segments, "unavailable", (
@@ -480,9 +548,11 @@ class MeetingProcessor:
             successful_durations: list[float] = []
             for speaker_audio, duration in pieces:
                 async with self.runtime.inference.offline():
-                    result = await asyncio.to_thread(
-                        speaker_engine.extract_feat,
-                        np.asarray(speaker_audio, dtype=np.float32),
+                    result = await await_uninterruptible(
+                        asyncio.to_thread(
+                            speaker_engine.extract_feat,
+                            np.asarray(speaker_audio, dtype=np.float32),
+                        )
                     )
                 embedding = result[0] if isinstance(result, tuple) else result
                 if embedding is None:

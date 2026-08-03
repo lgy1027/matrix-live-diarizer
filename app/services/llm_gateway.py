@@ -53,6 +53,15 @@ def _validate_endpoint(
         ip = ipaddress.ip_address(socket.gethostbyname(host))
     except (socket.gaierror, ValueError) as e:
         raise EndpointSecurityError(f"DNS 解析失败: {host} ({e})") from e
+    if ip.is_unspecified:
+        raise EndpointSecurityError(f"endpoint {host} 解析到未指定地址 {ip},禁止调用")
+    # 显式拒绝链路本地(169.254/16、fe80::/10)与 CGNAT(100.64/10):
+    # 它们虽 is_private=True,但分别指向云元数据服务(169.254.169.254)与
+    # 运营商级 NAT,不应作为 LLM endpoint。
+    if ip.is_link_local or _is_cgcnat(ip):
+        raise EndpointSecurityError(
+            f"endpoint {host} ({ip}) 是链路本地/CGNAT 地址,禁止作为 LLM endpoint"
+        )
     if not ip.is_private and not ip.is_loopback:
         raise EndpointSecurityError(
             f"endpoint {host} ({ip}) 不是私有/本机地址。"
@@ -61,6 +70,14 @@ def _validate_endpoint(
             f"并通过 LLM_API_KEY 配置 Bearer token。"
         )
     return str(ip)
+
+
+_CGNAT_NET = ipaddress.ip_network("100.64.0.0/10")
+
+
+def _is_cgcnat(ip: ipaddress.IPv4Address) -> bool:
+    """100.64.0.0/10 运营商级 NAT(Carrier-Grade NAT),不应作 LLM endpoint。"""
+    return ip.version == 4 and ip in _CGNAT_NET
 
 
 class LLMGateway:
