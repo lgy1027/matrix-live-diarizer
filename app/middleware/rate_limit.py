@@ -45,7 +45,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             try:
                 self._trusted_networks.append(ipaddress.ip_network(cidr, strict=False))
             except ValueError:
-                logger.warning(f"[RateLimit] 无效 trusted_proxy CIDR: {cidr}")
+                logger.warning("[RateLimit] 忽略无效 trusted_proxy CIDR")
         # 存储: {ip: [(timestamp, path), ...]}。容量上限防 IP 扩散(公网扫描/IPv6 轮换)
         # 撑爆内存:超 MAX_TRACKED_IPS 时按 LRU 丢弃最久未访问的 key。
         self.requests: Dict[str, List[Tuple[float, str]]] = defaultdict(list)

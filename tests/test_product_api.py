@@ -366,6 +366,22 @@ def test_add_voice_sample_extracts_and_persists_embedding(tmp_path, monkeypatch)
     assert detail["samples"][0]["effective_speech_sec"] >= 5
 
 
+def test_add_voice_sample_rejects_non_uuid_person_id_before_writing(tmp_path, monkeypatch):
+    from app.api import people as people_api
+
+    client, _app = make_client(tmp_path)
+    media_dir = tmp_path / "media"
+    monkeypatch.setattr(people_api.config.storage, "media_dir", str(media_dir))
+
+    response = client.post(
+        "/v1/people/not-a-uuid/samples",
+        files={"file": ("voice.wav", b"RIFF sample", "audio/wav")},
+    )
+
+    assert response.status_code == 404
+    assert not (media_dir / "voices").exists()
+
+
 def test_add_voice_sample_reports_ineligible_when_below_auto_match_threshold(tmp_path, monkeypatch):
     """B1: quality_score < 0.6 或 effective_speech_sec < 3.0 时 auto_match_eligible=False,
     让用户知道样本已注册但达不到自动匹配门槛。"""

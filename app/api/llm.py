@@ -143,8 +143,8 @@ def _get_gateway(request: Request) -> LLMGateway:
     prompts = _load_prompts(_settings_repo(request))
     try:
         return LLMGateway(cfg, prompts)
-    except EndpointSecurityError as e:
-        logger.warning(f"[LLM] endpoint 安全校验失败,降级本地摘要: {e}")
+    except EndpointSecurityError:
+        logger.warning("[LLM] endpoint 安全校验失败，已降级为本地摘要")
         return LLMGateway(replace(cfg, enabled=False), prompts)
 
 
@@ -257,9 +257,9 @@ async def test_llm_connection(request: Request):
             available = await LLMGateway(cfg).is_available()
             if not available:
                 error = "LLM 连接测试失败"
-        except EndpointSecurityError as exc:
+        except EndpointSecurityError:
             available = False
-            error = str(exc)
+            error = "LLM endpoint 配置不安全"
 
     probe = _store_probe(
         request,

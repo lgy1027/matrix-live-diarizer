@@ -3,6 +3,7 @@ import pytest
 from unittest.mock import Mock, patch
 from fastapi.testclient import TestClient
 import time
+import logging
 
 
 class TestRateLimit:
@@ -36,6 +37,16 @@ class TestRateLimit:
         client = TestClient(mock_app)
         response = client.get("/probe")
         assert response.status_code in [200, 429]
+
+    def test_invalid_proxy_warning_does_not_log_untrusted_value(self, mock_app, caplog):
+        from app.middleware import RateLimitMiddleware
+
+        malicious = "invalid\r\nforged-log: true"
+        with caplog.at_level(logging.WARNING, logger="Matrix_Core"):
+            RateLimitMiddleware(mock_app, trusted_proxies=[malicious])
+
+        assert "忽略无效 trusted_proxy CIDR" in caplog.text
+        assert "forged-log" not in caplog.text
 
 
 class TestRateLimitExceeded:
