@@ -85,4 +85,4 @@ summa==1.2.0
 # FFmpeg 仍建议安装，用于 librosa/soundfile 不能直接读取的压缩格式。
 # 若自行安装 TorchCodec，必须按其官方兼容表匹配 Torch 与 FFmpeg。
 # 会议模式未配置 HF_TOKEN 时会保留匿名文稿并报告 diarization unavailable
-pyannote.audio>=4.0.4,<5.0.0
+pyannote.audio>=4.0.7,<5.0.0
