@@ -16,9 +16,9 @@ httpx>=0.27.0,<1.0.0
 # 深度学习
 # Torch 二进制组件必须按官方版本矩阵成套安装，不能使用彼此独立的范围。
 # CUDA 用户应先按 pytorch.org 的命令安装对应 CUDA wheel，再装本文件。
-torch==2.11.0
+torch==2.13.0
 torchaudio==2.11.0
-torchvision==0.26.0
+torchvision==0.28.0
 # transformers: <5 范围内最新版仍有已知 CVE(PYSEC-2026-2289 等,from_pretrained
 # 加载恶意 config.json 可 RCE)。升级到 >=5.5 会破坏 Qwen3-ASR/Speaker 的
 # from_pretrained 加载(功能不变约束下不升级)。本地优先模型下触发需本地缓存
